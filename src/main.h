@@ -1,10 +1,7 @@
+
 #ifndef MAIN_H
 #define MAIN_H
 
-namespace fallout {
+int main();
 
-int falloutMain(int argc, char** argv);
-
-} // namespace fallout
-
-#endif /* MAIN_H */
+#endif // MAIN_H
