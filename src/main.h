@@ -1,6 +1,7 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#include "local_coop_interaction.h"
 #include "local_coop_inventory_ui.h"
 #include "local_coop_runtime.h"
 #include "unified_campaign.h"
@@ -18,6 +19,7 @@ inline int localCoopMainInputGetInput()
     localCoopRuntimeTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
+    localCoopInteractionTick();
     return inputGetInput();
 }
 
