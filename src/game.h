@@ -1,6 +1,10 @@
 #ifndef GAME_H
 #define GAME_H
 
+#ifdef LOCAL_COOP_LOADSAVE_META
+#include "unified_campaign.h"
+#endif
+
 #include "game_vars.h"
 #include "message.h"
 
@@ -24,6 +28,20 @@ extern MessageList gMiscMessageList;
 
 int gameInitWithOptions(const char* windowTitle, bool isMapper, int a3, int a4, int argc, char** argv);
 void gameReset();
+
+#ifdef LOCAL_COOP_LOADSAVE_META
+inline void localCoopLoadSaveGameReset()
+{
+    // Slot-list scans can stage metadata, but only the real load path reaches
+    // gameReset through _PrepLoad. Apply the staged profile here so merely
+    // browsing save slots never changes the active campaign.
+    unifiedCampaignApplyPendingSaveHeader();
+    gameReset();
+}
+
+#define gameReset localCoopLoadSaveGameReset
+#endif
+
 void gameExit();
 int gameHandleKey(int eventCode, bool isInCombatMode);
 void gameUiDisable(int a1);
