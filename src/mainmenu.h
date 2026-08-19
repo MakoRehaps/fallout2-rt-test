@@ -25,4 +25,27 @@ int mainMenuWindowHandleEvents();
 
 } // namespace fallout
 
+// main.cc includes main.h before this header, while mainmenu.cc includes this
+// header directly. Route only the executable's menu event read through the
+// unified one-shot Act II starter; the stock menu implementation keeps its
+// original symbol and behavior everywhere else.
+#if defined(MAIN_H)
+#include "unified_campaign_transition.h"
+
+namespace fallout {
+
+inline int unifiedCampaignMainMenuWindowHandleEvents()
+{
+    if (unifiedCampaignConsumeAutoStartNewGame()) {
+        return MAIN_MENU_NEW_GAME;
+    }
+
+    return mainMenuWindowHandleEvents();
+}
+
+} // namespace fallout
+
+#define mainMenuWindowHandleEvents unifiedCampaignMainMenuWindowHandleEvents
+#endif
+
 #endif /* FALLOUT_MAINMENU_H_ */
