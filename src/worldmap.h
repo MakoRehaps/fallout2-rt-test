@@ -289,4 +289,13 @@ void wmForceEncounter(int map, unsigned int flags);
 
 } // namespace fallout
 
+// scripts.cc includes scripts.h before reaching this header, while worldmap.cc
+// includes worldmap.h first. Install the F1 travel redirect only in the former
+// translation-unit shape; stock Fallout 2 worldmap.cc never sees this include.
+#if defined(SCRIPTS_H)
+#include "unified_fallout1_travel_profile.h"
+#define wmWorldMap unifiedWmWorldMap
+#define wmTownMap unifiedWmTownMap
+#endif
+
 #endif /* WORLD_MAP_H */
