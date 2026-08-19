@@ -3,12 +3,15 @@
 
 #include <SDL.h>
 
+#include <array>
+
 #include "actions.h"
 #include "item.h"
 #include "local_coop.h"
 #include "local_coop_focus.h"
 #include "object.h"
 #include "proto_types.h"
+#include "tile.h"
 
 namespace fallout {
 
@@ -17,7 +20,60 @@ struct LocalCoopInteractionState {
     Uint32 nextInteractTick = 0;
 };
 
-inline LocalCoopInteractionState gLocalCoopInteractionState;
+inline std::array<LocalCoopInteractionState, kLocalCoopMaxPlayers> gLocalCoopInteractionStates;
+
+inline bool localCoopIsSimplePickup(Object* object)
+{
+    return object != nullptr
+        && PID_TYPE(object->pid) == OBJ_TYPE_ITEM
+        && itemGetType(object) != ITEM_TYPE_CONTAINER
+        && object->owner == nullptr
+        && (object->flags & OBJECT_HIDDEN) == 0;
+}
+
+inline Object* localCoopFindSimplePickup(LocalCoopPlayer& player)
+{
+    Object* actor = player.actor;
+    if (actor == nullptr) {
+        return nullptr;
+    }
+
+    // Prefer an item on the actor's tile, then search a short right-stick/facing
+    // wedge. P2-P4 deliberately do not focus scenery, critters or containers;
+    // those remain P1-authoritative world interactions.
+    Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
+    while (object != nullptr) {
+        if (object != actor && localCoopIsSimplePickup(object)) {
+            return object;
+        }
+        object = objectFindNextAtLocation();
+    }
+
+    int aimRotation = localCoopDirectionFromStick(player.aimX, player.aimY);
+    if (aimRotation == -1) {
+        aimRotation = actor->rotation;
+    }
+
+    for (int rotationOffset = -1; rotationOffset <= 1; rotationOffset++) {
+        int rotation = (aimRotation + rotationOffset + ROTATION_COUNT) % ROTATION_COUNT;
+        for (int distance = 1; distance <= 3; distance++) {
+            int tile = tileGetTileInDirection(actor->tile, rotation, distance);
+            if (!tileIsValid(tile)) {
+                break;
+            }
+
+            object = objectFindFirstAtLocation(actor->elevation, tile);
+            while (object != nullptr) {
+                if (localCoopIsSimplePickup(object)) {
+                    return object;
+                }
+                object = objectFindNextAtLocation();
+            }
+        }
+    }
+
+    return nullptr;
+}
 
 inline bool localCoopPlayerOneInteract()
 {
@@ -53,10 +109,41 @@ inline bool localCoopPlayerOneInteract()
             return _action_loot_container(actor, target) == 0;
         }
 
-        return actionPickUp(actor, target) == 0;
+        bool pickedUp = actionPickUp(actor, target) == 0;
+        if (pickedUp) {
+            localCoopSweepSharedInventory();
+        }
+        return pickedUp;
     }
 
     return _action_use_an_object(actor, target) == 0;
+}
+
+inline bool localCoopCompanionPickup(int slot)
+{
+    if (slot <= 0 || slot >= kLocalCoopMaxPlayers) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    Object* actor = player.actor;
+    if (actor == nullptr || !player.humanOwned || player.uiMode != LocalCoopUiMode::World) {
+        return false;
+    }
+
+    Object* target = localCoopFindSimplePickup(player);
+    if (target == nullptr) {
+        return false;
+    }
+
+    bool pickedUp = actionPickUp(actor, target) == 0;
+    if (pickedUp) {
+        // The item exists in the companion inventory only long enough for the
+        // stock pickup script/animation to run. The shared-pool sweep then moves
+        // it to P1's party inventory unless it somehow became equipped.
+        localCoopSweepSharedInventory();
+    }
+    return pickedUp;
 }
 
 inline void localCoopInteractionTick()
@@ -65,24 +152,45 @@ inline void localCoopInteractionTick()
         return;
     }
 
-    LocalCoopPlayer& player = gLocalCoopPlayers[0];
-    if (!player.connected || player.controller == nullptr || !player.humanOwned || player.actor != gDude) {
-        gLocalCoopInteractionState.interactWasDown = false;
-        return;
-    }
-
-    bool interactDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
     Uint32 now = SDL_GetTicks();
 
-    if (interactDown
-        && !gLocalCoopInteractionState.interactWasDown
-        && static_cast<Sint32>(now - gLocalCoopInteractionState.nextInteractTick) >= 0
-        && player.uiMode == LocalCoopUiMode::World) {
-        localCoopPlayerOneInteract();
-        gLocalCoopInteractionState.nextInteractTick = now + 300;
-    }
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        LocalCoopInteractionState& state = gLocalCoopInteractionStates[slot];
 
-    gLocalCoopInteractionState.interactWasDown = interactDown;
+        if (!player.connected
+            || player.controller == nullptr
+            || !player.humanOwned
+            || player.actor == nullptr) {
+            state.interactWasDown = false;
+            continue;
+        }
+
+        bool interactDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
+
+        if (slot > 0
+            && !isInCombat()
+            && player.uiMode == LocalCoopUiMode::World) {
+            Object* pickup = localCoopFindSimplePickup(player);
+            if (pickup != nullptr) {
+                localCoopFocusApplyOutline(slot, pickup, false);
+            }
+        }
+
+        if (interactDown
+            && !state.interactWasDown
+            && static_cast<Sint32>(now - state.nextInteractTick) >= 0
+            && player.uiMode == LocalCoopUiMode::World) {
+            if (slot == 0) {
+                localCoopPlayerOneInteract();
+            } else if (!isInCombat()) {
+                localCoopCompanionPickup(slot);
+            }
+            state.nextInteractTick = now + 300;
+        }
+
+        state.interactWasDown = interactDown;
+    }
 }
 
 } // namespace fallout
