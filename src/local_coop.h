@@ -92,9 +92,29 @@ inline int localCoopFindFreeControllerSlot()
     return -1;
 }
 
+inline bool localCoopHasJoystickId(SDL_JoystickID joystickId)
+{
+    if (joystickId < 0) {
+        return false;
+    }
+
+    for (const LocalCoopPlayer& player : gLocalCoopPlayers) {
+        if (player.connected && player.joystickId == joystickId) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 inline void localCoopOpenController(int deviceIndex)
 {
     if (!SDL_IsGameController(deviceIndex)) {
+        return;
+    }
+
+    SDL_JoystickID deviceInstanceId = SDL_JoystickGetDeviceInstanceID(deviceIndex);
+    if (deviceInstanceId < 0 || localCoopHasJoystickId(deviceInstanceId)) {
         return;
     }
 
@@ -116,24 +136,52 @@ inline void localCoopOpenController(int deviceIndex)
     player.connected = true;
 }
 
+inline void localCoopClearController(LocalCoopPlayer& player)
+{
+    if (player.controller != nullptr) {
+        SDL_GameControllerClose(player.controller);
+    }
+
+    int slot = player.slot;
+    Object* actor = player.actor;
+    bool humanOwned = player.humanOwned;
+    LocalCoopUiMode uiMode = player.uiMode;
+
+    player = LocalCoopPlayer{};
+    player.slot = slot;
+    player.actor = actor;
+    player.humanOwned = humanOwned;
+    player.uiMode = uiMode;
+}
+
 inline void localCoopCloseControllerByJoystickId(SDL_JoystickID joystickId)
 {
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
         if (player.connected && player.joystickId == joystickId) {
-            if (player.controller != nullptr) {
-                SDL_GameControllerClose(player.controller);
-            }
-
-            player.controller = nullptr;
-            player.joystickId = -1;
-            player.connected = false;
-            player.moveX = 0;
-            player.moveY = 0;
-            player.aimX = 0;
-            player.aimY = 0;
-            player.wantsRun = false;
+            localCoopClearController(player);
             break;
         }
+    }
+}
+
+inline void localCoopRefreshControllers()
+{
+    // Do not depend on Fallout's legacy SDL event switch knowing about
+    // controller events. Validate currently open controllers each frame.
+    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
+        if (player.connected
+            && (player.controller == nullptr || !SDL_GameControllerGetAttached(player.controller))) {
+            localCoopClearController(player);
+        }
+    }
+
+    // Then pick up newly connected XInput-compatible/SDL GameController pads.
+    int joystickCount = SDL_NumJoysticks();
+    for (int deviceIndex = 0; deviceIndex < joystickCount; deviceIndex++) {
+        if (localCoopFindFreeControllerSlot() == -1) {
+            break;
+        }
+        localCoopOpenController(deviceIndex);
     }
 }
 
@@ -152,11 +200,7 @@ inline void localCoopInit()
         gLocalCoopPlayers[index].slot = index;
     }
 
-    int joystickCount = SDL_NumJoysticks();
-    for (int index = 0; index < joystickCount; index++) {
-        localCoopOpenController(index);
-    }
-
+    localCoopRefreshControllers();
     localCoopRefreshActorBindings();
 }
 
@@ -276,6 +320,7 @@ inline void localCoopPollControllers()
         return;
     }
 
+    localCoopRefreshControllers();
     localCoopRefreshActorBindings();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
@@ -409,10 +454,6 @@ inline bool localCoopEquipSharedItem(int slot, Object* item, int hand)
     }
 
     if (actor != sharedOwner && item->owner != actor) {
-        int quantity = itemGetQuantity(sharedOwner, item);
-        if (quantity <= 0) {
-            quantity = 1;
-        }
         if (itemMoveForce(sharedOwner, actor, item, 1) != 0) {
             return false;
         }
