@@ -22,4 +22,14 @@ char* endgameDeathEndingGetFileName();
 
 } // namespace fallout
 
+// interpreter_extra.cc includes interpreter_extra.h before this header, while
+// endgame.cc includes endgame.h first. Redirect only script-side ending opcode
+// calls through the unified profile; the stock endgame implementation compiles
+// under its original symbols and remains the Fallout 2 fallback.
+#if defined(INTERPRETER_EXTRA_H)
+#include "unified_fallout1_endgame_profile.h"
+#define endgamePlaySlideshow unifiedFallout1EndgamePlaySlideshow
+#define endgamePlayMovie unifiedFallout1EndgamePlayMovie
+#endif
+
 #endif /* ENDGAME_H */
