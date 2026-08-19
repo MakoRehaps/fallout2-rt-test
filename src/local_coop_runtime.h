@@ -9,7 +9,9 @@
 
 #include "combat.h"
 #include "critter.h"
+#include "input.h"
 #include "item.h"
+#include "kb.h"
 #include "local_coop.h"
 #include "object.h"
 #include "proto_types.h"
@@ -25,6 +27,7 @@ struct LocalCoopRuntimeSlot {
     Uint32 nextPrimaryAttackTick = 0;
     Uint32 nextSecondaryAttackTick = 0;
     Uint32 nextReloadTick = 0;
+    bool primaryWasDown = false;
     bool reloadWasDown = false;
     bool secondaryWasDown = false;
     Object* aimTarget = nullptr;
@@ -32,6 +35,9 @@ struct LocalCoopRuntimeSlot {
 
 inline std::array<LocalCoopRuntimeSlot, kLocalCoopMaxPlayers> gLocalCoopRuntimeSlots;
 inline bool gLocalCoopRealtimeCombatActive = false;
+inline bool gLocalCoopRuntimeTickerInstalled = false;
+inline bool gLocalCoopRuntimeInsideTick = false;
+inline bool gLocalCoopLegacyYieldQueued = false;
 
 inline bool localCoopTickReached(Uint32 now, Uint32 target)
 {
@@ -235,6 +241,49 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     return true;
 }
 
+inline void localCoopSuppressHumanCompanionAi()
+{
+    if (!isInCombat()) {
+        return;
+    }
+
+    // The legacy sequence still schedules NPC turns. Mark P2-P4 to lose that
+    // legacy turn before combat.cc reaches them. Their controller input remains
+    // live from the ticker and therefore they never fall back to combat AI.
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        Object* actor = gLocalCoopPlayers[slot].actor;
+        if (actor == nullptr
+            || !gLocalCoopPlayers[slot].humanOwned
+            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
+            continue;
+        }
+
+        actor->data.critter.combat.results |= DAM_LOSE_TURN;
+    }
+}
+
+inline void localCoopYieldLegacyPlayerTurn()
+{
+    if (!isInCombat() || !gLocalCoopRealtimeCombatActive) {
+        gLocalCoopLegacyYieldQueued = false;
+        return;
+    }
+
+    Object* current = _combat_whose_turn();
+    if (current != gDude) {
+        gLocalCoopLegacyYieldQueued = false;
+        return;
+    }
+
+    // combat.cc normally blocks here waiting for the player to press Space.
+    // Queue it once per P1 turn so the old sequence keeps feeding NPC AI turns
+    // while all four human actors remain independently controllable.
+    if (!gLocalCoopLegacyYieldQueued) {
+        enqueueInputEvent(KEY_SPACE);
+        gLocalCoopLegacyYieldQueued = true;
+    }
+}
+
 inline void localCoopProcessCombatInput()
 {
     if (!isInCombat()) {
@@ -288,8 +337,55 @@ inline void localCoopProcessCombatInput()
             }
         }
 
+        runtime.primaryWasDown = primaryDown;
         runtime.reloadWasDown = reloadDown;
         runtime.secondaryWasDown = secondaryDown;
+    }
+}
+
+inline void localCoopProcessWorldCombatStart()
+{
+    if (isInCombat()) {
+        return;
+    }
+
+    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
+        if (!player.connected
+            || !player.humanOwned
+            || player.controller == nullptr
+            || player.actor == nullptr
+            || player.uiMode != LocalCoopUiMode::World) {
+            continue;
+        }
+
+        LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+        int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+        bool primaryDown = rightTrigger > 12000;
+
+        if (primaryDown && !runtime.primaryWasDown) {
+            Object* target = localCoopFindAimTarget(player);
+            runtime.aimTarget = target;
+            if (target != nullptr) {
+                // Pre-mark companion turns before entering the blocking legacy
+                // combat function. The background ticker takes over as soon as
+                // combat begins.
+                for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+                    Object* companion = gLocalCoopPlayers[slot].actor;
+                    if (companion != nullptr) {
+                        companion->data.critter.combat.results |= DAM_LOSE_TURN;
+                    }
+                }
+
+                gLocalCoopRealtimeCombatActive = true;
+
+                CombatStartData csd{};
+                csd.attacker = player.actor;
+                csd.defender = target;
+                _combat(&csd);
+            }
+        }
+
+        runtime.primaryWasDown = primaryDown;
     }
 }
 
@@ -336,23 +432,12 @@ inline void localCoopUpdateSharedCamera()
     }
 }
 
-inline void localCoopRuntimeTick()
-{
-    if (!gLocalCoopInitialized) {
-        localCoopInit();
-    }
-
-    localCoopPollControllers();
-    localCoopProcessCombatInput();
-    localCoopUpdateSharedCamera();
-    localCoopSweepSharedInventory();
-}
-
 inline void localCoopSetRealtimeCombatActive(bool active)
 {
     gLocalCoopRealtimeCombatActive = active;
 
     if (!active) {
+        gLocalCoopLegacyYieldQueued = false;
         for (LocalCoopRuntimeSlot& slot : gLocalCoopRuntimeSlots) {
             slot.aimTarget = nullptr;
             slot.nextPrimaryAttackTick = 0;
@@ -360,6 +445,54 @@ inline void localCoopSetRealtimeCombatActive(bool active)
             slot.nextReloadTick = 0;
         }
     }
+}
+
+inline void localCoopRuntimeTick();
+
+inline void localCoopRuntimeTicker()
+{
+    localCoopRuntimeTick();
+}
+
+inline void localCoopRuntimeEnsureTicker()
+{
+    if (!gLocalCoopRuntimeTickerInstalled) {
+        tickersAdd(localCoopRuntimeTicker);
+        gLocalCoopRuntimeTickerInstalled = true;
+    }
+}
+
+inline void localCoopRuntimeTick()
+{
+    if (gLocalCoopRuntimeInsideTick) {
+        return;
+    }
+
+    gLocalCoopRuntimeInsideTick = true;
+
+    if (!gLocalCoopInitialized) {
+        localCoopInit();
+    }
+
+    localCoopRuntimeEnsureTicker();
+    localCoopPollControllers();
+
+    if (isInCombat()) {
+        gLocalCoopRealtimeCombatActive = true;
+        localCoopSuppressHumanCompanionAi();
+        localCoopProcessCombatInput();
+        localCoopYieldLegacyPlayerTurn();
+    } else {
+        if (gLocalCoopRealtimeCombatActive) {
+            localCoopSetRealtimeCombatActive(false);
+        }
+        localCoopProcessWorldCombatStart();
+    }
+
+    localCoopUpdateSharedCamera();
+    localCoopSweepSharedInventory();
+
+    gLocalCoopRuntimeInsideTick = false;
 }
 
 } // namespace fallout
