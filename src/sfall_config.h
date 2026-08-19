@@ -83,7 +83,7 @@ namespace fallout {
 #define SFALL_CONFIG_BURST_MOD_DEFAULT_CENTER_MULTIPLIER 1
 #define SFALL_CONFIG_BURST_MOD_DEFAULT_CENTER_DIVISOR 3
 #define SFALL_CONFIG_BURST_MOD_DEFAULT_TARGET_MULTIPLIER 1
-#define SFALL_CONFIG_BURST_MOD_DEFAULT_TARGET_DIVISOR 2
+#define SFALL_CONFIG_BURST_MOD_TARGET_DIVISOR 2
 
 extern bool gSfallConfigInitialized;
 extern Config gSfallConfig;
@@ -105,6 +105,13 @@ inline bool localCoopUnifiedProfileSfallConfigInit(int argc, char** argv)
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_YEAR, 2161);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_MONTH, 11);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_DAY, 4);
+
+    // main.cc already honors sfall's StartingMap override before falling back
+    // to its compiled Fallout 2 "artemple.map" default. F1's original main.cc
+    // starts at V13Ent.map, so set the profile override after parsing ddraw.ini
+    // to prevent stale user/F2 settings from sending the unified F1 campaign to
+    // an F2-only map.
+    configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_STARTING_MAP_KEY, "V13Ent.map");
 
     return true;
 }
