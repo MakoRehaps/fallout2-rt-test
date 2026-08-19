@@ -2,6 +2,7 @@
 #define UNIFIED_WORLDMAP_STATE_PROFILE_H
 
 #include "unified_campaign.h"
+#include "unified_fallout1_worldmap_globals.h"
 #include "unified_fallout1_worldmap_state.h"
 
 namespace fallout {
@@ -169,6 +170,7 @@ inline bool unifiedWmAreaIsKnown(int areaIdx)
         return false;
     }
 
+    unifiedFallout1WorldMapSyncFromGlobals();
     const UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetStateConst();
     return (state.firstVisitFlags & (1 << areaIdx)) != 0;
 }
