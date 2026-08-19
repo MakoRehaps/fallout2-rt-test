@@ -3,6 +3,7 @@
 
 #ifdef LOCAL_COOP_LOADSAVE_META
 #include "unified_campaign.h"
+#include "unified_fallout1_worldmap_state.h"
 #endif
 
 #include "game_vars.h"
@@ -33,7 +34,23 @@ void gameReset();
 inline void localCoopLoadSaveGameReset()
 {
     unifiedCampaignRunBeforeGameResetHook();
-    unifiedCampaignApplyPendingSaveHeader();
+
+    bool appliedCampaignMeta = unifiedCampaignApplyPendingSaveHeader();
+    if (appliedCampaignMeta
+        && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // New sidecars restore Fallout 1's complete original world-map payload.
+        // Header-only sidecars from earlier co-op builds remain readable; they
+        // receive Fallout 1's stock Vault 13 starting world-map state instead of
+        // inheriting stale exploration data from a previous loaded slot.
+        if (!unifiedFallout1WorldMapApplyPending()) {
+            UnifiedFallout1WorldMapState defaultState {};
+            unifiedFallout1WorldMapReset(defaultState);
+            unifiedFallout1WorldMapSetState(defaultState);
+        }
+    } else {
+        unifiedFallout1WorldMapClearPending();
+    }
+
     gameReset();
 }
 
@@ -42,6 +59,11 @@ inline bool localCoopLoadSaveShouldAbortForContentReload()
     if (!unifiedCampaignShouldAbortLoadForContentReload()) {
         return false;
     }
+
+    // Cross-profile loading intentionally restarts through the main menu. Do not
+    // leave a payload staged from the old content profile; opening the slot again
+    // after rebootstrap will stage it from the same COOPMETA.SAV file.
+    unifiedFallout1WorldMapClearPending();
 
     // If this load was requested while playing, leave the gameplay loop through
     // its normal teardown path. The main-menu initializer then performs the
