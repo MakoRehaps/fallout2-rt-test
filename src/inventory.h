@@ -25,20 +25,31 @@ int _inven_unwield(Object* critter_obj, int a2);
 int _invenUnwieldFunc(Object* obj, int a2, int a3);
 int inventoryOpenLooting(Object* looter, Object* target);
 int inventoryOpenStealing(Object* thief, Object* target);
-void inventoryOpenTrade(int win, Object* barterer, Object* playerTable, Object* bartererTable, int barterMod);
+
+// The stock trade implementation is renamed at preprocessing time inside
+// inventory.cc. This gives the controller bridge a stable fallback symbol while
+// allowing game_dialog.cc's call site to be redirected without including the
+// full co-op barter implementation during interpreter/object header parsing.
+void inventoryOpenTradeStock(int win,
+    Object* barterer,
+    Object* playerTable,
+    Object* bartererTable,
+    int barterMod);
+void localCoopInventoryOpenTradeBridge(int win,
+    Object* barterer,
+    Object* playerTable,
+    Object* bartererTable,
+    int barterMod);
+
 int _inven_set_timer(Object* a1);
 Object* inven_get_current_target_obj();
 
 } // namespace fallout
 
-// game_dialog.cc receives this header while object.h is being expanded. Route
-// that one external trade call through the controller-native wrapper. The
-// inventory.cc implementation includes inventory.h directly, so it keeps the
-// original symbol untouched and remains available as the mouse/keyboard
-// fallback inside local_coop_barter_ui.h.
 #if defined(OBJECT_H) && defined(GAME_DIALOG_H)
-#include "local_coop_barter_ui.h"
-#define inventoryOpenTrade localCoopInventoryOpenTrade
+#define inventoryOpenTrade localCoopInventoryOpenTradeBridge
+#else
+#define inventoryOpenTrade inventoryOpenTradeStock
 #endif
 
 #endif /* INVENTORY_H */
