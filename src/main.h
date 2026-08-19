@@ -21,12 +21,40 @@ inline int localCoopMainInputGetInput()
     return inputGetInput();
 }
 
+// main.cc is also the only place that calls gameInitWithOptions. Configure the
+// unified campaign before Fallout initializes its database layer, then make the
+// selected user-owned Fallout installation the active content root. This lets
+// the existing CE database code continue resolving master.dat, critter.dat,
+// data/, music, scripts, and other stock assets without bundling any content.
+inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
+    bool isMapper,
+    int font,
+    int a4,
+    int argc,
+    char** argv)
+{
+    unifiedCampaignConfigureFromArgs(argc, argv);
+    if (!unifiedCampaignActivateContentRoot()) {
+        return -1;
+    }
+
+    return gameInitWithOptions(
+        unifiedCampaignGetWindowTitle(windowTitle),
+        isMapper,
+        font,
+        a4,
+        argc,
+        argv);
+}
+
 int falloutMain(int argc, char** argv);
 
 } // namespace fallout
 
-// main.cc includes input.h after main.h. Redirect the executable's main-loop
-// reads without altering the low-level input implementation used elsewhere.
+// main.cc includes input.h/game.h after main.h, but these headers have already
+// been pulled in by the cooperative runtime. Redirect only main.cc's call sites
+// without altering the low-level implementations used elsewhere.
 #define inputGetInput localCoopMainInputGetInput
+#define gameInitWithOptions unifiedCampaignGameInitWithOptions
 
 #endif /* MAIN_H */
