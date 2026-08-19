@@ -326,12 +326,14 @@ inline void localCoopGenericUiControllerTick()
         return;
     }
 
+    bool selectionChanged = false;
     if (!state.activeLastTick || state.activeWindowId != window->id) {
         localCoopGenericUiRestoreMarker();
         localCoopGenericUiResetEdges();
         state.activeWindowId = window->id;
         Button* first = localCoopGenericUiDefaultButton(buttons, buttonCount);
         state.selectedButtonId = first != nullptr ? first->id : -1;
+        selectionChanged = true;
     }
 
     Button* current = localCoopGenericUiFindButtonById(buttons,
@@ -340,6 +342,7 @@ inline void localCoopGenericUiControllerTick()
     if (current == nullptr) {
         current = localCoopGenericUiDefaultButton(buttons, buttonCount);
         state.selectedButtonId = current != nullptr ? current->id : -1;
+        selectionChanged = true;
     }
 
     bool upDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0;
@@ -363,14 +366,10 @@ inline void localCoopGenericUiControllerTick()
     if (next != nullptr && next != current) {
         state.selectedButtonId = next->id;
         current = next;
+        selectionChanged = true;
     }
 
-    if (current != nullptr
-        && (!state.markerValid
-            || state.markerWindowId != window->id
-            || state.selectedButtonId != current->id)) {
-        localCoopGenericUiDrawMarker(window, current);
-    } else if (current != nullptr && !state.markerValid) {
+    if (current != nullptr && (selectionChanged || !state.markerValid || state.markerWindowId != window->id)) {
         localCoopGenericUiDrawMarker(window, current);
     }
 
