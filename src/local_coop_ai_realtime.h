@@ -80,6 +80,7 @@ inline int localCoopRealtimeAiActionSlice(Object* actor)
 inline bool localCoopRealtimeAiActorCanAct(Object* actor)
 {
     if (actor == nullptr
+        || gDude == nullptr
         || localCoopActorIsHumanOwned(actor)
         || (actor->flags & OBJECT_HIDDEN) != 0
         || actor->elevation != gDude->elevation
@@ -93,6 +94,13 @@ inline bool localCoopRealtimeAiActorCanAct(Object* actor)
 inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferredTarget)
 {
     if (actor == nullptr) {
+        return;
+    }
+
+    // Outside an active co-op combat, preserve Fallout's stock behavior. This
+    // also makes the dispatcher safe if some script calls the AI directly.
+    if (!isInCombat() || !gLocalCoopInitialized) {
+        combatAiStock(actor, preferredTarget);
         return;
     }
 
