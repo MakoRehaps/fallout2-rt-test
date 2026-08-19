@@ -139,5 +139,6 @@ int _map_save_in_game(bool a1);
 // map.h, so its stock Fallout 2 implementation remains the fallback backend.
 #include "unified_worldmap_profile.h"
 #include "unified_worldmap_state_profile.h"
+#include "unified_worldmap_grid_profile.h"
 
 #endif /* MAP_H */
