@@ -1,9 +1,6 @@
 name: Co-op Windows Build
 
 on:
-  push:
-    branches:
-      - agent/unified-coop-engine
   pull_request:
     branches:
       - main
