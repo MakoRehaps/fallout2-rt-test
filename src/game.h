@@ -33,8 +33,10 @@ void gameReset();
 inline void localCoopLoadSaveGameReset()
 {
     // Slot-list scans can stage metadata, but only the real load path reaches
-    // gameReset through _PrepLoad. Apply the staged profile here so merely
-    // browsing save slots never changes the active campaign.
+    // gameReset through _PrepLoad. Clear transient controller/combat/UI state
+    // here, then apply the staged campaign profile. Merely browsing save slots
+    // still has no side effects.
+    unifiedCampaignRunBeforeGameResetHook();
     unifiedCampaignApplyPendingSaveHeader();
     gameReset();
 }
