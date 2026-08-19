@@ -288,6 +288,13 @@ inline bool unifiedCampaignStageSaveHeader(const UnifiedCampaignSaveHeader& head
 
     gUnifiedCampaignPendingSaveHeader = header;
     gUnifiedCampaignPendingSaveHeaderValid = true;
+
+    UnifiedGameId savedGame = static_cast<UnifiedGameId>(header.activeGame);
+    gUnifiedCampaignRuntime.requestedContentGame = savedGame;
+    if (savedGame == gUnifiedCampaignRuntime.activeGame) {
+        gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+    }
+
     return true;
 }
 
@@ -306,6 +313,12 @@ inline bool unifiedCampaignRejectPendingCrossProfileLoad()
     gUnifiedCampaignRuntime.requestedContentGame = savedGame;
     unifiedCampaignClearPendingSaveHeader();
     return true;
+}
+
+inline bool unifiedCampaignShouldAbortLoadForContentReload()
+{
+    return unifiedCampaignRejectPendingCrossProfileLoad()
+        || gUnifiedCampaignRuntime.loadedSaveRequiresContentReload;
 }
 
 inline bool unifiedCampaignApplyPendingSaveHeader()
