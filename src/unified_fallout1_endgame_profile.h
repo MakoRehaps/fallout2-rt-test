@@ -72,6 +72,8 @@ inline void unifiedFallout1EndgamePlayMovie()
         // performs a full Fallout 2 rebootstrap. The transition flag makes the
         // fresh F2 main-menu event call choose NEW GAME exactly once so Act II
         // enters the stock character-selector/startup path automatically.
+        // This source path is compiler-verified; real F1/F2 data still requires
+        // runtime validation before the transition can be called stable.
         if (unifiedCampaignAdvanceToFallout2AndAutoStart()) {
             _game_user_wants_to_quit = 2;
             return;
