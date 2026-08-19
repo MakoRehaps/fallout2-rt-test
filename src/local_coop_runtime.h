@@ -12,12 +12,15 @@
 #include "item.h"
 #include "kb.h"
 #include "local_coop.h"
+#include "local_coop_ai_realtime.h"
 #include "local_coop_focus.h"
 #include "object.h"
 #include "proto_types.h"
 #include "tile.h"
 
 namespace fallout {
+
+inline constexpr Uint32 kLocalCoopLegacySchedulerHeartbeatMs = 50;
 
 struct LocalCoopRuntimeSlot {
     Uint32 nextPrimaryAttackTick = 0;
@@ -34,6 +37,7 @@ inline bool gLocalCoopRealtimeCombatActive = false;
 inline bool gLocalCoopRuntimeTickerInstalled = false;
 inline bool gLocalCoopRuntimeInsideTick = false;
 inline bool gLocalCoopLegacyYieldQueued = false;
+inline Uint32 gLocalCoopNextLegacyYieldTick = 0;
 
 inline bool localCoopTickReached(Uint32 now, Uint32 target)
 {
@@ -171,6 +175,7 @@ inline void localCoopYieldLegacyPlayerTurn()
 {
     if (!isInCombat() || !gLocalCoopRealtimeCombatActive) {
         gLocalCoopLegacyYieldQueued = false;
+        gLocalCoopNextLegacyYieldTick = 0;
         return;
     }
 
@@ -180,9 +185,17 @@ inline void localCoopYieldLegacyPlayerTurn()
         return;
     }
 
-    if (!gLocalCoopLegacyYieldQueued) {
+    Uint32 now = SDL_GetTicks();
+    if (!gLocalCoopLegacyYieldQueued
+        && (gLocalCoopNextLegacyYieldTick == 0
+            || localCoopTickReached(now, gLocalCoopNextLegacyYieldTick))) {
+        // The player turn is now only a scheduler heartbeat. While it remains
+        // open, Fallout keeps calling input/tickers, so all four controllers,
+        // movement, attacks and live overlays continue to update. Yield after a
+        // short wall-clock interval to let the next NPC action slices run.
         enqueueInputEvent(KEY_SPACE);
         gLocalCoopLegacyYieldQueued = true;
+        gLocalCoopNextLegacyYieldTick = now + kLocalCoopLegacySchedulerHeartbeatMs;
     }
 }
 
@@ -273,6 +286,8 @@ inline void localCoopProcessWorldCombatStart()
                     }
                 }
 
+                localCoopRealtimeAiReset();
+                gLocalCoopNextLegacyYieldTick = SDL_GetTicks() + kLocalCoopLegacySchedulerHeartbeatMs;
                 gLocalCoopRealtimeCombatActive = true;
 
                 CombatStartData csd{};
@@ -335,6 +350,8 @@ inline void localCoopSetRealtimeCombatActive(bool active)
 
     if (!active) {
         gLocalCoopLegacyYieldQueued = false;
+        gLocalCoopNextLegacyYieldTick = 0;
+        localCoopRealtimeAiReset();
         for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
             LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[index];
             runtime.aimTarget = nullptr;
