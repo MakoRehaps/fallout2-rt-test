@@ -43,10 +43,13 @@ inline void localCoopLoadSaveGameReset()
         // receive Fallout 1's stock Vault 13 starting world-map state instead of
         // inheriting stale exploration data from a previous loaded slot.
         if (!unifiedFallout1WorldMapApplyPending()) {
-            UnifiedFallout1WorldMapState defaultState {};
-            unifiedFallout1WorldMapReset(defaultState);
-            unifiedFallout1WorldMapSetState(defaultState);
+            unifiedFallout1WorldMapResetCurrent();
         }
+
+        // Stock gameReset calls wmWorldMap_reset after this wrapper. The F1
+        // lifecycle adapter consumes this one-shot flag so the just-restored
+        // sidecar survives that reset. Ordinary new-game resets do not set it.
+        unifiedFallout1WorldMapPreserveNextReset();
     } else {
         unifiedFallout1WorldMapClearPending();
     }
