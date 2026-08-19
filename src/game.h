@@ -32,16 +32,23 @@ void gameReset();
 #ifdef LOCAL_COOP_LOADSAVE_META
 inline void localCoopLoadSaveGameReset()
 {
-    // Slot-list scans can stage metadata, but only the real load path reaches
-    // gameReset through _PrepLoad. Clear transient controller/combat/UI state
-    // here, then apply the staged campaign profile. Merely browsing save slots
-    // still has no side effects.
     unifiedCampaignRunBeforeGameResetHook();
     unifiedCampaignApplyPendingSaveHeader();
     gameReset();
 }
 
-#define gameReset localCoopLoadSaveGameReset
+// loadsave.cc is the only translation unit that gets this function-like macro.
+// Its first load handler (_PrepLoad) calls gameReset before deserializing any
+// payload. If COOPMETA.SAV belongs to the other mounted game, return -1 from
+// that handler immediately. The later error-cleanup gameReset call also returns
+// before tearing down the current world while a content remount is pending.
+#define gameReset() \
+    do { \
+        if (unifiedCampaignShouldAbortLoadForContentReload()) { \
+            return -1; \
+        } \
+        localCoopLoadSaveGameReset(); \
+    } while (0)
 #endif
 
 void gameExit();
