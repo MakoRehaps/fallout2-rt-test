@@ -214,6 +214,35 @@ inline Button* localCoopGenericUiFindButtonById(
     return nullptr;
 }
 
+inline bool localCoopGenericUiHasReleaseEvent(
+    const std::array<Button*, kLocalCoopGenericUiButtonCapacity>& buttons,
+    int count,
+    int eventCode)
+{
+    for (int index = 0; index < count; index++) {
+        if (buttons[index] != nullptr
+            && buttons[index]->leftMouseUpEventCode == eventCode) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline bool localCoopGenericUiIsPerkPicker(
+    const std::array<Button*, kLocalCoopGenericUiButtonCapacity>& buttons,
+    int count)
+{
+    // The character-editor perk/trait/Tag pickers share the same stock event
+    // layout: 500 Done, 501 mouse-list area, 502 Cancel, and 574/575 arrows.
+    // Event 501 is intentionally mouse-position based, so controller input must
+    // bypass it and feed the picker's native keyboard list events instead.
+    return GameMode::isInGameMode(GameMode::kEditor)
+        && localCoopGenericUiHasReleaseEvent(buttons, count, 500)
+        && localCoopGenericUiHasReleaseEvent(buttons, count, 501)
+        && localCoopGenericUiHasReleaseEvent(buttons, count, 502);
+}
+
 inline Button* localCoopGenericUiDefaultButton(
     const std::array<Button*, kLocalCoopGenericUiButtonCapacity>& buttons,
     int count)
@@ -293,6 +322,47 @@ inline void localCoopGenericUiResetEdges()
     state.cancelWasDown = false;
 }
 
+inline void localCoopGenericUiHandlePerkPicker(SDL_GameController* controller,
+    LocalCoopGenericUiControllerState& state)
+{
+    localCoopGenericUiRestoreMarker();
+    state.selectedButtonId = -1;
+
+    bool upDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0;
+    bool downDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
+    bool leftDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+    bool rightDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
+    bool confirmDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A) != 0;
+    bool cancelDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_B) != 0;
+
+    if (upDown && !state.upWasDown) {
+        enqueueInputEvent(KEY_ARROW_UP);
+    }
+    if (downDown && !state.downWasDown) {
+        enqueueInputEvent(KEY_ARROW_DOWN);
+    }
+    if (leftDown && !state.leftWasDown) {
+        enqueueInputEvent(KEY_PAGE_UP);
+    }
+    if (rightDown && !state.rightWasDown) {
+        enqueueInputEvent(KEY_PAGE_DOWN);
+    }
+    if (confirmDown && !state.confirmWasDown) {
+        enqueueInputEvent(KEY_RETURN);
+    }
+    if (cancelDown && !state.cancelWasDown) {
+        enqueueInputEvent(KEY_ESCAPE);
+    }
+
+    state.upWasDown = upDown;
+    state.downWasDown = downDown;
+    state.leftWasDown = leftDown;
+    state.rightWasDown = rightDown;
+    state.confirmWasDown = confirmDown;
+    state.cancelWasDown = cancelDown;
+    state.activeLastTick = true;
+}
+
 inline void localCoopGenericUiControllerTick()
 {
     LocalCoopGenericUiControllerState& state = gLocalCoopGenericUiControllerState;
@@ -323,6 +393,15 @@ inline void localCoopGenericUiControllerTick()
     int buttonCount = localCoopGenericUiCollectButtons(window, buttons);
     if (buttonCount <= 0) {
         state.activeLastTick = active;
+        return;
+    }
+
+    if (localCoopGenericUiIsPerkPicker(buttons, buttonCount)) {
+        if (!state.activeLastTick || state.activeWindowId != window->id) {
+            localCoopGenericUiResetEdges();
+            state.activeWindowId = window->id;
+        }
+        localCoopGenericUiHandlePerkPicker(controller, state);
         return;
     }
 
