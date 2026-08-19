@@ -20,6 +20,7 @@ namespace fallout {
 
 inline constexpr int kLocalCoopMaxPlayers = 4;
 inline constexpr int kLocalCoopControllerDeadzone = 9000;
+inline constexpr int kLocalCoopCameraTetherTiles = 18;
 
 enum class LocalCoopUiMode {
     World,
@@ -314,6 +315,25 @@ inline bool localCoopPlayerCanMove(const LocalCoopPlayer& player)
         && (player.actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) == 0;
 }
 
+inline bool localCoopMoveRespectsSharedScreen(Object* actor, int destination)
+{
+    if (actor == nullptr || !tileIsValid(destination) || !tileIsValid(gCenterTile)) {
+        return true;
+    }
+
+    int currentDistance = tileDistanceBetween(actor->tile, gCenterTile);
+    int destinationDistance = tileDistanceBetween(destination, gCenterTile);
+
+    if (currentDistance <= kLocalCoopCameraTetherTiles) {
+        return destinationDistance <= kLocalCoopCameraTetherTiles;
+    }
+
+    // If a camera recenter or knockback leaves somebody outside the tether,
+    // never trap them there: movement toward the group remains legal, movement
+    // farther away does not.
+    return destinationDistance < currentDistance;
+}
+
 inline void localCoopPollControllers()
 {
     if (!gLocalCoopInitialized) {
@@ -350,6 +370,10 @@ inline void localCoopPollControllers()
 
         int destination = tileGetTileInDirection(actor->tile, rotation, 1);
         if (!tileIsValid(destination)) {
+            continue;
+        }
+
+        if (!localCoopMoveRespectsSharedScreen(actor, destination)) {
             continue;
         }
 
