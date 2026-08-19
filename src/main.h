@@ -4,6 +4,7 @@
 #include "local_coop_dialog_controller.h"
 #include "local_coop_interaction.h"
 #include "local_coop_inventory_ui.h"
+#include "local_coop_modal_controller.h"
 #include "local_coop_mode_sync.h"
 #include "local_coop_runtime.h"
 #include "unified_campaign.h"
@@ -20,6 +21,7 @@ inline int localCoopMainInputGetInput()
 {
     localCoopModeSyncEnsureTicker();
     localCoopDialogControllerEnsureTicker();
+    localCoopModalControllerEnsureTicker();
     localCoopSyncLegacyModes();
     localCoopRuntimeTick();
     localCoopFocusTick();
