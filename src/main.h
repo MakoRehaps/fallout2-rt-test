@@ -12,12 +12,8 @@
 
 namespace fallout {
 
-// Fallout 1 starts at 07:21. Fallout game time is stored in tenths of a second.
 inline constexpr unsigned int kUnifiedFallout1InitialGameTime = (7 * 60 * 60 + 21 * 60) * 10;
 
-// main.cc includes this header before input.h/mainmenu.h. Keep declarations of
-// the stock functions here so wrappers below can call the original symbols
-// before the main.cc-only macro redirects are introduced at the end.
 int inputGetInput();
 int mainMenuWindowInit();
 
@@ -63,9 +59,6 @@ inline void localCoopResetTransientStateForLoad()
 
 inline void localCoopResetTickerRegistrationAfterEngineExit()
 {
-    // gameExit destroys the engine ticker registry. These flags live outside
-    // that registry, so clear them before the new gameInit or the co-op tickers
-    // would incorrectly believe they were still registered.
     gLocalCoopRuntimeTickerInstalled = false;
     gLocalCoopInventoryTickerInstalled = false;
     gLocalCoopModeSyncTickerInstalled = false;
@@ -149,11 +142,10 @@ inline bool unifiedCampaignRebootstrapRequestedContent()
     UnifiedGameId requestedGame = gUnifiedCampaignRuntime.requestedContentGame;
     if (requestedGame == previousGame) {
         gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+        _game_user_wants_to_quit = 0;
         return true;
     }
 
-    // Do not destroy a working engine if the requested installation was never
-    // configured. The load stays blocked and the current profile remains live.
     if (unifiedCampaignGetRoot(requestedGame).empty()) {
         return false;
     }
@@ -186,6 +178,7 @@ inline bool unifiedCampaignRebootstrapRequestedContent()
         gameTimeSetTime(kUnifiedFallout1InitialGameTime);
     }
 
+    _game_user_wants_to_quit = 0;
     return true;
 }
 
@@ -203,8 +196,6 @@ int falloutMain(int argc, char** argv);
 
 } // namespace fallout
 
-// Redirect only main.cc call sites. Other translation units continue to use the
-// stock symbols directly.
 #define inputGetInput localCoopMainInputGetInput
 #define gameInitWithOptions unifiedCampaignGameInitWithOptions
 #define mainMenuWindowInit localCoopMainMenuWindowInit
