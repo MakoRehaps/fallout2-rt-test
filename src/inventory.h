@@ -27,19 +27,44 @@ int inventoryOpenLooting(Object* looter, Object* target);
 int inventoryOpenStealing(Object* thief, Object* target);
 
 // The stock trade implementation is renamed at preprocessing time inside
-// inventory.cc. This gives the controller bridge a stable fallback symbol while
-// allowing game_dialog.cc's call site to be redirected without including the
-// full co-op barter implementation during interpreter/object header parsing.
+// inventory.cc. This gives the controller dispatcher a stable fallback symbol
+// while allowing game_dialog.cc's call site to be redirected without pulling
+// any co-op/UI headers into interpreter/object header parsing.
 void inventoryOpenTradeStock(int win,
     Object* barterer,
     Object* playerTable,
     Object* bartererTable,
     int barterMod);
-void localCoopInventoryOpenTradeBridge(int win,
+
+using InventoryOpenTradeHandler = void (*)(int win,
     Object* barterer,
     Object* playerTable,
     Object* bartererTable,
     int barterMod);
+
+inline InventoryOpenTradeHandler gInventoryOpenTradeControllerHandler = nullptr;
+
+inline void localCoopInventoryOpenTradeBridge(int win,
+    Object* barterer,
+    Object* playerTable,
+    Object* bartererTable,
+    int barterMod)
+{
+    if (gInventoryOpenTradeControllerHandler != nullptr) {
+        gInventoryOpenTradeControllerHandler(win,
+            barterer,
+            playerTable,
+            bartererTable,
+            barterMod);
+        return;
+    }
+
+    inventoryOpenTradeStock(win,
+        barterer,
+        playerTable,
+        bartererTable,
+        barterMod);
+}
 
 int _inven_set_timer(Object* a1);
 Object* inven_get_current_target_obj();
