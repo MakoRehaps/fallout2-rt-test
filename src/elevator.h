@@ -44,8 +44,9 @@ void elevatorsInit();
 } // namespace fallout
 
 // Redirect only translation units that include elevator.h after combat_ai.h
-// (notably combat.cc). The original _combat_ai implementation remains intact
-// inside combat_ai.cc and is called by localCoopRealtimeAiTurn.
+// (notably combat.cc). The original implementations remain intact in their own
+// translation units and are called by these realtime dispatch helpers.
 #define _combat_ai localCoopRealtimeAiTurn
+#define gameTimeAddSeconds localCoopRealtimeCombatAdvanceTime
 
 #endif /* ELEVATOR_H */
