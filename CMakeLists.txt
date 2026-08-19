@@ -299,6 +299,15 @@ set_source_files_properties(
     PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_KEEP_ISO_LIVE"
 )
 
+# loadsave.cc gets a narrow adapter around its own fileOpen/gameReset call sites.
+# It writes COOPMETA.SAV beside each stock SAVE.DAT and stages that header until
+# the real _PrepLoad path starts. No stock SAVE.DAT bytes or handler tables are
+# changed by this metadata layer.
+set_source_files_properties(
+    "src/loadsave.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_LOADSAVE_META"
+)
+
 if(IOS)
     target_sources(${EXECUTABLE_NAME} PUBLIC
         "src/platform/ios/paths.h"
