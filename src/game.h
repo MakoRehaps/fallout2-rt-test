@@ -37,14 +37,22 @@ inline void localCoopLoadSaveGameReset()
     gameReset();
 }
 
-// loadsave.cc is the only translation unit that gets this function-like macro.
-// Its first load handler (_PrepLoad) calls gameReset before deserializing any
-// payload. If COOPMETA.SAV belongs to the other mounted game, return -1 from
-// that handler immediately. The later error-cleanup gameReset call also returns
-// before tearing down the current world while a content remount is pending.
+inline bool localCoopLoadSaveShouldAbortForContentReload()
+{
+    if (!unifiedCampaignShouldAbortLoadForContentReload()) {
+        return false;
+    }
+
+    // If this load was requested while playing, leave the gameplay loop through
+    // its normal teardown path. The main-menu initializer then performs the
+    // full engine rebootstrap into the requested Fallout content profile.
+    _game_user_wants_to_quit = 2;
+    return true;
+}
+
 #define gameReset() \
     do { \
-        if (unifiedCampaignShouldAbortLoadForContentReload()) { \
+        if (localCoopLoadSaveShouldAbortForContentReload()) { \
             return -1; \
         } \
         localCoopLoadSaveGameReset(); \
