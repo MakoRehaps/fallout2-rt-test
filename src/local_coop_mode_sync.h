@@ -28,7 +28,8 @@ inline LocalCoopUiMode localCoopLegacyModeForPlayerOne()
         return LocalCoopUiMode::PipBoy;
     }
 
-    if (GameMode::isInGameMode(GameMode::kHero)
+    if (GameMode::isInGameMode(GameMode::kEditor)
+        || GameMode::isInGameMode(GameMode::kHero)
         || GameMode::isInGameMode(GameMode::kSkilldex)) {
         return LocalCoopUiMode::Character;
     }
