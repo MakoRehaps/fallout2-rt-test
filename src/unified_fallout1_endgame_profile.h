@@ -8,6 +8,7 @@
 #include "proto_types.h"
 #include "stat.h"
 #include "unified_campaign.h"
+#include "unified_campaign_transition.h"
 #include "unified_fallout1_movie_profile.h"
 
 namespace fallout {
@@ -68,8 +69,10 @@ inline void unifiedFallout1EndgamePlayMovie()
     if (unifiedCampaignIsEnabled()) {
         // Do not switch cwd/databases under live F1 scripts. The existing main
         // loop sees this request, exits through the normal teardown path, then
-        // performs a full Fallout 2 rebootstrap from its configured content root.
-        if (unifiedCampaignAdvanceToFallout2()) {
+        // performs a full Fallout 2 rebootstrap. The transition flag makes the
+        // fresh F2 main-menu event call choose NEW GAME exactly once so Act II
+        // enters the stock character-selector/startup path automatically.
+        if (unifiedCampaignAdvanceToFallout2AndAutoStart()) {
             _game_user_wants_to_quit = 2;
             return;
         }
