@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: coop-windows-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   windows-x64:
