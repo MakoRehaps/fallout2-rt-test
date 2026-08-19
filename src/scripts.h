@@ -231,4 +231,9 @@ int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation);
 
 } // namespace fallout
 
+#ifdef LOCAL_COOP_F1_SCRIPT_WORLDMAP_PROFILE
+#include "unified_worldmap_profile.h"
+#include "unified_worldmap_state_profile.h"
+#endif
+
 #endif /* SCRIPTS_H */
