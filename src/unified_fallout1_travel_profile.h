@@ -38,8 +38,6 @@ void wmWorldMap();
 void wmTownMap();
 
 inline constexpr int kUnifiedFallout1LoadMapIndexGvar = 32;
-inline constexpr int kUnifiedFallout1VatsBlownGvar = 17;
-inline constexpr int kUnifiedFallout1MasterBlownGvar = 18;
 inline constexpr int kUnifiedFallout1TravelMaxX = 1399;
 inline constexpr int kUnifiedFallout1TravelMaxY = 1499;
 
@@ -480,7 +478,7 @@ inline int unifiedFallout1TravelToTown(int town)
             travelMile = 0;
             _partyMemberRestingHeal(24);
 
-            int luck = gDude != nullptr ? statGetValue(gDude, STAT_LUCK) : 5;
+            int luck = gDude != nullptr ? critterGetStat(gDude, STAT_LUCK) : 5;
             int explorer = gDude != nullptr ? perkGetRank(gDude, PERK_EXPLORER) : 0;
             UnifiedFallout1EncounterSelection encounter = unifiedFallout1SelectTravelEncounter(
                 state.worldX,
