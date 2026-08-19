@@ -9,6 +9,7 @@
 
 #include "color.h"
 #include "critter.h"
+#include "input.h"
 #include "inventory.h"
 #include "item.h"
 #include "local_coop.h"
@@ -32,6 +33,8 @@ inline std::array<LocalCoopInventoryUiSlot, kLocalCoopMaxPlayers> gLocalCoopInve
 inline int gLocalCoopInventoryWindow = -1;
 inline int gLocalCoopInventoryWindowWidth = 0;
 inline int gLocalCoopInventoryWindowHeight = 0;
+inline bool gLocalCoopInventoryTickerInstalled = false;
+inline bool gLocalCoopInventoryInsideTick = false;
 
 inline bool localCoopAnyInventoryUiOpen()
 {
@@ -371,8 +374,27 @@ inline void localCoopInventoryUiRender()
 
 inline void localCoopInventoryUiTick()
 {
+    if (gLocalCoopInventoryInsideTick) {
+        return;
+    }
+
+    gLocalCoopInventoryInsideTick = true;
     localCoopInventoryUiProcessInput();
     localCoopInventoryUiRender();
+    gLocalCoopInventoryInsideTick = false;
+}
+
+inline void localCoopInventoryUiTicker()
+{
+    localCoopInventoryUiTick();
+}
+
+inline void localCoopInventoryUiEnsureTicker()
+{
+    if (!gLocalCoopInventoryTickerInstalled) {
+        tickersAdd(localCoopInventoryUiTicker);
+        gLocalCoopInventoryTickerInstalled = true;
+    }
 }
 
 } // namespace fallout
