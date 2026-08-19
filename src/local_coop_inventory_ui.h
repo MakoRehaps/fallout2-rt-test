@@ -19,6 +19,9 @@
 
 namespace fallout {
 
+inline constexpr int kLocalCoopHandLeft = 0;
+inline constexpr int kLocalCoopHandRight = 1;
+
 struct LocalCoopInventoryUiSlot {
     int selectedSharedIndex = 0;
     bool backWasDown = false;
@@ -132,7 +135,7 @@ inline bool localCoopEquipSelectedSharedItem(int slot)
             }
         }
 
-        if (_invenWieldFunc(actor, item, HAND_RIGHT, true) != 0) {
+        if (_invenWieldFunc(actor, item, kLocalCoopHandRight, true) != 0) {
             if (actor != sharedOwner && item->owner == actor) {
                 itemMoveForce(actor, sharedOwner, item, 1);
             }
@@ -142,7 +145,7 @@ inline bool localCoopEquipSelectedSharedItem(int slot)
     }
 
     if (itemType == ITEM_TYPE_WEAPON) {
-        return localCoopEquipSharedItem(slot, item, HAND_RIGHT);
+        return localCoopEquipSharedItem(slot, item, kLocalCoopHandRight);
     }
 
     return false;
@@ -201,12 +204,12 @@ inline void localCoopInventoryUiProcessInput()
             }
 
             if (rightUnequipDown && !ui.rightUnequipWasDown) {
-                localCoopUnequipToSharedPool(slot, HAND_RIGHT);
+                localCoopUnequipToSharedPool(slot, kLocalCoopHandRight);
                 localCoopInventoryUiClampSelection(slot);
             }
 
             if (leftUnequipDown && !ui.leftUnequipWasDown) {
-                localCoopUnequipToSharedPool(slot, HAND_LEFT);
+                localCoopUnequipToSharedPool(slot, kLocalCoopHandLeft);
                 localCoopInventoryUiClampSelection(slot);
             }
         }
