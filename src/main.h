@@ -17,6 +17,7 @@ int inputGetInput();
 inline int localCoopMainInputGetInput()
 {
     localCoopRuntimeTick();
+    localCoopFocusTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
     localCoopInteractionTick();
