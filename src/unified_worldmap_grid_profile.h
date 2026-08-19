@@ -108,7 +108,9 @@ inline int unifiedWmSubTileGetVisitedState(int x, int y, int* statePtr)
 
 } // namespace fallout
 
+#ifndef WORLDMAP_H
 #define wmSubTileMarkRadiusVisited unifiedWmSubTileMarkRadiusVisited
 #define wmSubTileGetVisitedState unifiedWmSubTileGetVisitedState
+#endif
 
 #endif /* UNIFIED_WORLDMAP_GRID_PROFILE_H */
