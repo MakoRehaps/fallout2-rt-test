@@ -9,6 +9,7 @@
 #include <string>
 
 #include "unified_campaign.h"
+#include "unified_fallout1_worldmap_state.h"
 #endif
 
 #include "xfile.h"
@@ -101,6 +102,7 @@ inline std::string localCoopLoadSaveMetaPath(const char* saveDatPath)
 inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
 {
     unifiedCampaignClearPendingSaveHeader();
+    unifiedFallout1WorldMapClearPending();
 
     std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
     File* meta = fileOpen(metaPath.c_str(), "rb");
@@ -108,13 +110,25 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
         return;
     }
 
-    UnifiedCampaignSaveHeader header{};
+    UnifiedCampaignSaveHeader header {};
     bool readOk = fileRead(&header, sizeof(header), 1, meta) == 1;
-    fileClose(meta);
+    bool stagedHeader = readOk && unifiedCampaignStageSaveHeader(header);
 
-    if (readOk) {
-        unifiedCampaignStageSaveHeader(header);
+    if (stagedHeader
+        && header.activeGame == static_cast<uint32_t>(UnifiedGameId::Fallout1)) {
+        // Version 1 COOPMETA files ended immediately after the campaign header.
+        // A missing chunk is therefore a valid old save, not a load failure.
+        UnifiedCampaignMetaChunkHeader chunkHeader {};
+        if (fileRead(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1
+            && unifiedFallout1WorldMapChunkIsSupported(chunkHeader)) {
+            UnifiedFallout1WorldMapState state {};
+            if (fileRead(&state, sizeof(state), 1, meta) == 1) {
+                unifiedFallout1WorldMapStage(state);
+            }
+        }
     }
+
+    fileClose(meta);
 }
 
 inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
@@ -126,7 +140,20 @@ inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
     }
 
     UnifiedCampaignSaveHeader header = unifiedCampaignMakeSaveHeader();
-    fileWrite(&header, sizeof(header), 1, meta);
+    if (fileWrite(&header, sizeof(header), 1, meta) != 1) {
+        fileClose(meta);
+        return;
+    }
+
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        UnifiedCampaignMetaChunkHeader chunkHeader = unifiedFallout1WorldMapMakeChunkHeader();
+        const UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetStateConst();
+
+        if (fileWrite(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1) {
+            fileWrite(&state, sizeof(state), 1, meta);
+        }
+    }
+
     fileClose(meta);
 }
 
@@ -148,7 +175,7 @@ inline File* localCoopLoadSaveFileOpen(const char* filename, const char* mode)
         && mode != nullptr
         && strcmp(mode, "wb") == 0) {
         // The slot directory already exists by the time loadsave.cc creates
-        // SAVE.DAT, so the small engine metadata sidecar can safely be written.
+        // SAVE.DAT, so the engine metadata sidecar can safely be written.
         localCoopLoadSaveWriteCampaignMeta(filename);
     }
 
