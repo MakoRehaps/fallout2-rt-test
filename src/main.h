@@ -1,6 +1,7 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#include "local_coop_controller_bridge.h"
 #include "local_coop_dialog_controller.h"
 #include "local_coop_generic_ui_controller.h"
 #include "local_coop_interaction.h"
@@ -23,6 +24,20 @@ inline bool gUnifiedCampaignStartupIsMapper = false;
 inline int gUnifiedCampaignStartupFont = 0;
 inline int gUnifiedCampaignStartupA4 = 0;
 inline std::string gUnifiedCampaignStartupWindowTitle = "FALLOUT II";
+
+inline SDL_GameController* localCoopResolveAssignedController(int slot)
+{
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
+        return nullptr;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    if (!player.connected || player.controller == nullptr) {
+        return nullptr;
+    }
+
+    return player.controller;
+}
 
 inline void localCoopResetTransientStateForLoad()
 {
@@ -75,6 +90,8 @@ inline void localCoopResetTickerRegistrationAfterEngineExit()
 
 inline int localCoopMainInputGetInput()
 {
+    gLocalCoopControllerLookup = localCoopResolveAssignedController;
+
     localCoopModeSyncEnsureTicker();
     localCoopDialogControllerEnsureTicker();
     localCoopModalControllerEnsureTicker();
