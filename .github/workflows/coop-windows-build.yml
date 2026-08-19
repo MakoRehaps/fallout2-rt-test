@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: coop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
     name: Windows x64 / MSVC
