@@ -142,6 +142,7 @@ int _map_save_in_game(bool a1);
 #include "unified_worldmap_state_profile.h"
 #include "unified_worldmap_grid_profile.h"
 #include "unified_loaded_map_profile.h"
+#include "unified_worldmap_audio_profile.h"
 #include "unified_worldmap_lifecycle_profile.h"
 
 #endif /* MAP_H */
