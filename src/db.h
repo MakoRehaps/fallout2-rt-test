@@ -9,6 +9,7 @@
 #include <string>
 
 #include "unified_campaign.h"
+#include "unified_fallout1_worldmap_globals.h"
 #include "unified_fallout1_worldmap_state.h"
 #endif
 
@@ -146,6 +147,10 @@ inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
     }
 
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // Keep the sidecar synchronized with F1's original quest/global-driven
+        // town discovery immediately before taking the persistent snapshot.
+        unifiedFallout1WorldMapSyncFromGlobals();
+
         UnifiedCampaignMetaChunkHeader chunkHeader = unifiedFallout1WorldMapMakeChunkHeader();
         const UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetStateConst();
 
