@@ -2,6 +2,7 @@
 #define MAIN_H
 
 #include "local_coop_dialog_controller.h"
+#include "local_coop_generic_ui_controller.h"
 #include "local_coop_interaction.h"
 #include "local_coop_inventory_ui.h"
 #include "local_coop_modal_controller.h"
@@ -25,12 +26,14 @@ inline int localCoopMainInputGetInput()
     localCoopModeSyncEnsureTicker();
     localCoopDialogControllerEnsureTicker();
     localCoopModalControllerEnsureTicker();
+    localCoopGenericUiControllerEnsureTicker();
     localCoopSyncLegacyModes();
     localCoopRuntimeTick();
     localCoopFocusTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
     localCoopInteractionTick();
+    localCoopGenericUiControllerTick();
 
     int keyCode = inputGetInput();
 
