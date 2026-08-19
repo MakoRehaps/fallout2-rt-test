@@ -308,6 +308,14 @@ set_source_files_properties(
     PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_LOADSAVE_META"
 )
 
+# settings.cc applies the selected unified profile after normal config parsing.
+# In Fallout 1 mode this forces the F1 archive/patch/music roots and prevents
+# those temporary F1 paths from being written back into fallout2.cfg.
+set_source_files_properties(
+    "src/settings.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_UNIFIED_PROFILE_SETTINGS"
+)
+
 if(IOS)
     target_sources(${EXECUTABLE_NAME} PUBLIC
         "src/platform/ios/paths.h"
