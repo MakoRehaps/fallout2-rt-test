@@ -43,10 +43,11 @@ void elevatorsInit();
 
 } // namespace fallout
 
-// Redirect only translation units that include elevator.h after combat_ai.h
-// (notably combat.cc). The original implementations remain intact in their own
-// translation units and are called by these realtime dispatch helpers.
+// Redirect the legacy combat AI call sites to the realtime action-slice
+// dispatcher. Do not macro-redirect gameTimeAddSeconds here: elevator.h is also
+// included by scripts.cc, so that name would leak into the real function
+// definition. The wall-clock helper remains available for a safer combat-only
+// hook later.
 #define _combat_ai localCoopRealtimeAiTurn
-#define gameTimeAddSeconds localCoopRealtimeCombatAdvanceTime
 
 #endif /* ELEVATOR_H */
