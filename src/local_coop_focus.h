@@ -5,6 +5,7 @@
 #include <array>
 
 #include "combat.h"
+#include "item.h"
 #include "local_coop.h"
 #include "object.h"
 #include "proto_types.h"
@@ -27,6 +28,30 @@ inline int localCoopFocusRotationDifference(int lhs, int rhs)
     return std::min(difference, ROTATION_COUNT - difference);
 }
 
+inline int localCoopFocusCombatRange(const Object* actor)
+{
+    if (actor == nullptr) {
+        return 4;
+    }
+
+    Object* mutableActor = const_cast<Object*>(actor);
+    int hitMode = HIT_MODE_PUNCH;
+    Object* weapon = critterGetItem2(mutableActor);
+    if (weapon != nullptr && itemGetType(weapon) == ITEM_TYPE_WEAPON) {
+        hitMode = HIT_MODE_RIGHT_WEAPON_PRIMARY;
+    }
+
+    int weaponRange = weaponGetRange(mutableActor, hitMode);
+    if (weaponRange < 1) {
+        weaponRange = 1;
+    }
+
+    // Give the stick a small acquisition buffer outside exact firing range so
+    // melee/short-range players can lock while closing distance, but never let
+    // a controller snap to an irrelevant critter across the entire map.
+    return std::max(4, std::min(60, weaponRange + 2));
+}
+
 inline bool localCoopFocusTargetStillUsable(const Object* actor, const Object* target, int maxDistance)
 {
     return actor != nullptr
@@ -39,7 +64,7 @@ inline bool localCoopFocusTargetStillUsable(const Object* actor, const Object* t
 
 inline bool localCoopFocusIsEnemy(const Object* actor, const Object* target)
 {
-    if (!localCoopFocusTargetStillUsable(actor, target, 60)) {
+    if (!localCoopFocusTargetStillUsable(actor, target, localCoopFocusCombatRange(actor))) {
         return false;
     }
 
