@@ -21,6 +21,47 @@ inline constexpr unsigned int kUnifiedFallout1InitialGameTime = (7 * 60 * 60 + 2
 // to define the original inputGetInput symbol.
 int inputGetInput();
 
+inline void localCoopResetTransientStateForLoad()
+{
+    // Remove any temporary visual focus while the current world objects still
+    // exist. The stock load reset can safely destroy/rebuild them afterwards.
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        localCoopFocusReleaseOutline(slot);
+    }
+
+    localCoopPipboyRestoreMarker();
+    localCoopGenericUiRestoreMarker();
+    localCoopInventoryUiDestroyWindow();
+
+    // A queued scheduler Space event, held-button edge, sticky target, or attack
+    // cooldown from the old world must never fire into the freshly loaded one.
+    inputEventQueueReset();
+    localCoopSetRealtimeCombatActive(false);
+    localCoopRealtimeAiReset();
+
+    gLocalCoopRuntimeSlots = {};
+    gLocalCoopFocusSlots = {};
+    gLocalCoopInventoryUiSlots = {};
+    gLocalCoopDialogControllerState = {};
+    gLocalCoopModalControllerState = {};
+    gLocalCoopGenericUiControllerState = {};
+    gLocalCoopInteractionState = {};
+
+    gLocalCoopLegacyYieldQueued = false;
+    gLocalCoopNextLegacyYieldTick = 0;
+    gLocalCoopRuntimeInsideTick = false;
+    gLocalCoopModeSyncOwnsPlayerOne = false;
+
+    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
+        player.uiMode = LocalCoopUiMode::World;
+        player.wantsRun = false;
+        player.moveX = 0;
+        player.moveY = 0;
+        player.aimX = 0;
+        player.aimY = 0;
+    }
+}
+
 inline int localCoopMainInputGetInput()
 {
     localCoopModeSyncEnsureTicker();
@@ -70,6 +111,8 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
     char** argv)
 {
     unifiedCampaignConfigureFromArgs(argc, argv);
+    unifiedCampaignSetBeforeGameResetHook(localCoopResetTransientStateForLoad);
+
     if (!unifiedCampaignActivateContentRoot()) {
         return -1;
     }
