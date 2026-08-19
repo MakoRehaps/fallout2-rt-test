@@ -3,6 +3,7 @@
 
 #include "db.h"
 #include "unified_campaign.h"
+#include "unified_fallout1_encounter_bridge.h"
 #include "unified_fallout1_worldmap_state.h"
 #include "unified_worldmap_audio_profile.h"
 
@@ -26,6 +27,7 @@ inline int unifiedWmWorldMapInit()
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
     unifiedFallout1MapMusicResetOverrides();
+    unifiedFallout1EncounterBridgeReset();
     unifiedFallout1WorldMapResetCurrent();
     return 0;
 }
@@ -42,6 +44,7 @@ inline void unifiedWmWorldMapExit()
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
     unifiedFallout1MapMusicResetOverrides();
+    unifiedFallout1EncounterBridgeReset();
 }
 
 inline int unifiedWmWorldMapReset()
@@ -50,11 +53,10 @@ inline int unifiedWmWorldMapReset()
         return wmWorldMap_reset();
     }
 
-    // Runtime music overrides are not part of Fallout 1's original world-map
-    // save payload. Clear them on every engine reset, including load resets;
-    // scripts can reapply any transient music change after their saved state is
-    // restored, while an old game's override can never leak into another slot.
+    // Runtime music overrides and forced encounters are transient and are not
+    // part of Fallout 1's original world-map save payload.
     unifiedFallout1MapMusicResetOverrides();
+    unifiedFallout1EncounterBridgeReset();
 
     if (unifiedFallout1WorldMapConsumePreserveReset()) {
         return 0;
