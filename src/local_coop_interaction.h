@@ -6,9 +6,9 @@
 #include "actions.h"
 #include "item.h"
 #include "local_coop.h"
+#include "local_coop_focus.h"
 #include "object.h"
 #include "proto_types.h"
-#include "tile.h"
 
 namespace fallout {
 
@@ -19,65 +19,6 @@ struct LocalCoopInteractionState {
 
 inline LocalCoopInteractionState gLocalCoopInteractionState;
 
-inline Object* localCoopFindInteractionObjectAtTile(Object* actor, int tile)
-{
-    if (actor == nullptr || !tileIsValid(tile)) {
-        return nullptr;
-    }
-
-    Object* best = nullptr;
-    Object* object = objectFindFirstAtLocation(actor->elevation, tile);
-    while (object != nullptr) {
-        if (object != actor && (object->flags & OBJECT_HIDDEN) == 0) {
-            int objectType = PID_TYPE(object->pid);
-
-            // Prefer living critters (dialogue) and containers/scenery over
-            // loose floor items if several objects share the same tile.
-            if (objectType == OBJ_TYPE_CRITTER
-                && (object->data.critter.combat.results & DAM_DEAD) == 0) {
-                return object;
-            }
-
-            if (objectType == OBJ_TYPE_SCENERY) {
-                best = object;
-            } else if (best == nullptr && objectType == OBJ_TYPE_ITEM) {
-                best = object;
-            } else if (best == nullptr && objectType == OBJ_TYPE_CRITTER) {
-                best = object;
-            }
-        }
-
-        object = objectFindNextAtLocation();
-    }
-
-    return best;
-}
-
-inline Object* localCoopFindPlayerOneInteractionTarget()
-{
-    LocalCoopPlayer& player = gLocalCoopPlayers[0];
-    Object* actor = player.actor;
-    if (actor == nullptr) {
-        return nullptr;
-    }
-
-    // Right stick chooses the interaction direction when held. Otherwise use
-    // the actor's current facing so interaction remains natural with one stick.
-    int rotation = localCoopDirectionFromStick(player.aimX, player.aimY);
-    if (rotation == -1) {
-        rotation = actor->rotation;
-    }
-
-    int frontTile = tileGetTileInDirection(actor->tile, rotation, 1);
-    Object* target = localCoopFindInteractionObjectAtTile(actor, frontTile);
-    if (target != nullptr) {
-        return target;
-    }
-
-    // Loose items and some scenery can occupy the player's current tile.
-    return localCoopFindInteractionObjectAtTile(actor, actor->tile);
-}
-
 inline bool localCoopPlayerOneInteract()
 {
     LocalCoopPlayer& player = gLocalCoopPlayers[0];
@@ -86,7 +27,10 @@ inline bool localCoopPlayerOneInteract()
         return false;
     }
 
-    Object* target = localCoopFindPlayerOneInteractionTarget();
+    // Controller-native interaction: no virtual mouse. Right-stick direction
+    // establishes a soft focus wedge; A dispatches the stock Fallout action for
+    // the focused object directly.
+    Object* target = localCoopFocusFindInteractable(player);
     if (target == nullptr) {
         return false;
     }
@@ -98,8 +42,7 @@ inline bool localCoopPlayerOneInteract()
         }
 
         if (_action_can_talk_to(actor, target) == 0) {
-            int rc = actionTalk(actor, target);
-            return rc == 0;
+            return actionTalk(actor, target) == 0;
         }
 
         return _action_use_an_object(actor, target) == 0;
