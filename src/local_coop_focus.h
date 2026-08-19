@@ -283,11 +283,16 @@ inline Object* localCoopFocusUpdateForPlayer(LocalCoopPlayer& player)
     bool hostile = false;
 
     if (player.uiMode == LocalCoopUiMode::World) {
-        if (isInCombat()) {
+        bool activelyAiming = localCoopDirectionFromStick(player.aimX, player.aimY) != -1;
+
+        if (isInCombat() || activelyAiming) {
             focusTarget = localCoopFocusFindEnemy(player);
             hostile = focusTarget != nullptr;
-        } else if (player.slot == 0) {
+        }
+
+        if (focusTarget == nullptr && player.slot == 0) {
             focusTarget = localCoopFocusFindInteractable(player);
+            hostile = false;
         }
     }
 
