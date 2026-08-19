@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <string>
 
 namespace fallout {
@@ -20,6 +26,7 @@ enum class UnifiedGameId : uint32_t {
 struct UnifiedCampaignRuntime {
     bool initialized = false;
     bool unifiedCampaign = false;
+    bool contentRootActivated = false;
     UnifiedGameId activeGame = UnifiedGameId::Fallout2;
     std::string fallout1Root;
     std::string fallout2Root;
@@ -63,11 +70,16 @@ inline void unifiedCampaignSetRoot(UnifiedGameId game, const char* root)
     } else {
         gUnifiedCampaignRuntime.fallout2Root = value;
     }
+
+    gUnifiedCampaignRuntime.contentRootActivated = false;
 }
 
 inline void unifiedCampaignSetActiveGame(UnifiedGameId game)
 {
-    gUnifiedCampaignRuntime.activeGame = game;
+    if (gUnifiedCampaignRuntime.activeGame != game) {
+        gUnifiedCampaignRuntime.activeGame = game;
+        gUnifiedCampaignRuntime.contentRootActivated = false;
+    }
 }
 
 inline UnifiedGameId unifiedCampaignGetActiveGame()
@@ -111,6 +123,34 @@ inline std::string unifiedCampaignResolvePath(const char* relativePath)
 #endif
     path.append(relativePath);
     return path;
+}
+
+inline bool unifiedCampaignActivateContentRoot()
+{
+    if (gUnifiedCampaignRuntime.contentRootActivated) {
+        return true;
+    }
+
+    const std::string& root = unifiedCampaignGetActiveRoot();
+    if (root.empty()) {
+        // Empty root preserves Fallout CE's normal behavior: data is resolved
+        // relative to the executable/current working directory.
+        gUnifiedCampaignRuntime.contentRootActivated = true;
+        return true;
+    }
+
+#if defined(_WIN32)
+    int rc = _chdir(root.c_str());
+#else
+    int rc = chdir(root.c_str());
+#endif
+
+    if (rc != 0) {
+        return false;
+    }
+
+    gUnifiedCampaignRuntime.contentRootActivated = true;
+    return true;
 }
 
 inline const char* unifiedCampaignGetWindowTitle(const char* fallback)
@@ -168,11 +208,11 @@ inline void unifiedCampaignConfigureFromArgs(int argc, char** argv)
 
         if (strcmp(arg, "--unified") == 0) {
             gUnifiedCampaignRuntime.unifiedCampaign = true;
-            gUnifiedCampaignRuntime.activeGame = UnifiedGameId::Fallout1;
+            unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
         } else if (strcmp(arg, "--fallout1") == 0) {
-            gUnifiedCampaignRuntime.activeGame = UnifiedGameId::Fallout1;
+            unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
         } else if (strcmp(arg, "--fallout2") == 0) {
-            gUnifiedCampaignRuntime.activeGame = UnifiedGameId::Fallout2;
+            unifiedCampaignSetActiveGame(UnifiedGameId::Fallout2);
         } else if (unifiedCampaignStartsWith(arg, "--fallout1-root=")) {
             unifiedCampaignSetRoot(UnifiedGameId::Fallout1, arg + strlen("--fallout1-root="));
         } else if (unifiedCampaignStartsWith(arg, "--fallout2-root=")) {
@@ -188,8 +228,8 @@ inline bool unifiedCampaignAdvanceToFallout2()
         return false;
     }
 
-    gUnifiedCampaignRuntime.activeGame = UnifiedGameId::Fallout2;
-    return true;
+    unifiedCampaignSetActiveGame(UnifiedGameId::Fallout2);
+    return unifiedCampaignActivateContentRoot();
 }
 
 inline UnifiedCampaignSaveHeader unifiedCampaignMakeSaveHeader()
@@ -214,7 +254,7 @@ inline bool unifiedCampaignApplySaveHeader(const UnifiedCampaignSaveHeader& head
         return false;
     }
 
-    gUnifiedCampaignRuntime.activeGame = static_cast<UnifiedGameId>(header.activeGame);
+    unifiedCampaignSetActiveGame(static_cast<UnifiedGameId>(header.activeGame));
     gUnifiedCampaignRuntime.unifiedCampaign = (header.flags & kUnifiedCampaignSaveFlagUnified) != 0;
     return true;
 }
