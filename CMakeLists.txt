@@ -316,6 +316,14 @@ set_source_files_properties(
     PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_UNIFIED_PROFILE_SETTINGS"
 )
 
+# game.cc is the caller of sfallConfigInit during engine bootstrap. Override the
+# F1 calendar defaults there, before scripts.cc reads StartYear/Month/Day, while
+# leaving the real sfall_config.cc implementation and the user's ddraw.ini alone.
+set_source_files_properties(
+    "src/game.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_UNIFIED_PROFILE_SFALL"
+)
+
 if(IOS)
     target_sources(${EXECUTABLE_NAME} PUBLIC
         "src/platform/ios/paths.h"
