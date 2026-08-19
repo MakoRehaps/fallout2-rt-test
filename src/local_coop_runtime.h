@@ -20,7 +20,8 @@
 
 namespace fallout {
 
-inline constexpr Uint32 kLocalCoopLegacySchedulerHeartbeatMs = 50;
+inline constexpr Uint32 kLocalCoopInitialSchedulerHeartbeatMs = 200;
+inline constexpr Uint32 kLocalCoopBookkeepingHeartbeatMs = 1000;
 
 struct LocalCoopRuntimeSlot {
     Uint32 nextPrimaryAttackTick = 0;
@@ -171,6 +172,16 @@ inline void localCoopSuppressHumanCompanionAi()
     }
 }
 
+inline Uint32 localCoopLegacyHeartbeatDelay()
+{
+    // Before the first legacy pass, use a short heartbeat so NPCs are quickly
+    // discovered/registered. Once registered, action permission belongs to the
+    // realtime clocks, so legacy rounds can slow down to bookkeeping cadence.
+    return localCoopRealtimeAiHasRegisteredActors()
+        ? kLocalCoopBookkeepingHeartbeatMs
+        : kLocalCoopInitialSchedulerHeartbeatMs;
+}
+
 inline void localCoopYieldLegacyPlayerTurn()
 {
     if (!isInCombat() || !gLocalCoopRealtimeCombatActive) {
@@ -189,13 +200,13 @@ inline void localCoopYieldLegacyPlayerTurn()
     if (!gLocalCoopLegacyYieldQueued
         && (gLocalCoopNextLegacyYieldTick == 0
             || localCoopTickReached(now, gLocalCoopNextLegacyYieldTick))) {
-        // The player turn is now only a scheduler heartbeat. While it remains
-        // open, Fallout keeps calling input/tickers, so all four controllers,
-        // movement, attacks and live overlays continue to update. Yield after a
-        // short wall-clock interval to let the next NPC action slices run.
+        // The player turn is only a legacy bookkeeping heartbeat. While it is
+        // open, Fallout keeps calling input/tickers and the independent NPC AI
+        // clocks are free to act. Yield occasionally so combat scripts,
+        // sequence maintenance and end-condition checks still run.
         enqueueInputEvent(KEY_SPACE);
         gLocalCoopLegacyYieldQueued = true;
-        gLocalCoopNextLegacyYieldTick = now + kLocalCoopLegacySchedulerHeartbeatMs;
+        gLocalCoopNextLegacyYieldTick = now + localCoopLegacyHeartbeatDelay();
     }
 }
 
@@ -287,10 +298,10 @@ inline void localCoopProcessWorldCombatStart()
                 }
 
                 localCoopRealtimeAiReset();
-                gLocalCoopNextLegacyYieldTick = SDL_GetTicks() + kLocalCoopLegacySchedulerHeartbeatMs;
+                gLocalCoopNextLegacyYieldTick = SDL_GetTicks() + kLocalCoopInitialSchedulerHeartbeatMs;
                 gLocalCoopRealtimeCombatActive = true;
 
-                CombatStartData csd{};
+                CombatStartData csd {};
                 csd.attacker = player.actor;
                 csd.defender = target;
                 _combat(&csd);
@@ -390,12 +401,21 @@ inline void localCoopRuntimeTick()
         localCoopInit();
     }
 
+    // Install the AI dispatcher only after co-op initialization. Outside combat
+    // the bridge falls straight through to Fallout's stock AI implementation.
+    localCoopRealtimeAiInstall();
+
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
 
     if (isInCombat()) {
         gLocalCoopRealtimeCombatActive = true;
         localCoopSuppressHumanCompanionAi();
+
+        // NPC permission to act now lives here, once per frame, independently
+        // from `_combat_turn`. Registered actors each own a wall-clock cooldown.
+        localCoopRealtimeAiTick();
+
         localCoopProcessCombatInput();
         localCoopYieldLegacyPlayerTurn();
     } else {
