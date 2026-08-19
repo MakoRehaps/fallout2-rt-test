@@ -293,9 +293,8 @@ void wmForceEncounter(int map, unsigned int flags);
 // includes worldmap.h first. Install the F1 travel redirect only in the former
 // translation-unit shape; stock Fallout 2 worldmap.cc never sees this include.
 #if defined(SCRIPTS_H)
-#include "unified_fallout1_travel_profile.h"
-#include "unified_fallout1_worldmap_visual.h"
-#define wmWorldMap unifiedWmWorldMapVisual
+#include "unified_fallout1_worldmap_runtime.h"
+#define wmWorldMap unifiedWmWorldMapRuntime
 #define wmTownMap unifiedWmTownMap
 #endif
 
