@@ -204,7 +204,7 @@ inline int unifiedWmAreaMarkVisited(int areaIdx)
         return wmAreaMarkVisited(areaIdx);
     }
 
-    return unifiedWmAreaMarkVisitedState(areaIdx, 2) ? 0 : -1;
+    return unifiedWmAreaMarkVisitedState(areaIdx, 2);
 }
 
 inline bool unifiedWmAreaSetVisibleState(int areaIdx, int state, bool force)
