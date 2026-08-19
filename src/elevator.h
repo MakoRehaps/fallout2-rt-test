@@ -1,6 +1,12 @@
 #ifndef ELEVATOR_H
 #define ELEVATOR_H
 
+// combat.cc includes elevator.h after combat_ai.h, while combat_ai.cc does not.
+// This gives the co-op engine a narrow interception point for NPC turns without
+// rewriting the large legacy combat implementation or renaming the original AI
+// function itself.
+#include "local_coop_ai_realtime.h"
+
 namespace fallout {
 
 typedef enum Elevator {
@@ -36,5 +42,10 @@ int elevatorSelectLevel(int elevator, int* mapPtr, int* elevationPtr, int* tileP
 void elevatorsInit();
 
 } // namespace fallout
+
+// Redirect only translation units that include elevator.h after combat_ai.h
+// (notably combat.cc). The original _combat_ai implementation remains intact
+// inside combat_ai.cc and is called by localCoopRealtimeAiTurn.
+#define _combat_ai localCoopRealtimeAiTurn
 
 #endif /* ELEVATOR_H */
