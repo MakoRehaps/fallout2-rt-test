@@ -97,11 +97,8 @@ inline bool localCoopPlayerOneInteract()
             return _action_loot_container(actor, target) == 0;
         }
 
-        if (_action_can_talk_to(actor, target) != 0) {
-            LocalCoopUiMode previousMode = player.uiMode;
-            player.uiMode = LocalCoopUiMode::Dialogue;
+        if (_action_can_talk_to(actor, target) == 0) {
             int rc = actionTalk(actor, target);
-            player.uiMode = previousMode;
             return rc == 0;
         }
 
