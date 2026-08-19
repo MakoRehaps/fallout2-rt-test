@@ -3,6 +3,14 @@
 
 #include <stddef.h>
 
+#ifdef LOCAL_COOP_LOADSAVE_META
+#include <string.h>
+
+#include <string>
+
+#include "unified_campaign.h"
+#endif
+
 #include "xfile.h"
 
 namespace fallout {
@@ -62,6 +70,93 @@ int fileNameListInit(const char* pattern, char*** fileNames, int a3, int a4);
 void fileNameListFree(char*** fileNames, int a2);
 int fileGetSize(File* stream);
 void fileSetReadProgressHandler(FileReadProgressHandler* handler, int size);
+
+#ifdef LOCAL_COOP_LOADSAVE_META
+inline bool localCoopLoadSaveIsSaveDatPath(const char* filename)
+{
+    if (filename == nullptr) {
+        return false;
+    }
+
+    size_t length = strlen(filename);
+    static constexpr const char* kSaveName = "SAVE.DAT";
+    static constexpr size_t kSaveNameLength = 8;
+    if (length < kSaveNameLength) {
+        return false;
+    }
+
+    return strcmp(filename + length - kSaveNameLength, kSaveName) == 0;
+}
+
+inline std::string localCoopLoadSaveMetaPath(const char* saveDatPath)
+{
+    std::string path = saveDatPath != nullptr ? saveDatPath : "";
+    if (path.size() >= 8) {
+        path.resize(path.size() - 8);
+    }
+    path.append("COOPMETA.SAV");
+    return path;
+}
+
+inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
+{
+    unifiedCampaignClearPendingSaveHeader();
+
+    std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
+    File* meta = fileOpen(metaPath.c_str(), "rb");
+    if (meta == nullptr) {
+        return;
+    }
+
+    UnifiedCampaignSaveHeader header{};
+    bool readOk = fileRead(&header, sizeof(header), 1, meta) == 1;
+    fileClose(meta);
+
+    if (readOk) {
+        unifiedCampaignStageSaveHeader(header);
+    }
+}
+
+inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
+{
+    std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
+    File* meta = fileOpen(metaPath.c_str(), "wb");
+    if (meta == nullptr) {
+        return;
+    }
+
+    UnifiedCampaignSaveHeader header = unifiedCampaignMakeSaveHeader();
+    fileWrite(&header, sizeof(header), 1, meta);
+    fileClose(meta);
+}
+
+inline File* localCoopLoadSaveFileOpen(const char* filename, const char* mode)
+{
+    bool isSaveDat = localCoopLoadSaveIsSaveDatPath(filename);
+
+    if (isSaveDat && mode != nullptr && strcmp(mode, "rb") == 0) {
+        // Stage only. Slot-list/header scans also open SAVE.DAT; the metadata is
+        // not applied until loadsave.cc reaches its real _PrepLoad -> gameReset
+        // path. That keeps simply browsing the load menu from switching games.
+        localCoopLoadSaveStageCampaignMeta(filename);
+    }
+
+    File* stream = fileOpen(filename, mode);
+
+    if (stream != nullptr
+        && isSaveDat
+        && mode != nullptr
+        && strcmp(mode, "wb") == 0) {
+        // The slot directory already exists by the time loadsave.cc creates
+        // SAVE.DAT, so the small engine metadata sidecar can safely be written.
+        localCoopLoadSaveWriteCampaignMeta(filename);
+    }
+
+    return stream;
+}
+
+#define fileOpen localCoopLoadSaveFileOpen
+#endif
 
 } // namespace fallout
 
