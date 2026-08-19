@@ -31,4 +31,14 @@ Object* inven_get_current_target_obj();
 
 } // namespace fallout
 
+// game_dialog.cc receives this header while object.h is being expanded. Route
+// that one external trade call through the controller-native wrapper. The
+// inventory.cc implementation includes inventory.h directly, so it keeps the
+// original symbol untouched and remains available as the mouse/keyboard
+// fallback inside local_coop_barter_ui.h.
+#if defined(OBJECT_H) && defined(GAME_DIALOG_H)
+#include "local_coop_barter_ui.h"
+#define inventoryOpenTrade localCoopInventoryOpenTrade
+#endif
+
 #endif /* INVENTORY_H */
