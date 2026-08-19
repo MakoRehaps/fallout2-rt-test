@@ -1,10 +1,14 @@
 #ifndef ELEVATOR_H
 #define ELEVATOR_H
 
-// combat.cc includes elevator.h after combat_ai.h, while combat_ai.cc does not.
-// This gives the co-op engine a narrow interception point for NPC turns without
-// rewriting the large legacy combat implementation or renaming the original AI
-// function itself.
+// Capture whether combat_ai.h was already included BEFORE pulling in the
+// realtime helper below. combat.cc includes combat_ai.h before elevator.h;
+// scripts.cc includes elevator.h without it. This gives us a translation-unit
+// discriminator that does not leak macro redirects into scripts.cc.
+#if defined(COMBAT_AI_H)
+#define LOCAL_COOP_COMBAT_CC_INTERCEPTS
+#endif
+
 #include "local_coop_ai_realtime.h"
 
 namespace fallout {
@@ -43,11 +47,12 @@ void elevatorsInit();
 
 } // namespace fallout
 
-// Redirect the legacy combat AI call sites to the realtime action-slice
-// dispatcher. Do not macro-redirect gameTimeAddSeconds here: elevator.h is also
-// included by scripts.cc, so that name would leak into the real function
-// definition. The wall-clock helper remains available for a safer combat-only
-// hook later.
+#ifdef LOCAL_COOP_COMBAT_CC_INTERCEPTS
+// Only combat.cc sees these redirects. The original implementations remain
+// intact in combat_ai.cc/scripts.cc and are called from our realtime helpers.
 #define _combat_ai localCoopRealtimeAiTurn
+#define gameTimeAddSeconds localCoopRealtimeCombatAdvanceTime
+#undef LOCAL_COOP_COMBAT_CC_INTERCEPTS
+#endif
 
 #endif /* ELEVATOR_H */
