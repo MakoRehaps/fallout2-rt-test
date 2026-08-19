@@ -287,6 +287,18 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/touch.h"
 )
 
+# These stock P1 screens normally call isoDisable(), which stops world object
+# animation and critter script tickers. In local co-op they keep the ISO
+# simulation alive so P2-P4 continue moving/fighting while P1 uses the modal.
+# Options, save/load, movies and map transitions are intentionally not included.
+set_source_files_properties(
+    "src/game_dialog.cc"
+    "src/pipboy.cc"
+    "src/character_editor.cc"
+    "src/skilldex.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_KEEP_ISO_LIVE"
+)
+
 if(IOS)
     target_sources(${EXECUTABLE_NAME} PUBLIC
         "src/platform/ios/paths.h"
