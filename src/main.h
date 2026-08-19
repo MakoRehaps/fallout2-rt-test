@@ -45,7 +45,7 @@ inline void localCoopResetTransientStateForLoad()
     gLocalCoopDialogControllerState = {};
     gLocalCoopModalControllerState = {};
     gLocalCoopGenericUiControllerState = {};
-    gLocalCoopInteractionState = {};
+    gLocalCoopInteractionStates = {};
 
     gLocalCoopLegacyYieldQueued = false;
     gLocalCoopNextLegacyYieldTick = 0;
