@@ -15,9 +15,6 @@
 
 namespace fallout {
 
-// Engine-only campaign selector for running Fallout 1 and Fallout 2 content
-// through one executable. This layer deliberately owns no art, maps, movies,
-// dialogue, or other replacement content.
 enum class UnifiedGameId : uint32_t {
     Fallout1 = 1,
     Fallout2 = 2,
@@ -29,13 +26,11 @@ struct UnifiedCampaignRuntime {
     bool contentRootActivated = false;
     bool loadedSaveRequiresContentReload = false;
     UnifiedGameId activeGame = UnifiedGameId::Fallout2;
+    UnifiedGameId requestedContentGame = UnifiedGameId::Fallout2;
     std::string fallout1Root;
     std::string fallout2Root;
 };
 
-// Header stored beside the stock SAVE.DAT. The normal Fallout save data remains
-// owned by the existing engine; this identifies which content namespace must be
-// active when that slot is restored.
 struct UnifiedCampaignSaveHeader {
     uint32_t magic;
     uint32_t version;
@@ -151,8 +146,6 @@ inline bool unifiedCampaignActivateContentRoot()
 
     const std::string& root = unifiedCampaignGetActiveRoot();
     if (root.empty()) {
-        // Empty root preserves Fallout CE's normal behavior: data is resolved
-        // relative to the executable/current working directory.
         gUnifiedCampaignRuntime.contentRootActivated = true;
         return true;
     }
@@ -201,14 +194,6 @@ inline void unifiedCampaignConfigureFromEnvironment()
     }
 }
 
-// Supported engine switches:
-//   --unified                 Start the combined campaign in Fallout 1 mode.
-//   --fallout1                Run the Fallout 1 content namespace.
-//   --fallout2                Run the Fallout 2 content namespace.
-//   --fallout1-root=<path>    Root containing the user's Fallout 1 data.
-//   --fallout2-root=<path>    Root containing the user's Fallout 2 data.
-//
-// Content remains user-supplied; this code does not bundle or generate assets.
 inline void unifiedCampaignConfigureFromArgs(int argc, char** argv)
 {
     if (gUnifiedCampaignRuntime.initialized) {
@@ -237,6 +222,8 @@ inline void unifiedCampaignConfigureFromArgs(int argc, char** argv)
             unifiedCampaignSetRoot(UnifiedGameId::Fallout2, arg + strlen("--fallout2-root="));
         }
     }
+
+    gUnifiedCampaignRuntime.requestedContentGame = gUnifiedCampaignRuntime.activeGame;
 }
 
 inline bool unifiedCampaignAdvanceToFallout2()
@@ -247,6 +234,7 @@ inline bool unifiedCampaignAdvanceToFallout2()
     }
 
     unifiedCampaignSetActiveGame(UnifiedGameId::Fallout2);
+    gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout2;
     return unifiedCampaignActivateContentRoot();
 }
 
@@ -275,6 +263,7 @@ inline bool unifiedCampaignApplySaveHeader(const UnifiedCampaignSaveHeader& head
     UnifiedGameId savedGame = static_cast<UnifiedGameId>(header.activeGame);
     gUnifiedCampaignRuntime.loadedSaveRequiresContentReload =
         savedGame != gUnifiedCampaignRuntime.activeGame;
+    gUnifiedCampaignRuntime.requestedContentGame = savedGame;
 
     unifiedCampaignSetActiveGame(savedGame);
     gUnifiedCampaignRuntime.unifiedCampaign = (header.flags & kUnifiedCampaignSaveFlagUnified) != 0;
@@ -299,6 +288,23 @@ inline bool unifiedCampaignStageSaveHeader(const UnifiedCampaignSaveHeader& head
 
     gUnifiedCampaignPendingSaveHeader = header;
     gUnifiedCampaignPendingSaveHeaderValid = true;
+    return true;
+}
+
+inline bool unifiedCampaignRejectPendingCrossProfileLoad()
+{
+    if (!gUnifiedCampaignPendingSaveHeaderValid) {
+        return false;
+    }
+
+    UnifiedGameId savedGame = static_cast<UnifiedGameId>(gUnifiedCampaignPendingSaveHeader.activeGame);
+    if (savedGame == gUnifiedCampaignRuntime.activeGame) {
+        return false;
+    }
+
+    gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = true;
+    gUnifiedCampaignRuntime.requestedContentGame = savedGame;
+    unifiedCampaignClearPendingSaveHeader();
     return true;
 }
 
