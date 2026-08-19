@@ -245,10 +245,10 @@ inline int unifiedWmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr)
 } // namespace fallout
 
 // worldmap.cc includes worldmap.h before any transitive map.h include. In that
-// translation unit WORLDMAP_H is therefore already defined: keep the stock F2
+// translation unit WORLD_MAP_H is therefore already defined: keep the stock F2
 // function definitions unrenamed. Loaded-map/gameplay callers that enter through
 // map.h first receive the profile remaps below.
-#ifndef WORLDMAP_H
+#ifndef WORLD_MAP_H
 #define wmMapMaxCount unifiedWmMapMaxCount
 #define wmMapIdxToName unifiedWmMapIdxToName
 #define wmMapMatchNameToIdx unifiedWmMapMatchNameToIdx
