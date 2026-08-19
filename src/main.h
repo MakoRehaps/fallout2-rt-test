@@ -1,6 +1,7 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#include "local_coop_dialog_controller.h"
 #include "local_coop_interaction.h"
 #include "local_coop_inventory_ui.h"
 #include "local_coop_mode_sync.h"
@@ -18,6 +19,7 @@ int inputGetInput();
 inline int localCoopMainInputGetInput()
 {
     localCoopModeSyncEnsureTicker();
+    localCoopDialogControllerEnsureTicker();
     localCoopSyncLegacyModes();
     localCoopRuntimeTick();
     localCoopFocusTick();
