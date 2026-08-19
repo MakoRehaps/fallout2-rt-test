@@ -3,8 +3,8 @@
 
 // Capture whether combat_ai.h was already included BEFORE pulling in the
 // realtime helper below. combat.cc includes combat_ai.h before elevator.h;
-// scripts.cc includes elevator.h without it. This gives us a translation-unit
-// discriminator that does not leak macro redirects into scripts.cc.
+// scripts.cc includes elevator.h without it. This keeps the combat-time clock
+// redirect scoped to combat.cc without leaking it into scripts.cc.
 #if defined(COMBAT_AI_H)
 #define LOCAL_COOP_COMBAT_CC_INTERCEPTS
 #endif
@@ -48,9 +48,8 @@ void elevatorsInit();
 } // namespace fallout
 
 #ifdef LOCAL_COOP_COMBAT_CC_INTERCEPTS
-// Only combat.cc sees these redirects. The original implementations remain
-// intact in combat_ai.cc/scripts.cc and are called from our realtime helpers.
-#define _combat_ai localCoopRealtimeAiTurn
+// AI routing is now owned by combat_ai.h's single dispatcher. Keep only the
+// combat.cc-specific game-time redirect here.
 #define gameTimeAddSeconds localCoopRealtimeCombatAdvanceTime
 #undef LOCAL_COOP_COMBAT_CC_INTERCEPTS
 #endif
