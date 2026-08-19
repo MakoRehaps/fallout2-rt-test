@@ -1,6 +1,20 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+// Finish the normal dialogue/interpreter/object header chain first. inventory.h
+// installs a lightweight dialogue-side dispatcher, not the heavy barter UI.
+#include "game_dialog.h"
+
+// Compile the controller barter implementation only after the stock engine
+// types are complete. Its internal stock fallback must name the renamed stock
+// implementation directly rather than re-entering the dialogue dispatcher.
+#ifdef inventoryOpenTrade
+#undef inventoryOpenTrade
+#endif
+#define inventoryOpenTrade inventoryOpenTradeStock
+#include "local_coop_barter_ui.h"
+#undef inventoryOpenTrade
+
 #include "local_coop_controller_bridge.h"
 #include "local_coop_dialog_controller.h"
 #include "local_coop_generic_ui_controller.h"
@@ -91,6 +105,7 @@ inline void localCoopResetTickerRegistrationAfterEngineExit()
 inline int localCoopMainInputGetInput()
 {
     gLocalCoopControllerLookup = localCoopResolveAssignedController;
+    gInventoryOpenTradeControllerHandler = localCoopInventoryOpenTrade;
 
     localCoopModeSyncEnsureTicker();
     localCoopDialogControllerEnsureTicker();
