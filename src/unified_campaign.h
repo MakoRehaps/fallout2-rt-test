@@ -27,14 +27,15 @@ struct UnifiedCampaignRuntime {
     bool initialized = false;
     bool unifiedCampaign = false;
     bool contentRootActivated = false;
+    bool loadedSaveRequiresContentReload = false;
     UnifiedGameId activeGame = UnifiedGameId::Fallout2;
     std::string fallout1Root;
     std::string fallout2Root;
 };
 
-// Header reserved for the unified save wrapper. The normal Fallout save data
-// remains owned by the existing engine; this only identifies which content
-// namespace must be active when that save is restored.
+// Header stored beside the stock SAVE.DAT. The normal Fallout save data remains
+// owned by the existing engine; this identifies which content namespace must be
+// active when that slot is restored.
 struct UnifiedCampaignSaveHeader {
     uint32_t magic;
     uint32_t version;
@@ -47,6 +48,8 @@ inline constexpr uint32_t kUnifiedCampaignSaveVersion = 1;
 inline constexpr uint32_t kUnifiedCampaignSaveFlagUnified = 0x01;
 
 inline UnifiedCampaignRuntime gUnifiedCampaignRuntime;
+inline UnifiedCampaignSaveHeader gUnifiedCampaignPendingSaveHeader{};
+inline bool gUnifiedCampaignPendingSaveHeaderValid = false;
 
 inline bool unifiedCampaignStartsWith(const char* value, const char* prefix)
 {
@@ -254,9 +257,45 @@ inline bool unifiedCampaignApplySaveHeader(const UnifiedCampaignSaveHeader& head
         return false;
     }
 
-    unifiedCampaignSetActiveGame(static_cast<UnifiedGameId>(header.activeGame));
+    UnifiedGameId savedGame = static_cast<UnifiedGameId>(header.activeGame);
+    gUnifiedCampaignRuntime.loadedSaveRequiresContentReload =
+        savedGame != gUnifiedCampaignRuntime.activeGame;
+
+    unifiedCampaignSetActiveGame(savedGame);
     gUnifiedCampaignRuntime.unifiedCampaign = (header.flags & kUnifiedCampaignSaveFlagUnified) != 0;
     return true;
+}
+
+inline void unifiedCampaignClearPendingSaveHeader()
+{
+    gUnifiedCampaignPendingSaveHeader = UnifiedCampaignSaveHeader{};
+    gUnifiedCampaignPendingSaveHeaderValid = false;
+}
+
+inline bool unifiedCampaignStageSaveHeader(const UnifiedCampaignSaveHeader& header)
+{
+    if (header.magic != kUnifiedCampaignSaveMagic
+        || header.version != kUnifiedCampaignSaveVersion
+        || (header.activeGame != static_cast<uint32_t>(UnifiedGameId::Fallout1)
+            && header.activeGame != static_cast<uint32_t>(UnifiedGameId::Fallout2))) {
+        unifiedCampaignClearPendingSaveHeader();
+        return false;
+    }
+
+    gUnifiedCampaignPendingSaveHeader = header;
+    gUnifiedCampaignPendingSaveHeaderValid = true;
+    return true;
+}
+
+inline bool unifiedCampaignApplyPendingSaveHeader()
+{
+    if (!gUnifiedCampaignPendingSaveHeaderValid) {
+        return false;
+    }
+
+    UnifiedCampaignSaveHeader header = gUnifiedCampaignPendingSaveHeader;
+    unifiedCampaignClearPendingSaveHeader();
+    return unifiedCampaignApplySaveHeader(header);
 }
 
 } // namespace fallout
