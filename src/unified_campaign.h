@@ -43,13 +43,28 @@ struct UnifiedCampaignSaveHeader {
     uint32_t flags;
 };
 
+using UnifiedCampaignBeforeGameResetHook = void (*)();
+
 inline constexpr uint32_t kUnifiedCampaignSaveMagic = 0x4643554E; // "FCUN"
 inline constexpr uint32_t kUnifiedCampaignSaveVersion = 1;
 inline constexpr uint32_t kUnifiedCampaignSaveFlagUnified = 0x01;
 
 inline UnifiedCampaignRuntime gUnifiedCampaignRuntime;
-inline UnifiedCampaignSaveHeader gUnifiedCampaignPendingSaveHeader{};
+inline UnifiedCampaignSaveHeader gUnifiedCampaignPendingSaveHeader {};
 inline bool gUnifiedCampaignPendingSaveHeaderValid = false;
+inline UnifiedCampaignBeforeGameResetHook gUnifiedCampaignBeforeGameResetHook = nullptr;
+
+inline void unifiedCampaignSetBeforeGameResetHook(UnifiedCampaignBeforeGameResetHook hook)
+{
+    gUnifiedCampaignBeforeGameResetHook = hook;
+}
+
+inline void unifiedCampaignRunBeforeGameResetHook()
+{
+    if (gUnifiedCampaignBeforeGameResetHook != nullptr) {
+        gUnifiedCampaignBeforeGameResetHook();
+    }
+}
 
 inline bool unifiedCampaignStartsWith(const char* value, const char* prefix)
 {
@@ -237,7 +252,7 @@ inline bool unifiedCampaignAdvanceToFallout2()
 
 inline UnifiedCampaignSaveHeader unifiedCampaignMakeSaveHeader()
 {
-    UnifiedCampaignSaveHeader header{};
+    UnifiedCampaignSaveHeader header {};
     header.magic = kUnifiedCampaignSaveMagic;
     header.version = kUnifiedCampaignSaveVersion;
     header.activeGame = static_cast<uint32_t>(gUnifiedCampaignRuntime.activeGame);
@@ -268,7 +283,7 @@ inline bool unifiedCampaignApplySaveHeader(const UnifiedCampaignSaveHeader& head
 
 inline void unifiedCampaignClearPendingSaveHeader()
 {
-    gUnifiedCampaignPendingSaveHeader = UnifiedCampaignSaveHeader{};
+    gUnifiedCampaignPendingSaveHeader = UnifiedCampaignSaveHeader {};
     gUnifiedCampaignPendingSaveHeaderValid = false;
 }
 
