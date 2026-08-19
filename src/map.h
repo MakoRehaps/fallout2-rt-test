@@ -87,6 +87,27 @@ void _map_exit();
 void isoEnable();
 bool isoDisable();
 bool isoIsDisabled();
+
+// Selected P1 modal source files are compiled with
+// LOCAL_COOP_KEEP_ISO_LIVE. Redirect only their local call sites so opening a
+// dialogue/Pip-Boy/character/skill window does not stop object animation or
+// critter-script tickers. map.cc itself and all other systems still use the
+// stock isoEnable/isoDisable implementation, so Options, Save/Load, movies and
+// map transitions retain their normal global pause behavior.
+#ifdef LOCAL_COOP_KEEP_ISO_LIVE
+inline void localCoopModalIsoEnable()
+{
+}
+
+inline bool localCoopModalIsoDisable()
+{
+    return false;
+}
+
+#define isoEnable localCoopModalIsoEnable
+#define isoDisable localCoopModalIsoDisable
+#endif
+
 int mapSetElevation(int elevation);
 int mapSetGlobalVar(int var, ProgramValue& value);
 int mapGetGlobalVar(int var, ProgramValue& value);
