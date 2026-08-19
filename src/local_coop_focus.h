@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 
+#include "combat.h"
 #include "local_coop.h"
 #include "object.h"
 #include "proto_types.h"
@@ -33,7 +34,7 @@ inline bool localCoopFocusTargetStillUsable(const Object* actor, const Object* t
         && actor != target
         && target->elevation == actor->elevation
         && (target->flags & OBJECT_HIDDEN) == 0
-        && objectGetDistanceBetween(actor, const_cast<Object*>(target)) <= maxDistance;
+        && objectGetDistanceBetween(const_cast<Object*>(actor), const_cast<Object*>(target)) <= maxDistance;
 }
 
 inline bool localCoopFocusIsEnemy(const Object* actor, const Object* target)
@@ -69,6 +70,21 @@ inline bool localCoopFocusIsInteractable(const Object* actor, const Object* targ
         || type == OBJ_TYPE_SCENERY;
 }
 
+inline bool localCoopFocusOtherSlotUsesTarget(int slot, Object* target)
+{
+    if (target == nullptr) {
+        return false;
+    }
+
+    for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
+        if (index != slot && gLocalCoopFocusSlots[index].outlinedTarget == target) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 inline void localCoopFocusReleaseOutline(int slot)
 {
     if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
@@ -78,6 +94,12 @@ inline void localCoopFocusReleaseOutline(int slot)
     LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[slot];
     Object* object = focus.outlinedTarget;
     if (object == nullptr) {
+        return;
+    }
+
+    if (localCoopFocusOtherSlotUsesTarget(slot, object)) {
+        focus.outlinedTarget = nullptr;
+        focus.savedOutline = 0;
         return;
     }
 
@@ -113,6 +135,14 @@ inline void localCoopFocusApplyOutline(int slot, Object* target, bool hostile)
         return;
     }
 
+    for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
+        if (index != slot && gLocalCoopFocusSlots[index].outlinedTarget == target) {
+            focus.outlinedTarget = target;
+            focus.savedOutline = 0;
+            return;
+        }
+    }
+
     focus.savedOutline = target->outline;
     if ((target->outline & OUTLINE_TYPE_MASK) != 0) {
         objectDisableOutline(target, nullptr);
@@ -136,9 +166,6 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
     LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
     int aimRotation = localCoopDirectionFromStick(player.aimX, player.aimY);
 
-    // Neutral right stick means keep the current target if it is still valid.
-    // This gives the controller a sticky soft lock instead of requiring the
-    // player to hold a virtual mouse pointer over an enemy.
     if (aimRotation == -1 && localCoopFocusIsEnemy(actor, focus.combatTarget)) {
         return focus.combatTarget;
     }
@@ -202,9 +229,6 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
     Object* best = nullptr;
     int bestScore = 0x7FFFFFFF;
 
-    // Search a small wedge in front of the player. This replaces virtual-mouse
-    // clicking with controller-native spatial focus. A can then directly call
-    // the engine's talk/use/loot/pickup action for the focused object.
     for (int rotationOffset = -1; rotationOffset <= 1; rotationOffset++) {
         int rotation = (aimRotation + rotationOffset + ROTATION_COUNT) % ROTATION_COUNT;
         int angularPenalty = std::abs(rotationOffset) * 100;
@@ -219,9 +243,6 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
             while (object != nullptr) {
                 if (localCoopFocusIsInteractable(actor, object)) {
                     int score = angularPenalty + distance;
-
-                    // Conversations, bodies and containers should beat loose
-                    // floor items when several interactables overlap.
                     int type = PID_TYPE(object->pid);
                     if (type == OBJ_TYPE_CRITTER) {
                         score -= 20;
@@ -240,7 +261,6 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
         }
     }
 
-    // Also allow picking up an item standing on the same tile.
     Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
     while (object != nullptr) {
         if (localCoopFocusIsInteractable(actor, object) && object != actor) {
@@ -263,10 +283,9 @@ inline Object* localCoopFocusUpdateForPlayer(LocalCoopPlayer& player)
     bool hostile = false;
 
     if (player.uiMode == LocalCoopUiMode::World) {
-        Object* enemy = localCoopFocusFindEnemy(player);
-        if (enemy != nullptr) {
-            focusTarget = enemy;
-            hostile = true;
+        if (isInCombat()) {
+            focusTarget = localCoopFocusFindEnemy(player);
+            hostile = focusTarget != nullptr;
         } else if (player.slot == 0) {
             focusTarget = localCoopFocusFindInteractable(player);
         }
