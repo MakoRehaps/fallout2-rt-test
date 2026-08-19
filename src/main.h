@@ -11,6 +11,9 @@
 
 namespace fallout {
 
+// Fallout 1 starts at 07:21. Fallout game time is stored in tenths of a second.
+inline constexpr unsigned int kUnifiedFallout1InitialGameTime = (7 * 60 * 60 + 21 * 60) * 10;
+
 // main.cc includes this header before input.h. Keep a declaration of the
 // original input function here, then redirect only main.cc's calls through the
 // cooperative frame wrapper below. input.cc itself is untouched and continues
@@ -68,13 +71,22 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
         return -1;
     }
 
-    return gameInitWithOptions(
+    int rc = gameInitWithOptions(
         unifiedCampaignGetWindowTitle(windowTitle),
         isMapper,
         font,
         a4,
         argc,
         argv);
+
+    if (rc == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // Savegame loads overwrite this through the normal save handlers. This
+        // establishes the stock Fallout 1 new-session clock without changing
+        // Fallout 2's default or writing anything to user configuration files.
+        gameTimeSetTime(kUnifiedFallout1InitialGameTime);
+    }
+
+    return rc;
 }
 
 int falloutMain(int argc, char** argv);
