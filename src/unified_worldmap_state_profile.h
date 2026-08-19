@@ -255,6 +255,7 @@ inline int unifiedWmTeleportToArea(int areaIdx)
 
 } // namespace fallout
 
+#ifndef WORLDMAP_H
 #define wmGetPartyWorldPos unifiedWmGetPartyWorldPos
 #define wmGetPartyCurArea unifiedWmGetPartyCurArea
 #define wmSetPartyWorldPos unifiedWmSetPartyWorldPos
@@ -264,5 +265,6 @@ inline int unifiedWmTeleportToArea(int areaIdx)
 #define wmAreaMarkVisitedState unifiedWmAreaMarkVisitedState
 #define wmAreaSetVisibleState unifiedWmAreaSetVisibleState
 #define wmTeleportToArea unifiedWmTeleportToArea
+#endif
 
 #endif /* UNIFIED_WORLDMAP_STATE_PROFILE_H */
