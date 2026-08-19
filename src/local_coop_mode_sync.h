@@ -2,11 +2,13 @@
 #define LOCAL_COOP_MODE_SYNC_H
 
 #include "game.h"
+#include "input.h"
 #include "local_coop.h"
 
 namespace fallout {
 
 inline bool gLocalCoopModeSyncOwnsPlayerOne = false;
+inline bool gLocalCoopModeSyncTickerInstalled = false;
 
 inline LocalCoopUiMode localCoopLegacyModeForPlayerOne()
 {
@@ -57,6 +59,19 @@ inline void localCoopSyncLegacyModes()
     if (gLocalCoopModeSyncOwnsPlayerOne) {
         playerOne.uiMode = LocalCoopUiMode::World;
         gLocalCoopModeSyncOwnsPlayerOne = false;
+    }
+}
+
+inline void localCoopModeSyncTicker()
+{
+    localCoopSyncLegacyModes();
+}
+
+inline void localCoopModeSyncEnsureTicker()
+{
+    if (!gLocalCoopModeSyncTickerInstalled) {
+        tickersAdd(localCoopModeSyncTicker);
+        gLocalCoopModeSyncTickerInstalled = true;
     }
 }
 
