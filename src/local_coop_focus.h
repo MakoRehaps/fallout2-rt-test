@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 
+#include "actions.h"
 #include "combat.h"
 #include "item.h"
 #include "local_coop.h"
@@ -80,7 +81,13 @@ inline bool localCoopFocusIsEnemy(const Object* actor, const Object* target)
         return false;
     }
 
-    return target->data.critter.combat.team != actor->data.critter.combat.team;
+    if (target->data.critter.combat.team == actor->data.critter.combat.team) {
+        return false;
+    }
+
+    // Controller focus follows Fallout's own sight rules. The right-stick cone
+    // can no longer snap/outline an enemy through walls or other sight blockers.
+    return _can_see(const_cast<Object*>(actor), const_cast<Object*>(target));
 }
 
 inline bool localCoopFocusIsInteractable(const Object* actor, const Object* target)
