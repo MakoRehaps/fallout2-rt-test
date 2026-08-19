@@ -294,7 +294,8 @@ void wmForceEncounter(int map, unsigned int flags);
 // translation-unit shape; stock Fallout 2 worldmap.cc never sees this include.
 #if defined(SCRIPTS_H)
 #include "unified_fallout1_travel_profile.h"
-#define wmWorldMap unifiedWmWorldMap
+#include "unified_fallout1_worldmap_visual.h"
+#define wmWorldMap unifiedWmWorldMapVisual
 #define wmTownMap unifiedWmTownMap
 #endif
 
