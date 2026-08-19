@@ -226,6 +226,23 @@ inline void unifiedCampaignConfigureFromArgs(int argc, char** argv)
     gUnifiedCampaignRuntime.requestedContentGame = gUnifiedCampaignRuntime.activeGame;
 }
 
+inline bool unifiedCampaignRequestContentGame(UnifiedGameId game)
+{
+    if (game == gUnifiedCampaignRuntime.activeGame) {
+        gUnifiedCampaignRuntime.requestedContentGame = game;
+        gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+        return true;
+    }
+
+    if (unifiedCampaignGetRoot(game).empty()) {
+        return false;
+    }
+
+    gUnifiedCampaignRuntime.requestedContentGame = game;
+    gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = true;
+    return true;
+}
+
 inline bool unifiedCampaignAdvanceToFallout2()
 {
     if (!gUnifiedCampaignRuntime.unifiedCampaign
@@ -233,9 +250,10 @@ inline bool unifiedCampaignAdvanceToFallout2()
         return false;
     }
 
-    unifiedCampaignSetActiveGame(UnifiedGameId::Fallout2);
-    gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout2;
-    return unifiedCampaignActivateContentRoot();
+    // Never change cwd or database roots underneath live scripts/protos. The
+    // main-loop/menu bridge sees this request and performs the normal full
+    // gameExit -> root switch -> gameInitWithOptions rebootstrap instead.
+    return unifiedCampaignRequestContentGame(UnifiedGameId::Fallout2);
 }
 
 inline UnifiedCampaignSaveHeader unifiedCampaignMakeSaveHeader()
