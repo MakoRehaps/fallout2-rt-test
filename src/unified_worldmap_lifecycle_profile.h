@@ -4,6 +4,7 @@
 #include "db.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_worldmap_state.h"
+#include "unified_worldmap_audio_profile.h"
 
 namespace fallout {
 
@@ -24,6 +25,7 @@ inline int unifiedWmWorldMapInit()
     // the F1 profile with its original Vault 13 state and leave F2 tables alone.
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
+    unifiedFallout1MapMusicResetOverrides();
     unifiedFallout1WorldMapResetCurrent();
     return 0;
 }
@@ -39,6 +41,7 @@ inline void unifiedWmWorldMapExit()
     // therefore has no F2 worldmap parser allocations to release.
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
+    unifiedFallout1MapMusicResetOverrides();
 }
 
 inline int unifiedWmWorldMapReset()
@@ -46,6 +49,12 @@ inline int unifiedWmWorldMapReset()
     if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
         return wmWorldMap_reset();
     }
+
+    // Runtime music overrides are not part of Fallout 1's original world-map
+    // save payload. Clear them on every engine reset, including load resets;
+    // scripts can reapply any transient music change after their saved state is
+    // restored, while an old game's override can never leak into another slot.
+    unifiedFallout1MapMusicResetOverrides();
 
     if (unifiedFallout1WorldMapConsumePreserveReset()) {
         return 0;
