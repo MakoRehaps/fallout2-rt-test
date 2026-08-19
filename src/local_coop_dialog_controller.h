@@ -8,18 +8,22 @@
 #include "game.h"
 #include "input.h"
 #include "local_coop.h"
+#include "svga.h"
 #include "window_manager.h"
 
 namespace fallout {
 
-// Stock Fallout dialogue creates its response buttons in the options window at
-// this fixed location. Each option already has keyboard/event codes assigned:
+// Stock Fallout dialogue creates a 640x480 interface centered in the current
+// screen, with its options child window at (127, 335) inside that area. Each
+// option already has keyboard/event codes assigned:
 //   mouse-enter: 1200 + option index
 //   mouse-exit:  1300 + option index
 //   activate:    '1' + option index (49 + index)
 // Reuse those events directly instead of moving a virtual mouse cursor.
-inline constexpr int kLocalCoopDialogOptionsProbeX = 130;
-inline constexpr int kLocalCoopDialogOptionsProbeY = 338;
+inline constexpr int kLocalCoopDialogBaseWidth = 640;
+inline constexpr int kLocalCoopDialogBaseHeight = 480;
+inline constexpr int kLocalCoopDialogOptionsX = 127;
+inline constexpr int kLocalCoopDialogOptionsY = 335;
 inline constexpr int kLocalCoopDialogOptionEnterBase = 1200;
 inline constexpr int kLocalCoopDialogOptionExitBase = 1300;
 inline constexpr int kLocalCoopDialogOptionActivateBase = 49;
@@ -39,9 +43,12 @@ inline bool gLocalCoopDialogControllerTickerInstalled = false;
 
 inline Window* localCoopDialogFindOptionsWindow()
 {
-    int windowId = windowGetAtPoint(
-        kLocalCoopDialogOptionsProbeX,
-        kLocalCoopDialogOptionsProbeY);
+    int originX = (screenGetWidth() - kLocalCoopDialogBaseWidth) / 2;
+    int originY = (screenGetHeight() - kLocalCoopDialogBaseHeight) / 2;
+    int probeX = originX + kLocalCoopDialogOptionsX + 3;
+    int probeY = originY + kLocalCoopDialogOptionsY + 3;
+
+    int windowId = windowGetAtPoint(probeX, probeY);
     if (windowId == -1) {
         return nullptr;
     }
