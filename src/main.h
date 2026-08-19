@@ -19,6 +19,10 @@ int mainMenuWindowInit();
 
 inline int gUnifiedCampaignStartupArgc = 0;
 inline char** gUnifiedCampaignStartupArgv = nullptr;
+inline bool gUnifiedCampaignStartupIsMapper = false;
+inline int gUnifiedCampaignStartupFont = 0;
+inline int gUnifiedCampaignStartupA4 = 0;
+inline std::string gUnifiedCampaignStartupWindowTitle = "FALLOUT II";
 
 inline void localCoopResetTransientStateForLoad()
 {
@@ -81,6 +85,14 @@ inline int localCoopMainInputGetInput()
     localCoopInteractionTick();
     localCoopGenericUiControllerTick();
 
+    // A campaign transition request must leave the current gameplay loop before
+    // any cwd/database switch occurs. main.cc's normal teardown then returns to
+    // mainMenuWindowInit, where the full engine rebootstrap is performed.
+    if (gUnifiedCampaignRuntime.loadedSaveRequiresContentReload
+        && gUnifiedCampaignRuntime.requestedContentGame != gUnifiedCampaignRuntime.activeGame) {
+        _game_user_wants_to_quit = 2;
+    }
+
     int keyCode = inputGetInput();
 
     if ((keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I)
@@ -109,6 +121,10 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
 {
     gUnifiedCampaignStartupArgc = argc;
     gUnifiedCampaignStartupArgv = argv;
+    gUnifiedCampaignStartupIsMapper = isMapper;
+    gUnifiedCampaignStartupFont = font;
+    gUnifiedCampaignStartupA4 = a4;
+    gUnifiedCampaignStartupWindowTitle = windowTitle != nullptr ? windowTitle : "FALLOUT II";
 
     unifiedCampaignConfigureFromArgs(argc, argv);
     unifiedCampaignSetBeforeGameResetHook(localCoopResetTransientStateForLoad);
@@ -118,7 +134,7 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
     }
 
     int rc = gameInitWithOptions(
-        unifiedCampaignGetWindowTitle(windowTitle),
+        unifiedCampaignGetWindowTitle(gUnifiedCampaignStartupWindowTitle.c_str()),
         isMapper,
         font,
         a4,
@@ -163,10 +179,10 @@ inline bool unifiedCampaignRebootstrapRequestedContent()
     }
 
     int rc = gameInitWithOptions(
-        unifiedCampaignGetWindowTitle("FALLOUT II"),
-        false,
-        0,
-        0,
+        unifiedCampaignGetWindowTitle(gUnifiedCampaignStartupWindowTitle.c_str()),
+        gUnifiedCampaignStartupIsMapper,
+        gUnifiedCampaignStartupFont,
+        gUnifiedCampaignStartupA4,
         gUnifiedCampaignStartupArgc,
         gUnifiedCampaignStartupArgv);
     if (rc != 0) {
