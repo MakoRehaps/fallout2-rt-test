@@ -40,6 +40,7 @@ inline UnifiedFallout1WorldMapState gUnifiedFallout1WorldMapState {};
 inline UnifiedFallout1WorldMapState gUnifiedFallout1PendingWorldMapState {};
 inline bool gUnifiedFallout1WorldMapStateInitialized = false;
 inline bool gUnifiedFallout1PendingWorldMapStateValid = false;
+inline bool gUnifiedFallout1PreserveWorldMapOnNextReset = false;
 
 inline void unifiedFallout1WorldMapReset(UnifiedFallout1WorldMapState& state)
 {
@@ -79,6 +80,24 @@ inline void unifiedFallout1WorldMapSetState(const UnifiedFallout1WorldMapState& 
 {
     gUnifiedFallout1WorldMapState = state;
     gUnifiedFallout1WorldMapStateInitialized = true;
+}
+
+inline void unifiedFallout1WorldMapResetCurrent()
+{
+    unifiedFallout1WorldMapReset(gUnifiedFallout1WorldMapState);
+    gUnifiedFallout1WorldMapStateInitialized = true;
+}
+
+inline void unifiedFallout1WorldMapPreserveNextReset()
+{
+    gUnifiedFallout1PreserveWorldMapOnNextReset = true;
+}
+
+inline bool unifiedFallout1WorldMapConsumePreserveReset()
+{
+    bool preserve = gUnifiedFallout1PreserveWorldMapOnNextReset;
+    gUnifiedFallout1PreserveWorldMapOnNextReset = false;
+    return preserve;
 }
 
 inline void unifiedFallout1WorldMapClearPending()
