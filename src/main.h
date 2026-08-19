@@ -3,6 +3,7 @@
 
 #include "local_coop_interaction.h"
 #include "local_coop_inventory_ui.h"
+#include "local_coop_mode_sync.h"
 #include "local_coop_runtime.h"
 #include "unified_campaign.h"
 
@@ -16,12 +17,34 @@ int inputGetInput();
 
 inline int localCoopMainInputGetInput()
 {
+    localCoopModeSyncEnsureTicker();
+    localCoopSyncLegacyModes();
     localCoopRuntimeTick();
     localCoopFocusTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
     localCoopInteractionTick();
-    return inputGetInput();
+
+    int keyCode = inputGetInput();
+
+    // Keep the familiar keyboard shortcut, but route it into the live co-op
+    // overlay rather than Fallout's blocking inventory modal. Controller Back
+    // uses the same LocalCoopUiMode state in local_coop_inventory_ui.h.
+    if ((keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I)
+        && gLocalCoopInitialized) {
+        LocalCoopPlayer& playerOne = gLocalCoopPlayers[0];
+        if (playerOne.uiMode == LocalCoopUiMode::Inventory) {
+            playerOne.uiMode = LocalCoopUiMode::World;
+            return -1;
+        }
+
+        if (playerOne.uiMode == LocalCoopUiMode::World) {
+            playerOne.uiMode = LocalCoopUiMode::Inventory;
+            return -1;
+        }
+    }
+
+    return keyCode;
 }
 
 // main.cc is also the only place that calls gameInitWithOptions. Configure the
