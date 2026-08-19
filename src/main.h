@@ -33,6 +33,7 @@ inline void localCoopResetTransientStateForLoad()
     localCoopPipboyRestoreMarker();
     localCoopGenericUiRestoreMarker();
     localCoopInventoryUiDestroyWindow();
+    localCoopLiveLootResetForLoad();
 
     inputEventQueueReset();
     localCoopSetRealtimeCombatActive(false);
@@ -69,6 +70,7 @@ inline void localCoopResetTickerRegistrationAfterEngineExit()
     gLocalCoopDialogControllerTickerInstalled = false;
     gLocalCoopModalControllerTickerInstalled = false;
     gLocalCoopGenericUiControllerTickerInstalled = false;
+    gLocalCoopLiveLootState.tickerInstalled = false;
 }
 
 inline int localCoopMainInputGetInput()
@@ -77,12 +79,14 @@ inline int localCoopMainInputGetInput()
     localCoopDialogControllerEnsureTicker();
     localCoopModalControllerEnsureTicker();
     localCoopGenericUiControllerEnsureTicker();
+    localCoopLiveLootEnsureTicker();
     localCoopSyncLegacyModes();
     localCoopRuntimeTick();
     localCoopFocusTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
     localCoopInteractionTick();
+    localCoopLiveLootTick();
     localCoopGenericUiControllerTick();
 
     // A campaign transition request must leave the current gameplay loop before
