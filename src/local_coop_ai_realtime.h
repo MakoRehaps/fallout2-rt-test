@@ -12,6 +12,7 @@
 #include "item.h"
 #include "local_coop.h"
 #include "proto_types.h"
+#include "scripts.h"
 #include "stat.h"
 
 namespace fallout {
@@ -21,10 +22,12 @@ namespace fallout {
 // Each critter receives one action-sized AP slice when its realtime cooldown is
 // ready. Rounds become a lightweight scheduler heartbeat instead of turns.
 inline std::unordered_map<Object*, Uint32> gLocalCoopRealtimeAiNextTick;
+inline Uint32 gLocalCoopRealtimeCombatClockTick = 0;
 
 inline void localCoopRealtimeAiReset()
 {
     gLocalCoopRealtimeAiNextTick.clear();
+    gLocalCoopRealtimeCombatClockTick = SDL_GetTicks();
 }
 
 inline Uint32 localCoopRealtimeAiCooldownForSlice(int actionPoints)
@@ -103,6 +106,34 @@ inline void localCoopRealtimeAiTurn(Object* actor, Object* preferredTarget)
 
     actor->data.critter.combat.ap = 0;
     it->second = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
+}
+
+inline void localCoopRealtimeCombatAdvanceTime(int legacyRoundSeconds)
+{
+    (void)legacyRoundSeconds;
+
+    Uint32 now = SDL_GetTicks();
+    if (gLocalCoopRealtimeCombatClockTick == 0) {
+        gLocalCoopRealtimeCombatClockTick = now;
+        return;
+    }
+
+    Uint32 elapsed = now - gLocalCoopRealtimeCombatClockTick;
+
+    // A large gap means a previous combat ended and another started. Do not
+    // accidentally count out-of-combat wall time as combat time.
+    if (elapsed > 5000) {
+        gLocalCoopRealtimeCombatClockTick = now;
+        return;
+    }
+
+    int elapsedSeconds = static_cast<int>(elapsed / 1000);
+    if (elapsedSeconds <= 0) {
+        return;
+    }
+
+    gameTimeAddSeconds(elapsedSeconds);
+    gLocalCoopRealtimeCombatClockTick += static_cast<Uint32>(elapsedSeconds * 1000);
 }
 
 } // namespace fallout
