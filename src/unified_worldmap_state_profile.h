@@ -1,6 +1,9 @@
 #ifndef UNIFIED_WORLDMAP_STATE_PROFILE_H
 #define UNIFIED_WORLDMAP_STATE_PROFILE_H
 
+#include <cstring>
+
+#include "message.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_worldmap_globals.h"
 #include "unified_fallout1_worldmap_state.h"
@@ -12,12 +15,16 @@ namespace fallout {
 int wmGetPartyWorldPos(int* xPtr, int* yPtr);
 int wmGetPartyCurArea(int* areaIdxPtr);
 void wmSetPartyWorldPos(int x, int y);
+int wmGetAreaIdxName(int areaIdx, char* name);
 bool wmAreaIsKnown(int areaIdx);
 int wmAreaVisitedState(int areaIdx);
 int wmAreaMarkVisited(int areaIdx);
 bool wmAreaMarkVisitedState(int areaIdx, int state);
 bool wmAreaSetVisibleState(int areaIdx, int state, bool force);
+int wmAreaSetWorldPos(int areaIdx, int x, int y);
 int wmTeleportToArea(int areaIdx);
+
+extern MessageList gMapMessageList;
 
 inline constexpr int kUnifiedFallout1WorldCellSize = 50;
 inline constexpr int kUnifiedFallout1TownCountForState = 12;
@@ -160,6 +167,30 @@ inline int unifiedWmGetPartyCurArea(int* areaIdxPtr)
     return 0;
 }
 
+inline int unifiedWmGetAreaIdxName(int areaIdx, char* name)
+{
+    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        return wmGetAreaIdxName(areaIdx, name);
+    }
+
+    if (!unifiedFallout1TownIndexIsValid(areaIdx) || name == nullptr) {
+        return -1;
+    }
+
+    // Fallout 1's world-map hover/short-name path reads map.msg entries
+    // TOWN_* + 500. F2 instead uses areaId + 1500.
+    MessageListItem messageListItem {};
+    char* text = getmsg(&gMapMessageList, &messageListItem, 500 + areaIdx);
+    if (text == nullptr) {
+        name[0] = '\0';
+        return -1;
+    }
+
+    std::strncpy(name, text, 39);
+    name[39] = '\0';
+    return 0;
+}
+
 inline bool unifiedWmAreaIsKnown(int areaIdx)
 {
     if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
@@ -226,6 +257,21 @@ inline bool unifiedWmAreaSetVisibleState(int areaIdx, int state, bool force)
     return true;
 }
 
+inline int unifiedWmAreaSetWorldPos(int areaIdx, int x, int y)
+{
+    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        return wmAreaSetWorldPos(areaIdx, x, y);
+    }
+
+    // F1 town positions are a fixed compile-time table. This F2 scripting API
+    // has no original F1 equivalent; fail safely instead of touching F2 city
+    // storage that is intentionally uninitialized in the F1 profile.
+    (void)areaIdx;
+    (void)x;
+    (void)y;
+    return -1;
+}
+
 inline int unifiedWmTeleportToArea(int areaIdx)
 {
     if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
@@ -261,11 +307,13 @@ inline int unifiedWmTeleportToArea(int areaIdx)
 #define wmGetPartyWorldPos unifiedWmGetPartyWorldPos
 #define wmGetPartyCurArea unifiedWmGetPartyCurArea
 #define wmSetPartyWorldPos unifiedWmSetPartyWorldPos
+#define wmGetAreaIdxName unifiedWmGetAreaIdxName
 #define wmAreaIsKnown unifiedWmAreaIsKnown
 #define wmAreaVisitedState unifiedWmAreaVisitedState
 #define wmAreaMarkVisited unifiedWmAreaMarkVisited
 #define wmAreaMarkVisitedState unifiedWmAreaMarkVisitedState
 #define wmAreaSetVisibleState unifiedWmAreaSetVisibleState
+#define wmAreaSetWorldPos unifiedWmAreaSetWorldPos
 #define wmTeleportToArea unifiedWmTeleportToArea
 #endif
 
