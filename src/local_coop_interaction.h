@@ -9,6 +9,7 @@
 #include "item.h"
 #include "local_coop.h"
 #include "local_coop_focus.h"
+#include "local_coop_loot_ui.h"
 #include "object.h"
 #include "proto_types.h"
 #include "tile.h"
@@ -94,7 +95,7 @@ inline bool localCoopPlayerOneInteract()
     int objectType = PID_TYPE(target->pid);
     if (objectType == OBJ_TYPE_CRITTER) {
         if ((target->data.critter.combat.results & DAM_DEAD) != 0) {
-            return _action_loot_container(actor, target) == 0;
+            return localCoopLiveLootRequest(actor, target);
         }
 
         if (_action_can_talk_to(actor, target) == 0) {
@@ -106,7 +107,7 @@ inline bool localCoopPlayerOneInteract()
 
     if (objectType == OBJ_TYPE_ITEM) {
         if (itemGetType(target) == ITEM_TYPE_CONTAINER) {
-            return _action_loot_container(actor, target) == 0;
+            return localCoopLiveLootRequest(actor, target);
         }
 
         bool pickedUp = actionPickUp(actor, target) == 0;
