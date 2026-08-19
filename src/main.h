@@ -1,7 +1,7 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include "local_coop.h"
+#include "local_coop_runtime.h"
 #include "unified_campaign.h"
 
 namespace fallout {
@@ -14,12 +14,7 @@ int inputGetInput();
 
 inline int localCoopMainInputGetInput()
 {
-    if (!gLocalCoopInitialized) {
-        localCoopInit();
-    }
-
-    localCoopPollControllers();
-    localCoopSweepSharedInventory();
+    localCoopRuntimeTick();
     return inputGetInput();
 }
 
