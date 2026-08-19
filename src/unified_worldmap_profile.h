@@ -8,9 +8,9 @@
 
 namespace fallout {
 
-// Stock Fallout 2 CE world-map query symbols. This header is included from
-// map.h before the call-site remap macros below are installed, so these names
-// continue to refer to the untouched F2 world-map implementation.
+// Stock Fallout 2 CE world-map query symbols. Wrappers are defined before the
+// call-site remap macros below, so fallback calls continue to target the stock
+// Fallout 2 world-map implementation.
 int wmMapMaxCount();
 int wmMapIdxToName(int mapIdx, char* dest, size_t size);
 int wmMapMatchNameToIdx(char* name);
@@ -244,14 +244,16 @@ inline int unifiedWmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr)
 
 } // namespace fallout
 
-// map.cc includes map.h first and worldmap.h later. Remap the loaded-map side
-// of the engine through the unified profile without altering worldmap.cc's own
-// stock Fallout 2 definitions. This also benefits other translation units that
-// include map.h before issuing these map-identity queries.
+// worldmap.cc includes worldmap.h before any transitive map.h include. In that
+// translation unit WORLDMAP_H is therefore already defined: keep the stock F2
+// function definitions unrenamed. Loaded-map/gameplay callers that enter through
+// map.h first receive the profile remaps below.
+#ifndef WORLDMAP_H
 #define wmMapMaxCount unifiedWmMapMaxCount
 #define wmMapIdxToName unifiedWmMapIdxToName
 #define wmMapMatchNameToIdx unifiedWmMapMatchNameToIdx
 #define wmMapIdxIsSaveable unifiedWmMapIdxIsSaveable
 #define wmMatchAreaContainingMapIdx unifiedWmMatchAreaContainingMapIdx
+#endif
 
 #endif /* UNIFIED_WORLDMAP_PROFILE_H */
