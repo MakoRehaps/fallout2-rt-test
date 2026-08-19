@@ -134,4 +134,8 @@ int _map_save_in_game(bool a1);
 
 } // namespace fallout
 
+// Install profile-aware map identity semantics for translation units using the
+// ISO map layer. The stock F2 world-map implementation remains untouched.
+#include "unified_worldmap_profile.h"
+
 #endif /* MAP_H */
