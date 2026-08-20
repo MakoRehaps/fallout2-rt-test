@@ -5,15 +5,14 @@
 #include <array>
 
 #include "unified_fallout1_travel_profile.h"
+#include "unified_fallout1_walkmask_data.h"
 
 namespace fallout {
 
 // Original Fallout 1 OceanSeeXTable. In the stock engine, columns strictly
 // west of this boundary are treated as already-known ocean for each 50-pixel
-// world-map row. The original per-pixel WALKMASK_MASK_DATA remains the final
-// authority near the coastline; this coarse table keeps controller travel from
-// taking impossible straight-line routes through deep ocean while that exact
-// mask is being integrated.
+// world-map row. This coarse boundary keeps the destination router out of deep
+// ocean; the exact generated walkmask below remains the per-pixel authority.
 inline constexpr int kUnifiedFallout1OceanBoundaryColumns[kUnifiedFallout1TravelRows] = {
     0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
     2, 3, 4, 5, 5, 5, 5, 8, 11, 12,
@@ -40,8 +39,8 @@ inline bool unifiedFallout1RouteCellAllowed(int column, int row)
     }
 
     // OceanSeeXTable reveals [0, boundary) as ocean. The boundary column itself
-    // is deliberately left traversable because it contains the mixed shoreline
-    // pixels that the exact F1 walkmask resolves at pixel precision.
+    // is deliberately left available to the coarse router because it contains
+    // mixed shoreline pixels resolved by the exact F1 walkmask.
     return column >= kUnifiedFallout1OceanBoundaryColumns[row];
 }
 
@@ -55,7 +54,72 @@ inline bool unifiedFallout1RoutePointAllowed(int worldX, int worldY)
 
     int column = worldX / kUnifiedFallout1TravelCellSize;
     int row = worldY / kUnifiedFallout1TravelCellSize;
-    return unifiedFallout1RouteCellAllowed(column, row);
+    return unifiedFallout1RouteCellAllowed(column, row)
+        && !unifiedFallout1WalkmaskBlocked(worldX, worldY);
+}
+
+inline bool unifiedFallout1RouteFindAllowedPointInCell(
+    int column,
+    int row,
+    int preferredX,
+    int preferredY,
+    int& worldX,
+    int& worldY)
+{
+    if (!unifiedFallout1RouteCellAllowed(column, row)) {
+        return false;
+    }
+
+    int left = column * kUnifiedFallout1TravelCellSize;
+    int top = row * kUnifiedFallout1TravelCellSize;
+    int right = left + kUnifiedFallout1TravelCellSize - 1;
+    int bottom = top + kUnifiedFallout1TravelCellSize - 1;
+    preferredX = std::max(left, std::min(preferredX, right));
+    preferredY = std::max(top, std::min(preferredY, bottom));
+
+    if (unifiedFallout1RoutePointAllowed(preferredX, preferredY)) {
+        worldX = preferredX;
+        worldY = preferredY;
+        return true;
+    }
+
+    // Search outward from the desired point. A 50x50 coarse cell is small, so
+    // this deterministic ring search cheaply finds the closest legal shoreline
+    // pixel without allocating a large pathfinding grid.
+    for (int radius = 1; radius < kUnifiedFallout1TravelCellSize; radius++) {
+        int minX = std::max(left, preferredX - radius);
+        int maxX = std::min(right, preferredX + radius);
+        int minY = std::max(top, preferredY - radius);
+        int maxY = std::min(bottom, preferredY + radius);
+
+        for (int x = minX; x <= maxX; x++) {
+            if (unifiedFallout1RoutePointAllowed(x, minY)) {
+                worldX = x;
+                worldY = minY;
+                return true;
+            }
+            if (maxY != minY && unifiedFallout1RoutePointAllowed(x, maxY)) {
+                worldX = x;
+                worldY = maxY;
+                return true;
+            }
+        }
+
+        for (int y = minY + 1; y < maxY; y++) {
+            if (unifiedFallout1RoutePointAllowed(minX, y)) {
+                worldX = minX;
+                worldY = y;
+                return true;
+            }
+            if (maxX != minX && unifiedFallout1RoutePointAllowed(maxX, y)) {
+                worldX = maxX;
+                worldY = y;
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 inline bool unifiedFallout1BuildCoarseRoute(
@@ -88,9 +152,8 @@ inline bool unifiedFallout1BuildCoarseRoute(
     previous[start] = -1;
     queue[queueWrite++] = start;
 
-    // Four-way routing is intentional here. It prevents a diagonal segment
-    // between two legal coarse cells from clipping the fully-ocean corner of a
-    // neighboring cell before the exact pixel walkmask is installed.
+    // Four-way routing prevents a diagonal segment between legal coarse cells
+    // from cutting across a fully-ocean neighboring cell.
     static constexpr int kDirections[4][2] = {
         { 1, 0 },
         { -1, 0 },
@@ -115,9 +178,9 @@ inline bool unifiedFallout1BuildCoarseRoute(
                 continue;
             }
 
-            // Permit the current start cell even if an older save happens to
-            // place the party inside a boundary cell, but never route into a
-            // known deep-ocean cell. Town destinations are expected on land.
+            // Permit the current start cell even if an old sidecar happens to
+            // place the party near a shoreline boundary, but never route into a
+            // known deep-ocean cell.
             if (next != target && !unifiedFallout1RouteCellAllowed(nextColumn, nextRow)) {
                 continue;
             }
@@ -149,6 +212,84 @@ inline bool unifiedFallout1BuildCoarseRoute(
     return route.count != 0;
 }
 
+inline bool unifiedFallout1RouteStepToward(
+    UnifiedFallout1TravelLine& line,
+    int& worldX,
+    int& worldY,
+    int waypointX,
+    int waypointY,
+    int& previousX,
+    int& previousY)
+{
+    UnifiedFallout1TravelLine candidateLine = line;
+    int candidateX = worldX;
+    int candidateY = worldY;
+    if (unifiedFallout1TravelLineStep(candidateLine, candidateX, candidateY)
+        && unifiedFallout1RoutePointAllowed(candidateX, candidateY)) {
+        previousX = worldX;
+        previousY = worldY;
+        worldX = candidateX;
+        worldY = candidateY;
+        line = candidateLine;
+        return true;
+    }
+
+    // The stock F1 walkmask stops a straight move on blocked pixels. For the
+    // controller destination router, slide around that exact pixel instead of
+    // forcing the player to manually retarget repeatedly. Prefer the legal
+    // neighboring pixel closest to the current waypoint and avoid immediate
+    // backtracking when another choice exists.
+    static constexpr int kDirections[8][2] = {
+        { 1, 0 },
+        { 0, 1 },
+        { 0, -1 },
+        { -1, 0 },
+        { 1, 1 },
+        { 1, -1 },
+        { -1, 1 },
+        { -1, -1 },
+    };
+
+    int bestX = worldX;
+    int bestY = worldY;
+    int bestScore = 0x7FFFFFFF;
+    bool found = false;
+
+    for (int pass = 0; pass < 2 && !found; pass++) {
+        for (const auto& direction : kDirections) {
+            int nextX = worldX + direction[0];
+            int nextY = worldY + direction[1];
+            if (!unifiedFallout1RoutePointAllowed(nextX, nextY)) {
+                continue;
+            }
+            if (pass == 0 && nextX == previousX && nextY == previousY) {
+                continue;
+            }
+
+            int dx = waypointX - nextX;
+            int dy = waypointY - nextY;
+            int score = dx * dx + dy * dy;
+            if (!found || score < bestScore) {
+                bestScore = score;
+                bestX = nextX;
+                bestY = nextY;
+                found = true;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    previousX = worldX;
+    previousY = worldY;
+    worldX = bestX;
+    worldY = bestY;
+    line = unifiedFallout1TravelLineCreate(worldX, worldY, waypointX, waypointY);
+    return true;
+}
+
 inline int unifiedFallout1TravelToTownRouted(int town)
 {
     if (!unifiedFallout1TownIndexIsValid(town)) {
@@ -167,16 +308,17 @@ inline int unifiedFallout1TravelToTownRouted(int town)
     targetX = std::max(0, std::min(targetX, kUnifiedFallout1TravelMaxX));
     targetY = std::max(0, std::min(targetY, kUnifiedFallout1TravelMaxY));
 
-    // Keep jitter inside the destination's legal coarse shoreline cell.
     int targetColumn = unifiedFallout1TownWorldX(town) / kUnifiedFallout1TravelCellSize;
     int targetRow = unifiedFallout1TownWorldY(town) / kUnifiedFallout1TravelCellSize;
-    if (!unifiedFallout1RouteCellAllowed(targetColumn, targetRow)) {
+    if (!unifiedFallout1RouteFindAllowedPointInCell(
+            targetColumn,
+            targetRow,
+            targetX,
+            targetY,
+            targetX,
+            targetY)) {
         return 0;
     }
-    int cellLeft = targetColumn * kUnifiedFallout1TravelCellSize;
-    int cellTop = targetRow * kUnifiedFallout1TravelCellSize;
-    targetX = std::max(cellLeft + 1, std::min(targetX, cellLeft + kUnifiedFallout1TravelCellSize - 2));
-    targetY = std::max(cellTop + 1, std::min(targetY, cellTop + kUnifiedFallout1TravelCellSize - 2));
 
     UnifiedFallout1WorldRoute route;
     if (!unifiedFallout1BuildCoarseRoute(state.worldX, state.worldY, targetX, targetY, route)) {
@@ -193,6 +335,8 @@ inline int unifiedFallout1TravelToTownRouted(int town)
     int revealCounter = 0;
     int win = unifiedFallout1TravelOpenWindow("FALLOUT WORLD MAP - TRAVELLING");
     UnifiedFallout1PadEdges previousPad {};
+    int previousWorldX = state.worldX;
+    int previousWorldY = state.worldY;
 
     for (int routeIndex = 1; routeIndex < route.count; routeIndex++) {
         int cell = route.cells[routeIndex];
@@ -206,13 +350,35 @@ inline int unifiedFallout1TravelToTownRouted(int town)
             ? targetY
             : row * kUnifiedFallout1TravelCellSize + kUnifiedFallout1TravelCellSize / 2;
 
+        if (!finalWaypoint
+            && !unifiedFallout1RouteFindAllowedPointInCell(
+                column,
+                row,
+                waypointX,
+                waypointY,
+                waypointX,
+                waypointY)) {
+            if (win != -1) {
+                windowDestroy(win);
+            }
+            return 0;
+        }
+
         UnifiedFallout1TravelLine line = unifiedFallout1TravelLineCreate(
             state.worldX,
             state.worldY,
             waypointX,
             waypointY);
+        int waypointStepGuard = 0;
 
         while (state.worldX != waypointX || state.worldY != waypointY) {
+            if (++waypointStepGuard > kUnifiedFallout1TravelCellSize * 20) {
+                if (win != -1) {
+                    windowDestroy(win);
+                }
+                return 0;
+            }
+
             int terrain = unifiedFallout1TerrainAt(state.worldX, state.worldY);
             bool shouldStep = true;
             bool extraStep = false;
@@ -226,12 +392,14 @@ inline int unifiedFallout1TravelToTownRouted(int town)
             }
 
             if (shouldStep) {
-                int oldX = state.worldX;
-                int oldY = state.worldY;
-                unifiedFallout1TravelLineStep(line, state.worldX, state.worldY);
-                if (!unifiedFallout1RoutePointAllowed(state.worldX, state.worldY)) {
-                    state.worldX = oldX;
-                    state.worldY = oldY;
+                if (!unifiedFallout1RouteStepToward(
+                        line,
+                        state.worldX,
+                        state.worldY,
+                        waypointX,
+                        waypointY,
+                        previousWorldX,
+                        previousWorldY)) {
                     if (win != -1) {
                         windowDestroy(win);
                     }
@@ -239,12 +407,14 @@ inline int unifiedFallout1TravelToTownRouted(int town)
                 }
 
                 if (extraStep && (state.worldX != waypointX || state.worldY != waypointY)) {
-                    oldX = state.worldX;
-                    oldY = state.worldY;
-                    unifiedFallout1TravelLineStep(line, state.worldX, state.worldY);
-                    if (!unifiedFallout1RoutePointAllowed(state.worldX, state.worldY)) {
-                        state.worldX = oldX;
-                        state.worldY = oldY;
+                    if (!unifiedFallout1RouteStepToward(
+                            line,
+                            state.worldX,
+                            state.worldY,
+                            waypointX,
+                            waypointY,
+                            previousWorldX,
+                            previousWorldY)) {
                         if (win != -1) {
                             windowDestroy(win);
                         }
