@@ -27,6 +27,7 @@ struct UnifiedCampaignRuntime {
     bool loadedSaveRequiresContentReload = false;
     UnifiedGameId activeGame = UnifiedGameId::Fallout2;
     UnifiedGameId requestedContentGame = UnifiedGameId::Fallout2;
+    uint32_t completedGames = 0;
     std::string fallout1Root;
     std::string fallout2Root;
 };
@@ -43,11 +44,38 @@ using UnifiedCampaignBeforeGameResetHook = void (*)();
 inline constexpr uint32_t kUnifiedCampaignSaveMagic = 0x4643554E; // "FCUN"
 inline constexpr uint32_t kUnifiedCampaignSaveVersion = 1;
 inline constexpr uint32_t kUnifiedCampaignSaveFlagUnified = 0x01;
+inline constexpr uint32_t kUnifiedCampaignSaveFlagFallout1Completed = 0x02;
+inline constexpr uint32_t kUnifiedCampaignSaveFlagFallout2Completed = 0x04;
+inline constexpr uint32_t kUnifiedCampaignCompletedFallout1 = 0x01;
+inline constexpr uint32_t kUnifiedCampaignCompletedFallout2 = 0x02;
 
 inline UnifiedCampaignRuntime gUnifiedCampaignRuntime;
 inline UnifiedCampaignSaveHeader gUnifiedCampaignPendingSaveHeader {};
 inline bool gUnifiedCampaignPendingSaveHeaderValid = false;
 inline UnifiedCampaignBeforeGameResetHook gUnifiedCampaignBeforeGameResetHook = nullptr;
+
+inline uint32_t unifiedCampaignCompletionMask(UnifiedGameId game)
+{
+    return game == UnifiedGameId::Fallout1
+        ? kUnifiedCampaignCompletedFallout1
+        : kUnifiedCampaignCompletedFallout2;
+}
+
+inline void unifiedCampaignMarkCompleted(UnifiedGameId game)
+{
+    gUnifiedCampaignRuntime.completedGames |= unifiedCampaignCompletionMask(game);
+}
+
+inline bool unifiedCampaignIsCompleted(UnifiedGameId game)
+{
+    return (gUnifiedCampaignRuntime.completedGames & unifiedCampaignCompletionMask(game)) != 0;
+}
+
+inline bool unifiedCampaignBothGamesCompleted()
+{
+    return unifiedCampaignIsCompleted(UnifiedGameId::Fallout1)
+        && unifiedCampaignIsCompleted(UnifiedGameId::Fallout2);
+}
 
 inline void unifiedCampaignSetBeforeGameResetHook(UnifiedCampaignBeforeGameResetHook hook)
 {
@@ -250,6 +278,11 @@ inline bool unifiedCampaignAdvanceToFallout2()
         return false;
     }
 
+    // Reaching this handoff means Fallout 1's ending sequence completed. Keep
+    // that fact in campaign metadata before the F1 runtime is torn down so the
+    // first Fallout 2 save, and every later unified save, knows Act I is done.
+    unifiedCampaignMarkCompleted(UnifiedGameId::Fallout1);
+
     // Never change cwd or database roots underneath live scripts/protos. The
     // main-loop/menu bridge sees this request and performs the normal full
     // gameExit -> root switch -> gameInitWithOptions rebootstrap instead.
@@ -263,6 +296,12 @@ inline UnifiedCampaignSaveHeader unifiedCampaignMakeSaveHeader()
     header.version = kUnifiedCampaignSaveVersion;
     header.activeGame = static_cast<uint32_t>(gUnifiedCampaignRuntime.activeGame);
     header.flags = gUnifiedCampaignRuntime.unifiedCampaign ? kUnifiedCampaignSaveFlagUnified : 0;
+    if (unifiedCampaignIsCompleted(UnifiedGameId::Fallout1)) {
+        header.flags |= kUnifiedCampaignSaveFlagFallout1Completed;
+    }
+    if (unifiedCampaignIsCompleted(UnifiedGameId::Fallout2)) {
+        header.flags |= kUnifiedCampaignSaveFlagFallout2Completed;
+    }
     return header;
 }
 
@@ -285,6 +324,13 @@ inline bool unifiedCampaignApplySaveHeader(const UnifiedCampaignSaveHeader& head
 
     unifiedCampaignSetActiveGame(savedGame);
     gUnifiedCampaignRuntime.unifiedCampaign = (header.flags & kUnifiedCampaignSaveFlagUnified) != 0;
+    gUnifiedCampaignRuntime.completedGames = 0;
+    if ((header.flags & kUnifiedCampaignSaveFlagFallout1Completed) != 0) {
+        gUnifiedCampaignRuntime.completedGames |= kUnifiedCampaignCompletedFallout1;
+    }
+    if ((header.flags & kUnifiedCampaignSaveFlagFallout2Completed) != 0) {
+        gUnifiedCampaignRuntime.completedGames |= kUnifiedCampaignCompletedFallout2;
+    }
     return true;
 }
 
