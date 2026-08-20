@@ -228,6 +228,7 @@ inline void localCoopProcessPostgameWorldSwitch()
         } else {
             unifiedCampaignClearCarryover();
             unifiedCampaignCancelPostgameResume();
+            unifiedCampaignCancelAutoStartNewGame();
         }
     }
 
