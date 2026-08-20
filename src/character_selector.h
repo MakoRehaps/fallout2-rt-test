@@ -16,13 +16,18 @@ void premadeCharactersExit();
 // premade-character selection. Ordinary new games retain the stock selector.
 #if defined(MAIN_H)
 #include "unified_campaign_carryover.h"
+#include "unified_campaign_transition.h"
 
 namespace fallout {
 
 inline int unifiedCampaignCharacterSelectorOpen()
 {
     if (unifiedCampaignCarryoverCanApply()) {
-        return unifiedCampaignApplyPlayerCarryover() ? 2 : 0;
+        bool applied = unifiedCampaignApplyPlayerCarryover();
+        if (applied) {
+            unifiedCampaignConsumePostgameResume();
+        }
+        return applied ? 2 : 0;
     }
 
     return characterSelectorOpen();
