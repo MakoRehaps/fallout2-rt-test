@@ -13,7 +13,7 @@ on:
       - .github/workflows/extract-f1-walkmask.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: agent/unified-coop-engine
 
       - name: Generate compact exact mask
         shell: bash
@@ -50,7 +52,7 @@ jobs:
           max_spans_per_row = 0
           rows_with_spans = 0
 
-          for y, row in enumerate(rows):
+          for row in rows:
               bits = [bool(row[x // 8] & (0x80 >> (x % 8))) for x in range(1064)]
               row_spans = []
               x = 0
@@ -120,7 +122,7 @@ jobs:
           out.append("} // namespace fallout")
           out.append("")
           out.append("#endif /* UNIFIED_FALLOUT1_WALKMASK_DATA_H */")
-          Path("unified_fallout1_walkmask_data.h").write_text("\n".join(out) + "\n", encoding="utf-8")
+          Path("src/unified_fallout1_walkmask_data.h").write_text("\n".join(out) + "\n", encoding="utf-8")
 
           stats = {
               "source_bytes": expected,
@@ -134,11 +136,25 @@ jobs:
           print(json.dumps(stats, indent=2))
           PY
 
+      - name: Vendor generated mask on branch
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/unified_fallout1_walkmask_data.h
+          if git diff --cached --quiet; then
+            echo "Mask data already up to date."
+          else
+            git commit -m "Vendor exact Fallout 1 walkmask spans"
+            git push origin HEAD:agent/unified-coop-engine
+          fi
+
       - name: Upload generated mask
         uses: actions/upload-artifact@v4
         with:
           name: fallout1-walkmask-generated
           path: |
-            unified_fallout1_walkmask_data.h
+            src/unified_fallout1_walkmask_data.h
             walkmask_stats.json
           retention-days: 7
