@@ -8,6 +8,7 @@
 
 #include "combat.h"
 #include "critter.h"
+#include "game.h"
 #include "input.h"
 #include "item.h"
 #include "kb.h"
@@ -17,6 +18,7 @@
 #include "object.h"
 #include "proto_types.h"
 #include "tile.h"
+#include "unified_campaign_transition.h"
 
 namespace fallout {
 
@@ -30,6 +32,7 @@ struct LocalCoopRuntimeSlot {
     bool primaryWasDown = false;
     bool reloadWasDown = false;
     bool secondaryWasDown = false;
+    bool postgameSwitchWasDown = false;
     Object* aimTarget = nullptr;
 };
 
@@ -121,10 +124,6 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     }
 
     LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
-
-    // Cursorless soft lock: right stick picks a target cone, then that target is
-    // retained while the stick returns to center. Point toward another enemy to
-    // retarget. No mouse cursor or pixel-precise screen coordinate is involved.
     Object* target = localCoopFocusFindEnemy(player);
     runtime.aimTarget = target;
     if (target == nullptr) {
@@ -132,8 +131,6 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     }
 
     int hitMode = localCoopGetHitMode(actor, secondary);
-
-    // Player attacks are cooldown paced in realtime mode, not turn/AP gated.
     actor->data.critter.combat.ap = 9999;
 
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
@@ -174,9 +171,6 @@ inline void localCoopSuppressHumanCompanionAi()
 
 inline Uint32 localCoopLegacyHeartbeatDelay()
 {
-    // Before the first legacy pass, use a short heartbeat so NPCs are quickly
-    // discovered/registered. Once registered, action permission belongs to the
-    // realtime clocks, so legacy rounds can slow down to bookkeeping cadence.
     return localCoopRealtimeAiHasRegisteredActors()
         ? kLocalCoopBookkeepingHeartbeatMs
         : kLocalCoopInitialSchedulerHeartbeatMs;
@@ -200,14 +194,35 @@ inline void localCoopYieldLegacyPlayerTurn()
     if (!gLocalCoopLegacyYieldQueued
         && (gLocalCoopNextLegacyYieldTick == 0
             || localCoopTickReached(now, gLocalCoopNextLegacyYieldTick))) {
-        // The player turn is only a legacy bookkeeping heartbeat. While it is
-        // open, Fallout keeps calling input/tickers and the independent NPC AI
-        // clocks are free to act. Yield occasionally so combat scripts,
-        // sequence maintenance and end-condition checks still run.
         enqueueInputEvent(KEY_SPACE);
         gLocalCoopLegacyYieldQueued = true;
         gLocalCoopNextLegacyYieldTick = now + localCoopLegacyHeartbeatDelay();
     }
+}
+
+inline void localCoopProcessPostgameWorldSwitch()
+{
+    if (isInCombat() || !unifiedCampaignBothGamesCompleted()) {
+        return;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    if (!player.connected || player.controller == nullptr || player.uiMode != LocalCoopUiMode::World) {
+        return;
+    }
+
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[0];
+    bool backDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_BACK) != 0;
+    bool startDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+    bool switchDown = backDown && startDown;
+
+    if (switchDown && !runtime.postgameSwitchWasDown) {
+        if (unifiedCampaignRequestPostgameWorldSwitchAndResume()) {
+            _game_user_wants_to_quit = 2;
+        }
+    }
+
+    runtime.postgameSwitchWasDown = switchDown;
 }
 
 inline void localCoopProcessCombatInput()
@@ -401,27 +416,21 @@ inline void localCoopRuntimeTick()
         localCoopInit();
     }
 
-    // Install the AI dispatcher only after co-op initialization. Outside combat
-    // the bridge falls straight through to Fallout's stock AI implementation.
     localCoopRealtimeAiInstall();
-
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
 
     if (isInCombat()) {
         gLocalCoopRealtimeCombatActive = true;
         localCoopSuppressHumanCompanionAi();
-
-        // NPC permission to act now lives here, once per frame, independently
-        // from `_combat_turn`. Registered actors each own a wall-clock cooldown.
         localCoopRealtimeAiTick();
-
         localCoopProcessCombatInput();
         localCoopYieldLegacyPlayerTurn();
     } else {
         if (gLocalCoopRealtimeCombatActive) {
             localCoopSetRealtimeCombatActive(false);
         }
+        localCoopProcessPostgameWorldSwitch();
         localCoopProcessWorldCombatStart();
     }
 
