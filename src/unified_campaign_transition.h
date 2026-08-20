@@ -24,14 +24,14 @@ inline bool unifiedCampaignRequestPostgameWorldSwitchAndResume()
         return false;
     }
 
+    gUnifiedCampaignAutoStartNewGame = true;
     gUnifiedCampaignPostgameResumePending = true;
     return true;
 }
 
 inline bool unifiedCampaignConsumeAutoStartNewGame()
 {
-    if (!gUnifiedCampaignAutoStartNewGame
-        || unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout2) {
+    if (!gUnifiedCampaignAutoStartNewGame) {
         return false;
     }
 
