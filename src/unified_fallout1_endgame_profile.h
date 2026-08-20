@@ -54,7 +54,7 @@ inline void unifiedFallout1EndgamePlayMovie()
             // Mark Act II complete before entering the stock sequence so the
             // subsequent continue-playing save records that both campaigns are
             // finished without changing Fallout 2's endgame implementation.
-            unifiedCampaignMarkCompleted(UnifiedGameId::Fallout2);
+            unifiedCampaignMarkGameCompleted(UnifiedGameId::Fallout2);
         }
 
         endgamePlayMovie();
