@@ -1,0 +1,139 @@
+name: Extract Fallout 1 Walkmask
+
+on:
+  push:
+    branches:
+      - agent/unified-coop-engine
+    paths:
+      - .github/workflows/extract-f1-walkmask.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate exact walkmask spans
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate compact exact mask
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          url = "https://raw.githubusercontent.com/alexbatalov/fallout1-ce/0609bcfd0ec40ff0571d0f57fab2821eb461dc8b/src/game/worldmap_walkmask.cc"
+          source = urllib.request.urlopen(url, timeout=60).read().decode("utf-8")
+          marker = "unsigned char WALKMASK_MASK_DATA[1500][133] = {"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n};", start)
+          body = source[start:end]
+          values = [int(value, 16) for value in re.findall(r"0x([0-9A-Fa-f]{2})", body)]
+          expected = 1500 * 133
+          if len(values) != expected:
+              raise SystemExit(f"expected {expected} mask bytes, got {len(values)}")
+
+          rows = [values[row * 133:(row + 1) * 133] for row in range(1500)]
+          spans = []
+          row_offsets = [0]
+          max_spans_per_row = 0
+          rows_with_spans = 0
+
+          for y, row in enumerate(rows):
+              bits = [bool(row[x // 8] & (0x80 >> (x % 8))) for x in range(1064)]
+              row_spans = []
+              x = 0
+              while x < 1064:
+                  if not bits[x]:
+                      x += 1
+                      continue
+                  first = x
+                  x += 1
+                  while x < 1064 and bits[x]:
+                      x += 1
+                  row_spans.append((first, x))
+
+              if row_spans:
+                  rows_with_spans += 1
+              max_spans_per_row = max(max_spans_per_row, len(row_spans))
+              spans.extend(row_spans)
+              row_offsets.append(len(spans))
+
+          out = []
+          out.append("#ifndef UNIFIED_FALLOUT1_WALKMASK_DATA_H")
+          out.append("#define UNIFIED_FALLOUT1_WALKMASK_DATA_H")
+          out.append("")
+          out.append("#include <cstdint>")
+          out.append("")
+          out.append("namespace fallout {")
+          out.append("")
+          out.append("// Generated from fallout1-ce WALKMASK_MASK_DATA at commit")
+          out.append("// 0609bcfd0ec40ff0571d0f57fab2821eb461dc8b. Each span is")
+          out.append("// [firstX, endX) and preserves the stock bit test exactly for x<1064.")
+          out.append("struct UnifiedFallout1WalkmaskSpan {")
+          out.append("    std::uint16_t firstX;")
+          out.append("    std::uint16_t endX;")
+          out.append("};")
+          out.append("")
+          out.append("inline constexpr std::uint16_t kUnifiedFallout1WalkmaskRowOffsets[1501] = {")
+          for i in range(0, len(row_offsets), 16):
+              chunk = ", ".join(str(v) for v in row_offsets[i:i + 16])
+              out.append("    " + chunk + ("," if i + 16 < len(row_offsets) else ""))
+          out.append("};")
+          out.append("")
+          out.append(f"inline constexpr UnifiedFallout1WalkmaskSpan kUnifiedFallout1WalkmaskSpans[{len(spans)}] = {{")
+          for first, end_x in spans:
+              out.append(f"    {{ {first}, {end_x} }},")
+          out.append("};")
+          out.append("")
+          out.append("inline bool unifiedFallout1WalkmaskBlocked(int worldX, int worldY)")
+          out.append("{")
+          out.append("    if (worldX < 0 || worldX >= 1064 || worldY <= 0 || worldY >= 1500) {")
+          out.append("        return false;")
+          out.append("    }")
+          out.append("")
+          out.append("    std::uint16_t begin = kUnifiedFallout1WalkmaskRowOffsets[worldY];")
+          out.append("    std::uint16_t end = kUnifiedFallout1WalkmaskRowOffsets[worldY + 1];")
+          out.append("    for (std::uint16_t index = begin; index < end; index++) {")
+          out.append("        const UnifiedFallout1WalkmaskSpan& span = kUnifiedFallout1WalkmaskSpans[index];")
+          out.append("        if (worldX < span.firstX) {")
+          out.append("            return false;")
+          out.append("        }")
+          out.append("        if (worldX < span.endX) {")
+          out.append("            return true;")
+          out.append("        }")
+          out.append("    }")
+          out.append("    return false;")
+          out.append("}")
+          out.append("")
+          out.append("} // namespace fallout")
+          out.append("")
+          out.append("#endif /* UNIFIED_FALLOUT1_WALKMASK_DATA_H */")
+          Path("unified_fallout1_walkmask_data.h").write_text("\n".join(out) + "\n", encoding="utf-8")
+
+          stats = {
+              "source_bytes": expected,
+              "rows": 1500,
+              "mask_width": 1064,
+              "span_count": len(spans),
+              "rows_with_spans": rows_with_spans,
+              "max_spans_per_row": max_spans_per_row,
+          }
+          Path("walkmask_stats.json").write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(stats, indent=2))
+          PY
+
+      - name: Upload generated mask
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallout1-walkmask-generated
+          path: |
+            unified_fallout1_walkmask_data.h
+            walkmask_stats.json
+          retention-days: 7
