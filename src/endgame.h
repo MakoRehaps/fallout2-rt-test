@@ -32,4 +32,14 @@ char* endgameDeathEndingGetFileName();
 #define endgamePlayMovie unifiedFallout1EndgamePlayMovie
 #endif
 
+// main.cc includes main.h before endgame.h. Fallout 1's player-death path does
+// not use Fallout 2's death-ending condition table; it displays DEATH.FRM and
+// randomly selects narrator nar_3 through nar_6. Keep endgame.cc untouched and
+// redirect only executable-side death setup/selection calls.
+#if defined(MAIN_H)
+#include "unified_fallout1_death_profile.h"
+#define endgameSetupDeathEnding unifiedFallout1SetupDeathEnding
+#define endgameDeathEndingGetFileName unifiedFallout1DeathEndingGetFileName
+#endif
+
 #endif /* ENDGAME_H */
