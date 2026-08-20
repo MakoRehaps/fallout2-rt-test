@@ -4,8 +4,15 @@
 #include "game.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_travel_profile.h"
+#include "unified_fallout1_route_profile.h"
 #include "unified_fallout1_worldmap_events.h"
+
+// Keep the existing visual layer intact while routing its single travel handoff
+// through the coastline-aware controller travel backend.
+#define unifiedFallout1TravelToTown unifiedFallout1TravelToTownRouted
 #include "unified_fallout1_worldmap_visual.h"
+#undef unifiedFallout1TravelToTown
+
 #include "unified_worldmap_state_profile.h"
 
 namespace fallout {
