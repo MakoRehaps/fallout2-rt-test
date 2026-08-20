@@ -22,6 +22,7 @@ inline constexpr int kUnifiedCampaignCarryoverItemNameLength = 80;
 struct UnifiedCampaignCarryoverItem {
     bool valid = false;
     char name[kUnifiedCampaignCarryoverItemNameLength] {};
+    int sourcePid = -1;
     int quantity = 0;
     int itemType = -1;
     int equippedFlags = 0;
@@ -76,6 +77,7 @@ inline void unifiedCampaignCaptureInventory(UnifiedCampaignCarryover& carryover)
         captured.valid = true;
         std::strncpy(captured.name, name, sizeof(captured.name) - 1);
         captured.name[sizeof(captured.name) - 1] = '\0';
+        captured.sourcePid = item->pid;
         captured.quantity = inventoryItem.quantity;
         captured.itemType = itemGetType(item);
         captured.equippedFlags = item->flags & OBJECT_EQUIPPED;
@@ -157,29 +159,52 @@ inline void unifiedCampaignRestoreSkillBase(int skill, int target)
     }
 }
 
+inline bool unifiedCampaignDestinationItemPidMatches(int pid, const UnifiedCampaignCarryoverItem& captured)
+{
+    if (pid < 0 || PID_TYPE(pid) != OBJ_TYPE_ITEM) {
+        return false;
+    }
+
+    Proto* proto = nullptr;
+    if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
+        return false;
+    }
+
+    const char* destinationName = protoGetName(pid);
+    if (destinationName == nullptr || compat_stricmp(destinationName, captured.name) != 0) {
+        return false;
+    }
+
+    Object* probe = nullptr;
+    if (objectCreateWithPid(&probe, pid) != 0 || probe == nullptr) {
+        return false;
+    }
+
+    int destinationType = itemGetType(probe);
+    objectDestroy(probe, nullptr);
+    return destinationType == captured.itemType;
+}
+
 inline int unifiedCampaignFindDestinationItemPid(const UnifiedCampaignCarryoverItem& captured)
 {
+    // Fallout 1 and Fallout 2 deliberately retain many original item PIDs. Try
+    // the exact source PID first, but validate both localized name and item type
+    // before accepting it so a numerically reused PID can never turn into a
+    // different Fallout 2 object.
+    if (unifiedCampaignDestinationItemPidMatches(captured.sourcePid, captured)) {
+        return captured.sourcePid;
+    }
+
+    // Mods and localized installs may renumber otherwise equivalent items. Fall
+    // back to the slower name/type scan only when the stable PID check fails.
     int maxItemId = proto_max_id(OBJ_TYPE_ITEM);
     for (int id = 0; id <= maxItemId; id++) {
         int pid = (OBJ_TYPE_ITEM << 24) | id;
-        Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
+        if (pid == captured.sourcePid) {
             continue;
         }
 
-        const char* destinationName = protoGetName(pid);
-        if (destinationName == nullptr || compat_stricmp(destinationName, captured.name) != 0) {
-            continue;
-        }
-
-        Object* probe = nullptr;
-        if (objectCreateWithPid(&probe, pid) != 0 || probe == nullptr) {
-            continue;
-        }
-
-        int destinationType = itemGetType(probe);
-        objectDestroy(probe, nullptr);
-        if (destinationType == captured.itemType) {
+        if (unifiedCampaignDestinationItemPidMatches(pid, captured)) {
             return pid;
         }
     }
