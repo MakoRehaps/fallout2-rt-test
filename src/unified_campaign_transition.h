@@ -6,6 +6,7 @@
 namespace fallout {
 
 inline bool gUnifiedCampaignAutoStartNewGame = false;
+inline bool gUnifiedCampaignPostgameResumePending = false;
 
 inline bool unifiedCampaignAdvanceToFallout2AndAutoStart()
 {
@@ -14,6 +15,16 @@ inline bool unifiedCampaignAdvanceToFallout2AndAutoStart()
     }
 
     gUnifiedCampaignAutoStartNewGame = true;
+    return true;
+}
+
+inline bool unifiedCampaignRequestPostgameWorldSwitchAndResume()
+{
+    if (!unifiedCampaignRequestOtherPostgameWorld()) {
+        return false;
+    }
+
+    gUnifiedCampaignPostgameResumePending = true;
     return true;
 }
 
@@ -28,9 +39,25 @@ inline bool unifiedCampaignConsumeAutoStartNewGame()
     return true;
 }
 
+inline bool unifiedCampaignConsumePostgameResume()
+{
+    if (!gUnifiedCampaignPostgameResumePending
+        || !unifiedCampaignBothGamesCompleted()) {
+        return false;
+    }
+
+    gUnifiedCampaignPostgameResumePending = false;
+    return true;
+}
+
 inline void unifiedCampaignCancelAutoStartNewGame()
 {
     gUnifiedCampaignAutoStartNewGame = false;
+}
+
+inline void unifiedCampaignCancelPostgameResume()
+{
+    gUnifiedCampaignPostgameResumePending = false;
 }
 
 } // namespace fallout
