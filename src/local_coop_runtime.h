@@ -18,6 +18,7 @@
 #include "object.h"
 #include "proto_types.h"
 #include "tile.h"
+#include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
 
 namespace fallout {
@@ -217,8 +218,16 @@ inline void localCoopProcessPostgameWorldSwitch()
     bool switchDown = backDown && startDown;
 
     if (switchDown && !runtime.postgameSwitchWasDown) {
-        if (unifiedCampaignRequestPostgameWorldSwitchAndResume()) {
+        UnifiedGameId destination = unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1
+            ? UnifiedGameId::Fallout2
+            : UnifiedGameId::Fallout1;
+
+        if (unifiedCampaignCapturePlayerCarryover(destination)
+            && unifiedCampaignRequestPostgameWorldSwitchAndResume()) {
             _game_user_wants_to_quit = 2;
+        } else {
+            unifiedCampaignClearCarryover();
+            unifiedCampaignCancelPostgameResume();
         }
     }
 
