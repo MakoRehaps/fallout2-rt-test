@@ -4,6 +4,7 @@
 #include "game.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_travel_profile.h"
+#include "unified_fallout1_townmap_visual.h"
 #include "unified_fallout1_worldmap_events.h"
 
 namespace fallout {
@@ -29,6 +30,10 @@ inline bool unifiedFallout1TravelAdvanceTimeAndEvents(int ticks)
 
 } // namespace fallout
 
+// Route arrivals through the original F1 town-map art/hotspot selector while
+// leaving the base text selector available as an asset-failure fallback.
+#define unifiedFallout1SelectAndLoadTownEntrance unifiedFallout1SelectAndLoadTownEntranceVisual
+
 // Route travel's time advancement through the F1 event-aware wrapper without
 // changing the generic travel helper or Fallout 2's stock world-map path.
 #define unifiedFallout1TravelAdvanceTime unifiedFallout1TravelAdvanceTimeAndEvents
@@ -40,6 +45,7 @@ inline bool unifiedFallout1TravelAdvanceTimeAndEvents(int ticks)
 #define unifiedFallout1TravelToTown unifiedFallout1TravelToTownRouted
 #include "unified_fallout1_worldmap_visual.h"
 #undef unifiedFallout1TravelToTown
+#undef unifiedFallout1SelectAndLoadTownEntrance
 
 #include "unified_worldmap_state_profile.h"
 
