@@ -15,6 +15,7 @@ extern char _aEnglish_2[];
 
 void endgamePlaySlideshow();
 void endgamePlayMovie();
+void unifiedFallout1EndgamePlaySlideshowImpl();
 int endgameDeathEndingInit();
 int endgameDeathEndingExit();
 void endgameSetupDeathEnding(int reason);
