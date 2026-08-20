@@ -48,6 +48,15 @@ inline void unifiedFallout1EndgamePlaySlideshow()
 inline void unifiedFallout1EndgamePlayMovie()
 {
     if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        if (unifiedCampaignIsEnabled()
+            && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout2) {
+            // The stock Fallout 2 endgame movie is the final campaign handoff.
+            // Mark Act II complete before entering the stock sequence so the
+            // subsequent continue-playing save records that both campaigns are
+            // finished without changing Fallout 2's endgame implementation.
+            unifiedCampaignMarkCompleted(UnifiedGameId::Fallout2);
+        }
+
         endgamePlayMovie();
         return;
     }
