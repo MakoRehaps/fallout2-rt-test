@@ -91,4 +91,9 @@ inline void unifiedWmWorldMapRuntime()
 
 } // namespace fallout
 
+// worldmap.h's script-only redirect already names unifiedWmTownMap. Remap that
+// symbol only in the translation-unit shape that included this runtime header;
+// stock worldmap.cc never includes this file and therefore remains untouched.
+#define unifiedWmTownMap unifiedWmTownMapVisual
+
 #endif /* UNIFIED_FALLOUT1_WORLDMAP_RUNTIME_H */
