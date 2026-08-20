@@ -8,6 +8,7 @@
 #include "proto_types.h"
 #include "stat.h"
 #include "unified_campaign.h"
+#include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
 #include "unified_fallout1_movie_profile.h"
 
@@ -67,17 +68,26 @@ inline void unifiedFallout1EndgamePlayMovie()
     creditsOpen("credits.txt", -1, false);
 
     if (unifiedCampaignIsEnabled()) {
+        // Preserve the completed Fallout 1 player's build before the F1 object,
+        // proto, skill and stat systems are torn down. The F2 character-selector
+        // bridge consumes this once after the F2 rebootstrap, so Act II starts
+        // with the same SPECIAL, traits, tagged/trained skills and PC stats
+        // instead of silently replacing the player with a new premade.
+        if (!unifiedCampaignCapturePlayerCarryover(UnifiedGameId::Fallout2)) {
+            unifiedCampaignClearCarryover();
+        }
+
         // Do not switch cwd/databases under live F1 scripts. The existing main
         // loop sees this request, exits through the normal teardown path, then
         // performs a full Fallout 2 rebootstrap. The transition flag makes the
         // fresh F2 main-menu event call choose NEW GAME exactly once so Act II
-        // enters the stock character-selector/startup path automatically.
-        // This source path is compiler-verified; real F1/F2 data still requires
-        // runtime validation before the transition can be called stable.
+        // enters the stock startup path automatically.
         if (unifiedCampaignAdvanceToFallout2AndAutoStart()) {
             _game_user_wants_to_quit = 2;
             return;
         }
+
+        unifiedCampaignClearCarryover();
     }
 
     // Standalone --fallout1 keeps the original semantic of ending the game.
