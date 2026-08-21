@@ -22,26 +22,46 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Source: "..\build\RelWithDebInfo\fallout2-ce.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{code:GetFallout1Root}"" --fallout2-root=""{code:GetFallout2Root}"""; WorkingDir: "{app}"
-Name: "{autodesktop}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{code:GetFallout1Root}"" --fallout2-root=""{code:GetFallout2Root}"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"
+Name: "{autodesktop}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{code:GetFallout1Root}"" --fallout2-root=""{code:GetFallout2Root}"""; Description: "Launch Fallout Unified Co-op Beta"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; Description: "Launch Fallout Unified Co-op Beta"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
   GameRootsPage: TInputDirWizardPage;
 
+function ExistingFileEitherCase(const Root, LowerName, UpperName: String): String;
+begin
+  if FileExists(AddBackslash(Root) + LowerName) then
+    Result := AddBackslash(Root) + LowerName
+  else if FileExists(AddBackslash(Root) + UpperName) then
+    Result := AddBackslash(Root) + UpperName
+  else
+    Result := '';
+end;
+
+function ExistingDirEitherCase(const Root, LowerName, UpperName: String): String;
+begin
+  if DirExists(AddBackslash(Root) + LowerName) then
+    Result := AddBackslash(Root) + LowerName
+  else if DirExists(AddBackslash(Root) + UpperName) then
+    Result := AddBackslash(Root) + UpperName
+  else
+    Result := '';
+end;
+
 function HasGameData(const Root: String; NeedPatch: Boolean): Boolean;
 begin
-  Result := FileExists(AddBackslash(Root) + 'master.dat') or FileExists(AddBackslash(Root) + 'MASTER.DAT');
-  Result := Result and (FileExists(AddBackslash(Root) + 'critter.dat') or FileExists(AddBackslash(Root) + 'CRITTER.DAT'));
-  Result := Result and DirExists(AddBackslash(Root) + 'data');
+  Result := ExistingFileEitherCase(Root, 'master.dat', 'MASTER.DAT') <> '';
+  Result := Result and (ExistingFileEitherCase(Root, 'critter.dat', 'CRITTER.DAT') <> '');
+  Result := Result and (ExistingDirEitherCase(Root, 'data', 'DATA') <> '');
   if NeedPatch then
-    Result := Result and (FileExists(AddBackslash(Root) + 'patch000.dat') or FileExists(AddBackslash(Root) + 'PATCH000.DAT'));
+    Result := Result and (ExistingFileEitherCase(Root, 'patch000.dat', 'PATCH000.DAT') <> '');
 end;
 
 function TrySteamCommon(const CommonRoot, GameName: String): String;
@@ -76,6 +96,78 @@ begin
   end;
 end;
 
+function QuoteCmdArg(const Value: String): String;
+begin
+  Result := '"' + Value + '"';
+end;
+
+function CopyTreeWithRobocopy(const SourceDir, DestDir: String): Boolean;
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  if not DirExists(SourceDir) then
+  begin
+    Result := True;
+    exit;
+  end;
+
+  ForceDirectories(DestDir);
+  Params := QuoteCmdArg(SourceDir) + ' ' + QuoteCmdArg(DestDir)
+    + ' /E /COPY:DAT /DCOPY:DA /R:2 /W:1 /NFL /NDL /NJH /NJS /NP';
+
+  Result := Exec(ExpandConstant('{sys}\robocopy.exe'), Params, '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) and (ResultCode >= 0) and (ResultCode <= 7);
+end;
+
+function CopyRequiredFile(const SourceRoot, DestRoot, LowerName, UpperName: String): Boolean;
+var
+  SourceFile: String;
+begin
+  SourceFile := ExistingFileEitherCase(SourceRoot, LowerName, UpperName);
+  if SourceFile = '' then
+  begin
+    Result := False;
+    exit;
+  end;
+
+  ForceDirectories(DestRoot);
+  Result := FileCopy(SourceFile, AddBackslash(DestRoot) + LowerName, False);
+end;
+
+function CopyGameData(const SourceRoot, DestRoot: String; NeedPatch: Boolean): Boolean;
+var
+  DataDir: String;
+  SoundDir: String;
+begin
+  Result := CopyRequiredFile(SourceRoot, DestRoot, 'master.dat', 'MASTER.DAT');
+  if not Result then exit;
+
+  Result := CopyRequiredFile(SourceRoot, DestRoot, 'critter.dat', 'CRITTER.DAT');
+  if not Result then exit;
+
+  if NeedPatch then
+  begin
+    Result := CopyRequiredFile(SourceRoot, DestRoot, 'patch000.dat', 'PATCH000.DAT');
+    if not Result then exit;
+  end;
+
+  DataDir := ExistingDirEitherCase(SourceRoot, 'data', 'DATA');
+  if DataDir = '' then
+  begin
+    Result := False;
+    exit;
+  end;
+
+  Result := CopyTreeWithRobocopy(DataDir, AddBackslash(DestRoot) + 'data');
+  if not Result then exit;
+
+  { Some releases keep music/sound beside DATA rather than inside it. }
+  SoundDir := ExistingDirEitherCase(SourceRoot, 'sound', 'SOUND');
+  if SoundDir <> '' then
+    Result := CopyTreeWithRobocopy(SoundDir, AddBackslash(DestRoot) + 'sound');
+end;
+
 procedure InitializeWizard;
 var
   F1: String;
@@ -84,7 +176,7 @@ begin
   GameRootsPage := CreateInputDirPage(wpSelectDir,
     'Locate your Fallout games',
     'Select your original Fallout 1 and Fallout 2 installation folders.',
-    'The installer does not include copyrighted game data. It only creates a configured launcher that points at your existing installations.',
+    'The installer will COPY the required data from your owned games into the beta installation. Your Steam installations are not modified.',
     False, '');
 
   GameRootsPage.Add('Fallout 1 folder:');
@@ -117,12 +209,24 @@ begin
   end;
 end;
 
-function GetFallout1Root(Param: String): String;
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  F1Dest: String;
+  F2Dest: String;
 begin
-  Result := GameRootsPage.Values[0];
-end;
+  if CurStep <> ssPostInstall then
+    exit;
 
-function GetFallout2Root(Param: String): String;
-begin
-  Result := GameRootsPage.Values[1];
+  F1Dest := ExpandConstant('{app}\GameData\Fallout1');
+  F2Dest := ExpandConstant('{app}\GameData\Fallout2');
+
+  WizardForm.StatusLabel.Caption := 'Copying Fallout 1 game data...';
+  if not CopyGameData(GameRootsPage.Values[0], F1Dest, False) then
+    RaiseException('Failed to copy Fallout 1 game data into the beta installation.');
+
+  WizardForm.StatusLabel.Caption := 'Copying Fallout 2 game data...';
+  if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
+    RaiseException('Failed to copy Fallout 2 game data into the beta installation.');
+
+  WizardForm.StatusLabel.Caption := 'Fallout game data copied successfully.';
 end;
