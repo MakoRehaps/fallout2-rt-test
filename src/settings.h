@@ -4,6 +4,7 @@
 #include <string>
 
 #include "game_config.h"
+#include "unified_campaign.h"
 
 namespace fallout {
 
@@ -102,6 +103,49 @@ extern Settings settings;
 bool settingsInit(bool isMapper, int argc, char** argv);
 bool settingsSave();
 bool settingsExit(bool shouldSave);
+
+// game.cc includes game.h before settings.h. Restrict this wrapper to that
+// consumer so settings.cc still defines the stock settingsInit symbol normally.
+// Unified mode must never inherit stale Fallout 2 asset paths from fallout2.cfg:
+// the active campaign root is authoritative immediately before gameDbInit opens
+// MASTER.DAT, CRITTER.DAT and the loose patch directory.
+#ifdef GAME_H
+inline bool unifiedCampaignSettingsInit(bool isMapper, int argc, char** argv)
+{
+    if (!settingsInit(isMapper, argc, argv)) {
+        return false;
+    }
+
+    if (!unifiedCampaignIsEnabled()) {
+        return true;
+    }
+
+    const std::string& root = unifiedCampaignGetActiveRoot();
+    if (root.empty()) {
+        return true;
+    }
+
+#if defined(_WIN32)
+    constexpr char kPathSeparator = '\\';
+#else
+    constexpr char kPathSeparator = '/';
+#endif
+
+    std::string prefix = root;
+    if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\') {
+        prefix.push_back(kPathSeparator);
+    }
+
+    settings.system.master_dat_path = prefix + "master.dat";
+    settings.system.critter_dat_path = prefix + "critter.dat";
+    settings.system.master_patches_path = prefix + "data";
+    settings.system.critter_patches_path = prefix + "data";
+
+    return true;
+}
+
+#define settingsInit unifiedCampaignSettingsInit
+#endif
 
 } // namespace fallout
 
