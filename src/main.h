@@ -23,6 +23,7 @@
 #include "local_coop_modal_controller.h"
 #include "local_coop_mode_sync.h"
 #include "local_coop_runtime.h"
+#include "local_coop_beta_hotfix.h"
 #include "unified_campaign.h"
 
 namespace fallout {
@@ -113,7 +114,13 @@ inline int localCoopMainInputGetInput()
     localCoopGenericUiControllerEnsureTicker();
     localCoopLiveLootEnsureTicker();
     localCoopSyncLegacyModes();
+
+    // Preserve the pre-runtime camera center so the beta correction can apply a
+    // shared-screen dead-zone after the old runtime has processed movement.
+    localCoopBetaHotfixBeginFrame();
     localCoopRuntimeTick();
+    localCoopBetaHotfixAfterRuntime();
+
     localCoopFocusTick();
     localCoopInventoryUiEnsureTicker();
     localCoopInventoryUiTick();
@@ -163,6 +170,16 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
     gUnifiedCampaignStartupWindowTitle = windowTitle != nullptr ? windowTitle : "FALLOUT II";
 
     unifiedCampaignConfigureFromArgs(argc, argv);
+
+    // A fresh combined-campaign process always begins in Fallout 1. Save-load
+    // and explicit postgame transitions still use the requested-content path
+    // below and are not affected by this one-time bootstrap selection.
+    if (unifiedCampaignIsEnabled()) {
+        unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
+        gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout1;
+        gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+    }
+
     unifiedCampaignSetBeforeGameResetHook(localCoopResetTransientStateForLoad);
 
     if (!unifiedCampaignActivateContentRoot()) {
