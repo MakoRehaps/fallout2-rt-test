@@ -7,6 +7,31 @@
 
 #include "dfile.h"
 #include "platform_compat.h"
+#include "unified_fallout1_dfile_adapter.h"
+
+// xfile.cc remains the common resource layer. Route only its DBase/DFile calls
+// through profile-aware wrappers. The wrappers fall straight through to the
+// untouched Fallout 2 DAT2 implementation unless the active profile is F1 and
+// an original Fallout 1 archive was recognized.
+#define dbaseOpen unifiedDbaseOpen
+#define dbaseClose unifiedDbaseClose
+#define dbaseFindFirstEntry unifiedDbaseFindFirstEntry
+#define dbaseFindNextEntry unifiedDbaseFindNextEntry
+#define dbaseFindClose unifiedDbaseFindClose
+#define dfileGetSize unifiedDfileGetSize
+#define dfileClose unifiedDfileClose
+#define dfileOpen unifiedDfileOpen
+#define dfilePrintFormattedArgs unifiedDfilePrintFormattedArgs
+#define dfileReadChar unifiedDfileReadChar
+#define dfileReadString unifiedDfileReadString
+#define dfileWriteChar unifiedDfileWriteChar
+#define dfileWriteString unifiedDfileWriteString
+#define dfileRead unifiedDfileRead
+#define dfileWrite unifiedDfileWrite
+#define dfileSeek unifiedDfileSeek
+#define dfileTell unifiedDfileTell
+#define dfileRewind unifiedDfileRewind
+#define dfileEof unifiedDfileEof
 
 namespace fallout {
 
