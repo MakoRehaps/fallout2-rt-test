@@ -39,3 +39,23 @@ jobs:
           name: fallout2-ce-coop-windows-x64
           path: build/RelWithDebInfo/fallout2-ce.exe
           retention-days: 7
+
+      - name: Install Inno Setup
+        if: success()
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build beta installer
+        if: success()
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\UnifiedCoopBeta.iss"
+
+      - name: Upload beta installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallout-Unified-Coop-Beta-Setup
+          path: installer-output/Fallout-Unified-Coop-Beta-Setup.exe
+          retention-days: 7
