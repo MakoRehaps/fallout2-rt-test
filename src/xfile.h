@@ -9,11 +9,12 @@
 #include "platform_compat.h"
 #include "unified_fallout1_dfile_adapter.h"
 #include "unified_fallout1_dat1_fixed.h"
+#include "unified_fallout1_dat1_guard.h"
 
 // xfile.cc remains the common resource layer. Route only its DBase/DFile calls
-// through profile-aware wrappers. Fallout 1 uses the corrected DAT1 header and
-// directory parser while Fallout 2 keeps the untouched DAT2 implementation.
-#define dbaseOpen unifiedDbaseOpenFixed
+// through profile-aware wrappers. Fallout 1 uses the guarded DAT1 parser while
+// Fallout 2 keeps the untouched DAT2 implementation.
+#define dbaseOpen unifiedDbaseOpenGuarded
 #define dbaseClose unifiedDbaseClose
 #define dbaseFindFirstEntry unifiedDbaseFindFirstEntry
 #define dbaseFindNextEntry unifiedDbaseFindNextEntry
