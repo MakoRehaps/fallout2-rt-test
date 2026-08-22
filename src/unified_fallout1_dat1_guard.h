@@ -5,13 +5,45 @@
 #include <cstdio>
 #include <cstring>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "unified_fallout1_dat1_fixed.h"
 
 namespace fallout {
 
+inline FILE* unifiedFallout1OpenStartupTrace()
+{
+#if defined(_WIN32)
+    char modulePath[MAX_PATH];
+    DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length > 0 && length < MAX_PATH) {
+        char* slash = std::strrchr(modulePath, '\\');
+        char* forwardSlash = std::strrchr(modulePath, '/');
+        if (forwardSlash != nullptr && (slash == nullptr || forwardSlash > slash)) {
+            slash = forwardSlash;
+        }
+
+        if (slash != nullptr) {
+            slash[1] = '\0';
+            char logPath[MAX_PATH];
+            if (std::snprintf(logPath, sizeof(logPath), "%sunified-startup.log", modulePath) > 0) {
+                FILE* stream = std::fopen(logPath, "a");
+                if (stream != nullptr) {
+                    return stream;
+                }
+            }
+        }
+    }
+#endif
+
+    return std::fopen("unified-startup.log", "a");
+}
+
 inline void unifiedFallout1StartupTrace(const char* format, ...)
 {
-    FILE* stream = std::fopen("unified-startup.log", "a");
+    FILE* stream = unifiedFallout1OpenStartupTrace();
     if (stream == nullptr) {
         return;
     }
@@ -119,7 +151,19 @@ inline DBase* unifiedDbaseOpenGuarded(const char* path)
         return dbaseOpen(path);
     }
 
-    unifiedFallout1StartupTrace("Opening Fallout 1 DAT1: %s", path != nullptr ? path : "<null>");
+    // Fallout's database list contains both DAT archives and ordinary directories.
+    // Only DAT files use the Fallout 1 DAT1 adapter. Directories must stay on the
+    // engine's normal DBase path or loose assets (including fonts) disappear.
+    if (path == nullptr || !unifiedFallout1DatPathEndsWith(path, ".dat")) {
+        DBase* base = dbaseOpen(path);
+        unifiedFallout1StartupTrace(
+            "Fallout 1 loose-data path: %s result=%s",
+            path != nullptr ? path : "<null>",
+            base != nullptr ? "ok" : "failed");
+        return base;
+    }
+
+    unifiedFallout1StartupTrace("Opening Fallout 1 DAT1: %s", path);
 
     UnifiedFallout1DatBase* base = unifiedFallout1DatOpenBaseFixed(path);
     if (!unifiedFallout1DatValidateBase(base, path)) {
