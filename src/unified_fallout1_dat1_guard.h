@@ -4,14 +4,36 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #include "unified_fallout1_dat1_fixed.h"
 
 namespace fallout {
 
+inline std::string unifiedDebugLogPath()
+{
+#if defined(_WIN32)
+    char modulePath[MAX_PATH] = {};
+    DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length != 0 && length < MAX_PATH) {
+        char* slash = std::strrchr(modulePath, '\\');
+        if (slash != nullptr) {
+            slash[1] = '\0';
+            return std::string(modulePath) + "unified-debug.log";
+        }
+    }
+#endif
+    return "unified-debug.log";
+}
+
 inline void unifiedFallout1StartupTrace(const char* format, ...)
 {
-    FILE* stream = std::fopen("unified-startup.log", "a");
+    std::string logPath = unifiedDebugLogPath();
+    FILE* stream = std::fopen(logPath.c_str(), "a");
     if (stream == nullptr) {
         return;
     }
@@ -24,6 +46,31 @@ inline void unifiedFallout1StartupTrace(const char* format, ...)
     std::fflush(stream);
     std::fclose(stream);
 }
+
+#if defined(_WIN32)
+inline LONG WINAPI unifiedDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
+{
+    DWORD code = 0;
+    void* address = nullptr;
+    if (exceptionInfo != nullptr && exceptionInfo->ExceptionRecord != nullptr) {
+        code = exceptionInfo->ExceptionRecord->ExceptionCode;
+        address = exceptionInfo->ExceptionRecord->ExceptionAddress;
+    }
+
+    unifiedFallout1StartupTrace("*** UNHANDLED EXCEPTION code=0x%08lX address=%p thread=%lu ***",
+        static_cast<unsigned long>(code), address, static_cast<unsigned long>(GetCurrentThreadId()));
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+inline bool unifiedDebugInstallCrashHandler()
+{
+    SetUnhandledExceptionFilter(unifiedDebugUnhandledExceptionFilter);
+    unifiedFallout1StartupTrace("=== unified debug session begin ===");
+    return true;
+}
+
+inline bool gUnifiedDebugCrashHandlerInstalled = unifiedDebugInstallCrashHandler();
+#endif
 
 inline bool unifiedFallout1DatPathEndsWith(const char* path, const char* suffix)
 {
@@ -115,21 +162,43 @@ inline bool unifiedFallout1DatValidateBase(UnifiedFallout1DatBase* base, const c
 
 inline DBase* unifiedDbaseOpenGuarded(const char* path)
 {
-    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
-        return dbaseOpen(path);
-    }
+    unifiedFallout1StartupTrace("DBASE open request activeGame=%u path=%s",
+        static_cast<unsigned int>(unifiedCampaignGetActiveGame()), path != nullptr ? path : "<null>");
 
-    unifiedFallout1StartupTrace("Opening Fallout 1 DAT1: %s", path != nullptr ? path : "<null>");
+    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        DBase* result = dbaseOpen(path);
+        unifiedFallout1StartupTrace("DBASE DAT2 result=%p path=%s", result, path != nullptr ? path : "<null>");
+        return result;
+    }
 
     UnifiedFallout1DatBase* base = unifiedFallout1DatOpenBaseFixed(path);
     if (!unifiedFallout1DatValidateBase(base, path)) {
         delete base;
-        // Fail closed. Never feed a Fallout 1 archive to Fallout 2's DAT2 reader.
+        unifiedFallout1StartupTrace("DBASE DAT1 rejected path=%s", path != nullptr ? path : "<null>");
         return nullptr;
     }
 
     gUnifiedFallout1DatBases.push_back(base);
+    unifiedFallout1StartupTrace("DBASE DAT1 mounted handle=%p path=%s", base, path != nullptr ? path : "<null>");
     return reinterpret_cast<DBase*>(base);
+}
+
+inline DFile* unifiedDfileOpenDebug(DBase* dbase, const char* filename, const char* mode)
+{
+    unifiedFallout1StartupTrace("DFILE open begin base=%p file=%s mode=%s",
+        dbase,
+        filename != nullptr ? filename : "<null>",
+        mode != nullptr ? mode : "<null>");
+    DFile* result = unifiedDfileOpen(dbase, filename, mode);
+    if (result != nullptr) {
+        unifiedFallout1StartupTrace("DFILE open OK file=%s handle=%p size=%ld",
+            filename != nullptr ? filename : "<null>",
+            result,
+            unifiedDfileGetSize(result));
+    } else {
+        unifiedFallout1StartupTrace("DFILE open FAIL file=%s", filename != nullptr ? filename : "<null>");
+    }
+    return result;
 }
 
 } // namespace fallout
