@@ -1,35 +1,38 @@
-#define MyAppName "Fallout Unified Co-op Beta"
-#define MyAppVersion "0.1-beta"
+#define MyAppName "Fallout Unified Co-op Beta Debug"
+#define MyAppVersion "0.1-beta-debug"
 #define MyAppExeName "fallout2-ce.exe"
 
 [Setup]
 AppId={{8D94A6CE-0F8E-4A6B-BA96-6B3B7E8A94C2}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName={autopf}\Fallout Unified Co-op Beta
+DefaultDirName={userdocs}\Fallout Unified Co-op Beta Debug
+DisableDirPage=no
+UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\installer-output
-OutputBaseFilename=Fallout-Unified-Coop-Beta-Setup
+OutputBaseFilename=Fallout-Unified-Coop-Beta-Debug-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "..\build\RelWithDebInfo\fallout2-ce.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\Debug\fallout2-ce.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\Debug\fallout2-ce.pdb"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{autoprograms}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"
-Name: "{autodesktop}\Fallout Unified Co-op Beta"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\Fallout Unified Co-op Beta Debug"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"
+Name: "{autodesktop}\Fallout Unified Co-op Beta Debug"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; Description: "Launch Fallout Unified Co-op Beta"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"""; Description: "Launch Fallout Unified Co-op Beta Debug"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
@@ -162,7 +165,6 @@ begin
   Result := CopyTreeWithRobocopy(DataDir, AddBackslash(DestRoot) + 'data');
   if not Result then exit;
 
-  { Some releases keep music/sound beside DATA rather than inside it. }
   SoundDir := ExistingDirEitherCase(SourceRoot, 'sound', 'SOUND');
   if SoundDir <> '' then
     Result := CopyTreeWithRobocopy(SoundDir, AddBackslash(DestRoot) + 'sound');
@@ -176,7 +178,7 @@ begin
   GameRootsPage := CreateInputDirPage(wpSelectDir,
     'Locate your Fallout games',
     'Select your original Fallout 1 and Fallout 2 installation folders.',
-    'The installer will COPY the required data from your owned games into the beta installation. Your Steam installations are not modified.',
+    'The installer will COPY the required data from your owned games into the install folder you selected. Your Steam installations are not modified.',
     False, '');
 
   GameRootsPage.Add('Fallout 1 folder:');
@@ -228,5 +230,5 @@ begin
   if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
     RaiseException('Failed to copy Fallout 2 game data into the beta installation.');
 
-  WizardForm.StatusLabel.Caption := 'Fallout game data copied successfully.';
+  WizardForm.StatusLabel.Caption := 'Debug build installed. If startup fails, send unified-startup.log and the crash details.';
 end;
