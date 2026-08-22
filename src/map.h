@@ -87,6 +87,27 @@ void _map_exit();
 void isoEnable();
 bool isoDisable();
 bool isoIsDisabled();
+
+// Selected P1 modal source files are compiled with
+// LOCAL_COOP_KEEP_ISO_LIVE. Redirect only their local call sites so opening a
+// dialogue/Pip-Boy/character/skill window does not stop object animation or
+// critter-script tickers. map.cc itself and all other systems still use the
+// stock isoEnable/isoDisable implementation, so Options, Save/Load, movies and
+// map transitions retain their normal global pause behavior.
+#ifdef LOCAL_COOP_KEEP_ISO_LIVE
+inline void localCoopModalIsoEnable()
+{
+}
+
+inline bool localCoopModalIsoDisable()
+{
+    return false;
+}
+
+#define isoEnable localCoopModalIsoEnable
+#define isoDisable localCoopModalIsoDisable
+#endif
+
 int mapSetElevation(int elevation);
 int mapSetGlobalVar(int var, ProgramValue& value);
 int mapGetGlobalVar(int var, ProgramValue& value);
@@ -112,5 +133,20 @@ int mapHandleTransition();
 int _map_save_in_game(bool a1);
 
 } // namespace fallout
+
+// Install profile-aware world-map semantics for translation units that enter
+// through the ISO map layer. worldmap.cc includes worldmap.h first, so its
+// WORLD_MAP_H guard suppresses these call-site remaps and preserves the stock
+// Fallout 2 implementation as the fallback backend.
+#include "unified_worldmap_profile.h"
+#include "unified_worldmap_state_profile.h"
+#include "unified_worldmap_grid_profile.h"
+#include "unified_loaded_map_profile.h"
+#include "unified_worldmap_audio_profile.h"
+#include "unified_worldmap_vehicle_profile.h"
+#include "unified_fallout1_encounter_runtime.h"
+#include "unified_fallout1_encounter_bridge.h"
+#include "unified_fallout1_worldmap_events.h"
+#include "unified_worldmap_lifecycle_profile.h"
 
 #endif /* MAP_H */

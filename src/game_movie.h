@@ -44,4 +44,13 @@ bool gameMovieIsPlaying();
 
 } // namespace fallout
 
+// main.cc includes main.h before its own game_movie.h include. Route only that
+// executable translation unit through the profile-aware startup movie table;
+// game_movie.cc includes this header directly and therefore retains the stock
+// implementation and Fallout 2 movie table unchanged.
+#if defined(MAIN_H)
+#include "unified_main_movie_profile.h"
+#define gameMoviePlay unifiedMainGameMoviePlay
+#endif
+
 #endif /* GAME_MOVIE_H */

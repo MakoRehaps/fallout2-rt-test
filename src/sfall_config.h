@@ -3,6 +3,10 @@
 
 #include "config.h"
 
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SFALL
+#include "unified_campaign.h"
+#endif
+
 namespace fallout {
 
 #define SFALL_CONFIG_FILE_NAME "ddraw.ini"
@@ -86,6 +90,34 @@ extern Config gSfallConfig;
 
 bool sfallConfigInit(int argc, char** argv);
 void sfallConfigExit();
+
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SFALL
+inline bool localCoopUnifiedProfileSfallConfigInit(int argc, char** argv)
+{
+    bool initialized = sfallConfigInit(argc, argv);
+    if (!initialized || unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        return initialized;
+    }
+
+    // scripts.cc consumes these immediately during _scr_game_init. Fallout 2
+    // stores month/day as zero-based values: F1's 2161-12-05 therefore becomes
+    // StartYear=2161, StartMonth=11, StartDay=4.
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_YEAR, 2161);
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_MONTH, 11);
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_DAY, 4);
+
+    // main.cc already honors sfall's StartingMap override before falling back
+    // to its compiled Fallout 2 "artemple.map" default. F1's original main.cc
+    // starts at V13Ent.map, so set the profile override after parsing ddraw.ini
+    // to prevent stale user/F2 settings from sending the unified F1 campaign to
+    // an F2-only map.
+    configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_STARTING_MAP_KEY, "V13Ent.map");
+
+    return true;
+}
+
+#define sfallConfigInit localCoopUnifiedProfileSfallConfigInit
+#endif
 
 } // namespace fallout
 

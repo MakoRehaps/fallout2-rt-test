@@ -1,6 +1,11 @@
 #ifndef GAME_H
 #define GAME_H
 
+#ifdef LOCAL_COOP_LOADSAVE_META
+#include "unified_campaign.h"
+#include "unified_fallout1_worldmap_state.h"
+#endif
+
 #include "game_vars.h"
 #include "message.h"
 
@@ -24,6 +29,61 @@ extern MessageList gMiscMessageList;
 
 int gameInitWithOptions(const char* windowTitle, bool isMapper, int a3, int a4, int argc, char** argv);
 void gameReset();
+
+#ifdef LOCAL_COOP_LOADSAVE_META
+inline void localCoopLoadSaveGameReset()
+{
+    unifiedCampaignRunBeforeGameResetHook();
+
+    bool appliedCampaignMeta = unifiedCampaignApplyPendingSaveHeader();
+    if (appliedCampaignMeta
+        && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // New sidecars restore Fallout 1's complete original world-map payload.
+        // Header-only sidecars from earlier co-op builds remain readable; they
+        // receive Fallout 1's stock Vault 13 starting world-map state instead of
+        // inheriting stale exploration data from a previous loaded slot.
+        if (!unifiedFallout1WorldMapApplyPending()) {
+            unifiedFallout1WorldMapResetCurrent();
+        }
+
+        // Stock gameReset calls wmWorldMap_reset after this wrapper. The F1
+        // lifecycle adapter consumes this one-shot flag so the just-restored
+        // sidecar survives that reset. Ordinary new-game resets do not set it.
+        unifiedFallout1WorldMapPreserveNextReset();
+    } else {
+        unifiedFallout1WorldMapClearPending();
+    }
+
+    gameReset();
+}
+
+inline bool localCoopLoadSaveShouldAbortForContentReload()
+{
+    if (!unifiedCampaignShouldAbortLoadForContentReload()) {
+        return false;
+    }
+
+    // Cross-profile loading intentionally restarts through the main menu. Do not
+    // leave a payload staged from the old content profile; opening the slot again
+    // after rebootstrap will stage it from the same COOPMETA.SAV file.
+    unifiedFallout1WorldMapClearPending();
+
+    // If this load was requested while playing, leave the gameplay loop through
+    // its normal teardown path. The main-menu initializer then performs the
+    // full engine rebootstrap into the requested Fallout content profile.
+    _game_user_wants_to_quit = 2;
+    return true;
+}
+
+#define gameReset() \
+    do { \
+        if (localCoopLoadSaveShouldAbortForContentReload()) { \
+            return -1; \
+        } \
+        localCoopLoadSaveGameReset(); \
+    } while (0)
+#endif
+
 void gameExit();
 int gameHandleKey(int eventCode, bool isInCombatMode);
 void gameUiDisable(int a1);

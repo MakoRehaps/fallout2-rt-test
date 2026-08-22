@@ -287,6 +287,43 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/touch.h"
 )
 
+# These stock P1 screens normally call isoDisable(), which stops world object
+# animation and critter script tickers. In local co-op they keep the ISO
+# simulation alive so P2-P4 continue moving/fighting while P1 uses the modal.
+# Options, save/load, movies and map transitions are intentionally not included.
+set_source_files_properties(
+    "src/game_dialog.cc"
+    "src/pipboy.cc"
+    "src/character_editor.cc"
+    "src/skilldex.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_KEEP_ISO_LIVE"
+)
+
+# loadsave.cc gets a narrow adapter around its own fileOpen/gameReset call sites.
+# It writes COOPMETA.SAV beside each stock SAVE.DAT and stages that header until
+# the real _PrepLoad path starts. No stock SAVE.DAT bytes or handler tables are
+# changed by this metadata layer.
+set_source_files_properties(
+    "src/loadsave.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_LOADSAVE_META"
+)
+
+# settings.cc applies the selected unified profile after normal config parsing.
+# In Fallout 1 mode this forces the F1 archive/patch/music roots and prevents
+# those temporary F1 paths from being written back into fallout2.cfg.
+set_source_files_properties(
+    "src/settings.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_UNIFIED_PROFILE_SETTINGS"
+)
+
+# game.cc is the caller of sfallConfigInit during engine bootstrap. Override the
+# F1 calendar defaults there, before scripts.cc reads StartYear/Month/Day, while
+# leaving the real sfall_config.cc implementation and the user's ddraw.ini alone.
+set_source_files_properties(
+    "src/game.cc"
+    PROPERTIES COMPILE_DEFINITIONS "LOCAL_COOP_UNIFIED_PROFILE_SFALL"
+)
+
 if(IOS)
     target_sources(${EXECUTABLE_NAME} PUBLIC
         "src/platform/ios/paths.h"

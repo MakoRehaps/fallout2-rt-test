@@ -3,6 +3,16 @@
 
 #include <stddef.h>
 
+#ifdef LOCAL_COOP_LOADSAVE_META
+#include <string.h>
+
+#include <string>
+
+#include "unified_campaign.h"
+#include "unified_fallout1_worldmap_globals.h"
+#include "unified_fallout1_worldmap_state.h"
+#endif
+
 #include "xfile.h"
 
 namespace fallout {
@@ -62,6 +72,123 @@ int fileNameListInit(const char* pattern, char*** fileNames, int a3, int a4);
 void fileNameListFree(char*** fileNames, int a2);
 int fileGetSize(File* stream);
 void fileSetReadProgressHandler(FileReadProgressHandler* handler, int size);
+
+#ifdef LOCAL_COOP_LOADSAVE_META
+inline bool localCoopLoadSaveIsSaveDatPath(const char* filename)
+{
+    if (filename == nullptr) {
+        return false;
+    }
+
+    size_t length = strlen(filename);
+    static constexpr const char* kSaveName = "SAVE.DAT";
+    static constexpr size_t kSaveNameLength = 8;
+    if (length < kSaveNameLength) {
+        return false;
+    }
+
+    return strcmp(filename + length - kSaveNameLength, kSaveName) == 0;
+}
+
+inline std::string localCoopLoadSaveMetaPath(const char* saveDatPath)
+{
+    std::string path = saveDatPath != nullptr ? saveDatPath : "";
+    if (path.size() >= 8) {
+        path.resize(path.size() - 8);
+    }
+    path.append("COOPMETA.SAV");
+    return path;
+}
+
+inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
+{
+    unifiedCampaignClearPendingSaveHeader();
+    unifiedFallout1WorldMapClearPending();
+
+    std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
+    File* meta = fileOpen(metaPath.c_str(), "rb");
+    if (meta == nullptr) {
+        return;
+    }
+
+    UnifiedCampaignSaveHeader header {};
+    bool readOk = fileRead(&header, sizeof(header), 1, meta) == 1;
+    bool stagedHeader = readOk && unifiedCampaignStageSaveHeader(header);
+
+    if (stagedHeader
+        && header.activeGame == static_cast<uint32_t>(UnifiedGameId::Fallout1)) {
+        // Version 1 COOPMETA files ended immediately after the campaign header.
+        // A missing chunk is therefore a valid old save, not a load failure.
+        UnifiedCampaignMetaChunkHeader chunkHeader {};
+        if (fileRead(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1
+            && unifiedFallout1WorldMapChunkIsSupported(chunkHeader)) {
+            UnifiedFallout1WorldMapState state {};
+            if (fileRead(&state, sizeof(state), 1, meta) == 1) {
+                unifiedFallout1WorldMapStage(state);
+            }
+        }
+    }
+
+    fileClose(meta);
+}
+
+inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
+{
+    std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
+    File* meta = fileOpen(metaPath.c_str(), "wb");
+    if (meta == nullptr) {
+        return;
+    }
+
+    UnifiedCampaignSaveHeader header = unifiedCampaignMakeSaveHeader();
+    if (fileWrite(&header, sizeof(header), 1, meta) != 1) {
+        fileClose(meta);
+        return;
+    }
+
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // Keep the sidecar synchronized with F1's original quest/global-driven
+        // town discovery immediately before taking the persistent snapshot.
+        unifiedFallout1WorldMapSyncFromGlobals();
+
+        UnifiedCampaignMetaChunkHeader chunkHeader = unifiedFallout1WorldMapMakeChunkHeader();
+        const UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetStateConst();
+
+        if (fileWrite(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1) {
+            fileWrite(&state, sizeof(state), 1, meta);
+        }
+    }
+
+    fileClose(meta);
+}
+
+inline File* localCoopLoadSaveFileOpen(const char* filename, const char* mode)
+{
+    bool isSaveDat = localCoopLoadSaveIsSaveDatPath(filename);
+
+    if (isSaveDat && mode != nullptr && strcmp(mode, "rb") == 0) {
+        // Stage only. Slot-list/header scans also open SAVE.DAT; the metadata is
+        // not applied until loadsave.cc reaches its real _PrepLoad -> gameReset
+        // path. That keeps simply browsing the load menu from switching games.
+        localCoopLoadSaveStageCampaignMeta(filename);
+    }
+
+    File* stream = fileOpen(filename, mode);
+
+    if (stream != nullptr
+        && isSaveDat
+        && mode != nullptr
+        && strcmp(mode, "wb") == 0) {
+        // The slot directory already exists by the time loadsave.cc creates
+        // SAVE.DAT, so the engine metadata sidecar can safely be written.
+        localCoopLoadSaveWriteCampaignMeta(filename);
+    }
+
+    return stream;
+}
+
+#define fileOpen localCoopLoadSaveFileOpen
+#endif
 
 } // namespace fallout
 
