@@ -6,9 +6,8 @@
 AppId={{8D94A6CE-0F8E-4A6B-BA96-6B3B7E8A94C2}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName={userdocs}\Fallout Unified Co-op Beta Debug
+DefaultDirName={autopf}\Fallout Unified Co-op Beta
 DisableDirPage=no
-UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -178,7 +177,7 @@ begin
   GameRootsPage := CreateInputDirPage(wpSelectDir,
     'Locate your Fallout games',
     'Select your original Fallout 1 and Fallout 2 installation folders.',
-    'The installer will COPY the required data from your owned games into the install folder you selected. Your Steam installations are not modified.',
+    'The installer will COPY the required data from your owned games into the existing beta installation. Your Steam installations are not modified.',
     False, '');
 
   GameRootsPage.Add('Fallout 1 folder:');
