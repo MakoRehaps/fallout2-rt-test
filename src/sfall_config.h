@@ -113,6 +113,13 @@ inline bool localCoopUnifiedProfileSfallConfigInit(int argc, char** argv)
     // an F2-only map.
     configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_STARTING_MAP_KEY, "V13Ent.map");
 
+    // The F1 data set uses a different movie ID table from Fallout 2. Until
+    // that table is fully translated in game_movie.cc, bypass only the opening
+    // movies so startup reaches the F1 main menu instead of dying in F2 movie
+    // post-processing. This is deliberately profile-scoped; Fallout 2 keeps
+    // its normal opening movie behavior.
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_SKIP_OPENING_MOVIES_KEY, 1);
+
     return true;
 }
 
