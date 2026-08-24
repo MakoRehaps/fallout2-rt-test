@@ -5,6 +5,7 @@
 #include "db.h"
 #include "geometry.h"
 #include "interpreter.h"
+#include "local_coop_danger.h"
 #include "map_defs.h"
 #include "message.h"
 #include "platform_compat.h"
@@ -20,40 +21,17 @@ typedef struct TileData {
 } TileData;
 
 typedef struct MapHeader {
-    // map_ver
     int version;
-
-    // map_name
     char name[16];
-
-    // map_ent_tile
     int enteringTile;
-
-    // map_ent_elev
     int enteringElevation;
-
-    // map_ent_rot
     int enteringRotation;
-
-    // map_num_loc_vars
     int localVariablesCount;
-
-    // 0map_script_idx
     int scriptIndex;
-
-    // map_flags
     int flags;
-
-    // map_darkness
     int darkness;
-
-    // map_num_glob_vars
     int globalVariablesCount;
-
-    // map_number
     int field_34;
-
-    // Time in game ticks when PC last visited this map.
     unsigned int lastVisitTime;
     int field_3C[44];
 } MapHeader;
@@ -132,7 +110,23 @@ int mapSetTransition(MapTransition* transition);
 int mapHandleTransition();
 int _map_save_in_game(bool a1);
 
+// Script opcodes are the normal path for stairs, doors and scripted exits to
+// request a different map. While realtime danger is active, consume that request
+// without changing maps. The stock mapSetTransition definition in map.cc is not
+// renamed because only interpreter_extra.cc defines the translation-unit marker.
+inline int localCoopMapSetTransitionDispatch(MapTransition* transition)
+{
+    if (localCoopDangerBlocksMapExit()) {
+        return 0;
+    }
+    return mapSetTransition(transition);
+}
+
 } // namespace fallout
+
+#if defined(LOCAL_COOP_INTERPRETER_EXTRA_TRANSLATION_UNIT)
+#define mapSetTransition localCoopMapSetTransitionDispatch
+#endif
 
 // Install profile-aware world-map semantics for translation units that enter
 // through the ISO map layer. worldmap.cc includes worldmap.h first, so its
