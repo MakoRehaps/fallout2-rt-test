@@ -138,6 +138,14 @@ inline int localCoopMainInputGetInput()
 
     int keyCode = inputGetInput();
 
+    // P1 is hybrid-input. Keyboard remains untouched, while ISO-world mouse
+    // clicks use the co-op Diablo mapping: right click moves; left click performs
+    // the context action or attacks. Returning -1 prevents the stock world mouse
+    // handler from also cycling modes or treating left click as movement.
+    if (localCoopHandlePlayerOneMouseInput(keyCode)) {
+        return -1;
+    }
+
     if ((keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I)
         && gLocalCoopInitialized) {
         LocalCoopPlayer& playerOne = gLocalCoopPlayers[0];
