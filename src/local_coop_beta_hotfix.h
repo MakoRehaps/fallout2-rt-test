@@ -4,19 +4,16 @@
 #include <SDL.h>
 
 #include "combat.h"
-#include "input.h"
 #include "local_coop.h"
-#include "local_coop_ai_realtime.h"
-#include "local_coop_focus.h"
-#include "local_coop_runtime.h"
 #include "local_coop_analog_aim.h"
+#include "local_coop_runtime.h"
 #include "object.h"
 #include "tile.h"
 
 namespace fallout {
 
-// Beta runtime corrections kept separate from the original controller slice so
-// they can be validated independently and later folded into the main runtime.
+// Runtime corrections that remain useful after removing Fallout's combat phase:
+// continuous steering, shared-camera dead-zone, and SDL aim rendering.
 inline int gLocalCoopHotfixCameraTileBeforeTick = -1;
 inline Uint32 gLocalCoopHotfixNextLegacyAdvanceTick = 0;
 inline bool gLocalCoopHotfixCombatWasActive = false;
@@ -25,9 +22,8 @@ inline void localCoopBetaHotfixBeginFrame()
 {
     gLocalCoopHotfixCameraTileBeforeTick = gCenterTile;
 
-    // Run the continuous steering layer before the legacy controller runtime.
-    // This queues a multi-hex movement path first, so the old one-hex poll sees
-    // the actor as busy instead of injecting a stop/start step.
+    // Queue continuous movement before the older controller poll so it does not
+    // inject a one-hex stop/start step.
     localCoopAnalogAimPreRuntimeTick();
 }
 
@@ -79,9 +75,6 @@ inline void localCoopBetaHotfixCameraAfterRuntime()
         return;
     }
 
-    // The old runtime recenters every movement step, which makes analog movement
-    // feel as though the camera is physically attached to a critter. Keep the
-    // previous camera center until the party centroid leaves this dead-zone.
     constexpr int kCameraDeadZoneTiles = 5;
     if (tileDistanceBetween(partyCenter, gLocalCoopHotfixCameraTileBeforeTick) <= kCameraDeadZoneTiles) {
         if (gCenterTile != gLocalCoopHotfixCameraTileBeforeTick) {
@@ -91,108 +84,14 @@ inline void localCoopBetaHotfixCameraAfterRuntime()
     }
 }
 
-inline void localCoopBetaHotfixSeedHostileAi()
-{
-    if (!isInCombat() || gDude == nullptr) {
-        return;
-    }
-
-    Object** critters = nullptr;
-    int count = objectListCreate(-1, gDude->elevation, OBJ_TYPE_CRITTER, &critters);
-    if (count <= 0 || critters == nullptr) {
-        return;
-    }
-
-    for (int index = 0; index < count; index++) {
-        Object* actor = critters[index];
-        if (actor == nullptr
-            || actor == gDude
-            || localCoopActorIsHumanOwned(actor)
-            || (actor->flags & OBJECT_HIDDEN) != 0
-            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
-            || actor->data.critter.combat.team == gDude->data.critter.combat.team) {
-            continue;
-        }
-
-        if (actor->id != -1 && gLocalCoopRealtimeAiActors.find(actor->id) == gLocalCoopRealtimeAiActors.end()) {
-            localCoopRealtimeAiRegisterLegacyTurn(actor, gDude);
-        }
-    }
-
-    objectListFree(critters);
-}
-
-inline void localCoopBetaHotfixAdvanceLegacyScheduler()
-{
-    if (!isInCombat()) {
-        gLocalCoopHotfixNextLegacyAdvanceTick = 0;
-        return;
-    }
-
-    // The previous bridge queued SPACE once and then waited forever for the
-    // legacy turn owner to change. If that input was consumed elsewhere, enemy
-    // AI was never registered. Retry at a bounded cadence until ownership moves.
-    if (_combat_whose_turn() != gDude) {
-        return;
-    }
-
-    Uint32 now = SDL_GetTicks();
-    if (gLocalCoopHotfixNextLegacyAdvanceTick == 0
-        || static_cast<Sint32>(now - gLocalCoopHotfixNextLegacyAdvanceTick) >= 0) {
-        enqueueInputEvent(KEY_SPACE);
-        gLocalCoopHotfixNextLegacyAdvanceTick = now + 250;
-        gLocalCoopLegacyYieldQueued = false;
-    }
-}
-
-inline void localCoopBetaHotfixCombatInput()
-{
-    if (!isInCombat()) {
-        gLocalCoopHotfixCombatWasActive = false;
-        return;
-    }
-
-    bool combatJustStarted = !gLocalCoopHotfixCombatWasActive;
-    gLocalCoopHotfixCombatWasActive = true;
-
-    if (combatJustStarted || gLocalCoopRealtimeAiActors.empty()) {
-        localCoopBetaHotfixSeedHostileAi();
-    }
-
-    // Keep focus selection updated after the runtime has read the right stick.
-    // A centered stick retains the previous valid target; moving it selects a
-    // new enemy in the requested direction.
-    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected
-            || !player.humanOwned
-            || player.controller == nullptr
-            || player.actor == nullptr
-            || player.uiMode != LocalCoopUiMode::World) {
-            continue;
-        }
-
-        Object* target = localCoopFocusFindEnemy(player);
-        if (target != nullptr) {
-            gLocalCoopRuntimeSlots[player.slot].aimTarget = target;
-            localCoopFocusApplyOutline(player.slot, target, true);
-        }
-    }
-
-    localCoopBetaHotfixAdvanceLegacyScheduler();
-    localCoopRealtimeAiTick();
-}
-
 inline void localCoopBetaHotfixAfterRuntime()
 {
-    // The legacy runtime samples axes internally. Restore the radial stick
-    // values before focus, interaction and the visual aim bead consume them.
+    // No combat scheduler, no SPACE/end-turn injection, and no combat-mode focus
+    // branch. Danger is handled entirely by the realtime world AI runtime.
     localCoopAnalogAimPostRuntimeTick();
     localCoopBetaHotfixCameraAfterRuntime();
-    localCoopBetaHotfixCombatInput();
 
-    // Draw from the controlled critter toward the selected world target (or the
-    // raw right-stick direction when nothing is acquired). This is a controller
-    // overlay and never moves Fallout's mouse cursor.
+    // Installs the SDL post-world renderer for the current right-stick bead.
     localCoopAimBeadTick();
 }
 
