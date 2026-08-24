@@ -40,21 +40,22 @@ inline int unifiedCampaignCharacterSelectorOpen()
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
         _ResetPlayer();
 
+        // The fused game uses the Fallout 2 engine/UI layer. Keep the player's
+        // F1 world/proto origin intact, but resolve the entire character-editor
+        // modal (palette, editor.msg and interface art) from the F2 dataset.
+        // Leaving the scope immediately restores F1-preferred world resources
+        // before V13Ent.map is loaded.
+        UnifiedResourceOriginScope editorResources(UnifiedGameId::Fallout2);
+
         // mainMenuWindowHide(true) fades the hardware palette to black before
         // calling the selector. The stock Fallout 2 selector restores color.pal
         // before opening its UI, but this unified Fallout 1 path intentionally
         // bypasses that selector and enters the editor directly. Restore the
-        // normal game palette here or the editor is fully functional but renders
-        // as a black screen (Esc still works, which is the telltale symptom).
+        // editor palette here or the editor is fully functional but renders as
+        // a black screen (Esc still works, which is the telltale symptom).
         colorPaletteLoad("color.pal");
         paletteFadeTo(_cmap);
 
-        // The fused game uses the Fallout 2 engine/UI layer. Keep the player's
-        // F1 world/proto origin intact, but resolve the character editor's
-        // editor.msg and interface art from the F2 dataset for the duration of
-        // this modal screen. Leaving the scope immediately restores F1-preferred
-        // world resources before V13Ent.map is loaded.
-        UnifiedResourceOriginScope editorResources(UnifiedGameId::Fallout2);
         return characterEditorShow(true) == 0 ? 2 : 3;
     }
 
