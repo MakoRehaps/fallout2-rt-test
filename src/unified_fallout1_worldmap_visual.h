@@ -15,6 +15,7 @@
 #include "unified_campaign.h"
 #include "unified_fallout1_travel_profile.h"
 #include "unified_fallout1_worldmap_state.h"
+#include "unified_origin_art.h"
 #include "unified_worldmap_state_profile.h"
 #include "window_manager.h"
 
@@ -154,7 +155,7 @@ inline void unifiedFallout1WorldMapDrawMarker(
 
 inline bool unifiedFallout1WorldMapRender(
     int win,
-    FrmImage& worldMapImage,
+    UnifiedOriginFrmImage& worldMapImage,
     int selectedTown)
 {
     if (win == -1 || !worldMapImage.isLocked()) {
@@ -255,9 +256,8 @@ inline int unifiedFallout1SelectKnownTownVisual()
         return -1;
     }
 
-    FrmImage worldMapImage;
-    int fid = buildFid(OBJ_TYPE_INTERFACE, kUnifiedFallout1WorldMapArtId, 0, 0, 0);
-    if (!worldMapImage.lock(fid)
+    UnifiedOriginFrmImage worldMapImage;
+    if (!worldMapImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kUnifiedFallout1WorldMapArtId)
         || screenGetWidth() < kUnifiedFallout1WorldMapWindowWidth
         || screenGetVisibleHeight() < kUnifiedFallout1WorldMapWindowHeight) {
         return unifiedFallout1SelectKnownTown();
