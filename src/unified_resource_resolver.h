@@ -190,9 +190,20 @@ inline bool unifiedResourceUsesFallout2EngineLayer(const char* filePath)
         return true;
     }
 
+    // F2 engine/UI message tables. intrface.msg contains F2-only indicator
+    // labels (notably LEVEL and ADDICT), and the main proto.msg contains the
+    // F2 engine's material/item/scenery/damage/caliber/race/body type metadata.
+    // Keep only the main proto.msg here: pro_item.msg/pro_crit.msg/etc remain
+    // campaign-owned so Fallout 1 object names/descriptions continue to come
+    // from Fallout 1 while an F1 map is active.
+    if (unifiedResourceEndsWith(path, "game\\intrface.msg")
+        || unifiedResourceEndsWith(path, "game\\proto.msg")) {
+        return true;
+    }
+
     // Engine modal text follows the same rule. Campaign dialogue, maps, scripts,
-    // protos and world-map messages are intentionally NOT listed here and keep
-    // using their originating game's namespace.
+    // per-object prototype messages and world-map messages are intentionally NOT
+    // listed here and keep using their originating game's namespace.
     return unifiedResourceEndsWith(path, "game\\editor.msg")
         || unifiedResourceEndsWith(path, "game\\options.msg")
         || unifiedResourceEndsWith(path, "game\\inventry.msg")
