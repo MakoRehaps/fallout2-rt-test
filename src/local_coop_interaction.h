@@ -263,20 +263,12 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
         return true;
     }
 
-    if (!isInCombat()) {
-        CombatStartData csd {};
-        csd.attacker = actor;
-        csd.defender = target;
-        _combat(&csd);
-        return true;
-    }
-
     Object* weapon = critterGetItem2(actor);
     int hitMode = weapon != nullptr ? HIT_MODE_RIGHT_WEAPON_PRIMARY : HIT_MODE_PUNCH;
 
-    // Realtime local co-op does not use the legacy player's AP turn as an input
-    // permission gate. Match controller attacks by giving the stock attack code
-    // a temporary AP budget, while retaining stock LOS/range/ammo validation.
+    // Diablo-style combat is a world action, not a request to enter Fallout's
+    // turn loop. Give the stock attack sequencer a temporary AP budget so its
+    // LOS/range/ammo/damage/animation code can be reused without calling _combat.
     actor->data.critter.combat.ap = 9999;
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
@@ -316,13 +308,15 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
             return true;
         }
 
-        if (!isInCombat() && _action_can_talk_to(actor, target) == 0) {
-            return actionTalk(actor, target) == 0;
+        // Hostile team membership wins over the generic Fallout "can talk"
+        // capability. Left-clicking an enemy attacks immediately; friendly or
+        // neutral living critters retain their normal dialogue/use behavior.
+        if (target->data.critter.combat.team != actor->data.critter.combat.team) {
+            return localCoopMouseAttackPlayerOne(target);
         }
 
-        if (isInCombat()
-            || target->data.critter.combat.team != actor->data.critter.combat.team) {
-            return localCoopMouseAttackPlayerOne(target);
+        if (_action_can_talk_to(actor, target) == 0) {
+            return actionTalk(actor, target) == 0;
         }
 
         return _action_use_an_object(actor, target) == 0;
