@@ -4,8 +4,6 @@
 // Finish the normal dialogue/interpreter/object header chain first. inventory.h
 // installs a lightweight dialogue-side dispatcher, not the heavy barter UI.
 #include "game_dialog.h"
-#include "character_editor.h"
-#include "proto.h"
 
 // Compile the controller barter implementation only after the stock engine
 // types are complete. Its internal stock fallback must name the renamed stock
@@ -34,7 +32,6 @@ inline constexpr unsigned int kUnifiedFallout1InitialGameTime = (7 * 60 * 60 + 2
 
 int inputGetInput();
 int mainMenuWindowInit();
-int characterSelectorOpen();
 
 inline int gUnifiedCampaignStartupArgc = 0;
 inline char** gUnifiedCampaignStartupArgv = nullptr;
@@ -264,16 +261,6 @@ inline int localCoopMainMenuWindowInit()
     return mainMenuWindowInit();
 }
 
-inline int unifiedCampaignCharacterSelectorOpen()
-{
-    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
-        return characterSelectorOpen();
-    }
-
-    _ResetPlayer();
-    return characterEditorShow(true) == 0 ? 2 : 3;
-}
-
 int falloutMain(int argc, char** argv);
 
 } // namespace fallout
@@ -281,6 +268,5 @@ int falloutMain(int argc, char** argv);
 #define inputGetInput localCoopMainInputGetInput
 #define gameInitWithOptions unifiedCampaignGameInitWithOptions
 #define mainMenuWindowInit localCoopMainMenuWindowInit
-#define characterSelectorOpen unifiedCampaignCharacterSelectorOpen
 
 #endif /* MAIN_H */
