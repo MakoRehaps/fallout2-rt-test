@@ -15,13 +15,8 @@ namespace fallout {
 #define SCRIPT_FLAG_0x08 (0x08)
 #define SCRIPT_FLAG_0x10 (0x10)
 
-// 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_HOUR 36000
-
-// 24 * 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_DAY (864000)
-
-// 365 * 24 * 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_YEAR (315360000)
 
 typedef enum ScriptRequests {
@@ -39,11 +34,11 @@ typedef enum ScriptRequests {
 } ScriptRequests;
 
 typedef enum ScriptType {
-    SCRIPT_TYPE_SYSTEM, // s_system
-    SCRIPT_TYPE_SPATIAL, // s_spatial
-    SCRIPT_TYPE_TIMED, // s_time
-    SCRIPT_TYPE_ITEM, // s_item
-    SCRIPT_TYPE_CRITTER, // s_critter
+    SCRIPT_TYPE_SYSTEM,
+    SCRIPT_TYPE_SPATIAL,
+    SCRIPT_TYPE_TIMED,
+    SCRIPT_TYPE_ITEM,
+    SCRIPT_TYPE_CRITTER,
     SCRIPT_TYPE_COUNT,
 } ScriptType;
 
@@ -57,8 +52,8 @@ typedef enum ScriptProc {
     SCRIPT_PROC_USE = 6,
     SCRIPT_PROC_USE_OBJ_ON = 7,
     SCRIPT_PROC_USE_SKILL_ON = 8,
-    SCRIPT_PROC_9 = 9, // use_ad_on_proc
-    SCRIPT_PROC_10 = 10, // use_disad_on_proc
+    SCRIPT_PROC_9 = 9,
+    SCRIPT_PROC_10 = 10,
     SCRIPT_PROC_TALK = 11,
     SCRIPT_PROC_CRITTER = 12,
     SCRIPT_PROC_COMBAT = 13,
@@ -67,8 +62,8 @@ typedef enum ScriptProc {
     SCRIPT_PROC_MAP_EXIT = 16,
     SCRIPT_PROC_CREATE = 17,
     SCRIPT_PROC_DESTROY = 18,
-    SCRIPT_PROC_19 = 19, // barter_init_proc
-    SCRIPT_PROC_20 = 20, // barter_proc
+    SCRIPT_PROC_19 = 19,
+    SCRIPT_PROC_20 = 20,
     SCRIPT_PROC_LOOK_AT = 21,
     SCRIPT_PROC_TIMED = 22,
     SCRIPT_PROC_MAP_UPDATE = 23,
@@ -80,56 +75,28 @@ typedef enum ScriptProc {
 } ScriptProc;
 
 typedef struct Script {
-    // scr_id
     int sid;
-
-    // scr_next
     int field_4;
-
     union {
         struct {
-            // scr_udata.sp.built_tile
             int built_tile;
-            // scr_udata.sp.radius
             int radius;
         } sp;
         struct {
-            // scr_udata.tm.time
             int time;
         } tm;
     };
-
-    // scr_flags
     int flags;
-
-    // scr_script_idx
     int field_14;
-
     Program* program;
-
-    // scr_oid
     int field_1C;
-
-    // scr_local_var_offset
     int localVarsOffset;
-
-    // scr_num_local_vars
     int localVarsCount;
-
-    // return value?
     int field_28;
-
-    // Currently executed action.
-    //
-    // See [opGetScriptAction].
     int action;
     int fixedParam;
     Object* owner;
-
-    // source_obj
     Object* source;
-
-    // target_obj
     Object* target;
     int actionBeingUsed;
     int scriptOverrides;
@@ -144,7 +111,6 @@ typedef struct Script {
     int field_D4;
     int field_D8;
     int field_DC;
-
     Object* overriddenSelf;
 } Script;
 
@@ -230,10 +196,8 @@ int scriptSetLocalVar(int sid, int var, ProgramValue& value);
 bool _scr_end_combat();
 int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation);
 
-// Script attack opcodes normally queue SCRIPT_REQUEST_COMBAT, which is later
-// converted by scripts.cc into a blocking `_combat()` call. The co-op runtime
-// installs this handler so those same script requests wake realtime hostile AI
-// instead and never create a combat/non-combat phase transition.
+// Combat requests become realtime danger/AI engagements instead of queued
+// SCRIPT_REQUEST_COMBAT -> `_combat()` transitions.
 using ScriptCombatRequestRuntimeHandler = int (*)(CombatStartData* combat);
 inline ScriptCombatRequestRuntimeHandler gScriptCombatRequestRuntimeHandler = nullptr;
 
@@ -268,16 +232,25 @@ inline void localCoopScriptsRequestWorldMapDispatch()
     }
 }
 
+inline int localCoopScriptsRequestElevatorDispatch(Object* object, int elevator)
+{
+    if (localCoopDangerBlocksMapExit()) {
+        return 0;
+    }
+    return scriptsRequestElevator(object, elevator);
+}
+
 } // namespace fallout
 
-// Only interpreter_extra.cc defines this marker before scripts.h is included.
-// That lets script opcodes be redirected without renaming the stock definitions
-// in scripts.cc itself.
+// interpreter_extra.cc defines this marker before scripts.h. Redirect the
+// script opcodes there while leaving scripts.cc's stock function definitions
+// untouched as backend fallbacks for non-co-op paths.
 #if defined(LOCAL_COOP_INTERPRETER_EXTRA_TRANSLATION_UNIT)
 #define scriptsRequestCombat localCoopScriptsRequestCombatDispatch
 #define _scripts_request_combat_locked localCoopScriptsRequestCombatLockedDispatch
 #define scripts_request_townmap localCoopScriptsRequestTownMapDispatch
 #define scriptsRequestWorldMap localCoopScriptsRequestWorldMapDispatch
+#define scriptsRequestElevator localCoopScriptsRequestElevatorDispatch
 #endif
 
 #ifdef LOCAL_COOP_F1_SCRIPT_WORLDMAP_PROFILE
