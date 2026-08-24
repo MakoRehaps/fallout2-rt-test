@@ -13,7 +13,7 @@
 #include "unified_fallout1_worldmap_state.h"
 #endif
 
-#include "xfile.h"
+#include "unified_resource_resolver.h"
 
 namespace fallout {
 
