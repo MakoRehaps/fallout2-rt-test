@@ -169,6 +169,23 @@ begin
     Result := CopyTreeWithRobocopy(SoundDir, AddBackslash(DestRoot) + 'sound');
 end;
 
+function EnsureFallout1PartyCompatibility(const F1Dest: String): Boolean;
+var
+  PartyPath: String;
+  PartyText: String;
+begin
+  PartyPath := AddBackslash(F1Dest) + 'data\party.txt';
+  ForceDirectories(AddBackslash(F1Dest) + 'data');
+
+  PartyText := '[Party Member 0]' + #13#10
+    + 'party_member_pid=16777216' + #13#10
+    + 'level_minimum=0' + #13#10
+    + 'level_up_every=0' + #13#10
+    + 'level_pids=-1' + #13#10;
+
+  Result := SaveStringToFile(PartyPath, PartyText, False);
+end;
+
 procedure InitializeWizard;
 var
   F1: String;
@@ -224,6 +241,10 @@ begin
   WizardForm.StatusLabel.Caption := 'Copying Fallout 1 game data...';
   if not CopyGameData(GameRootsPage.Values[0], F1Dest, False) then
     RaiseException('Failed to copy Fallout 1 game data into the beta installation.');
+
+  WizardForm.StatusLabel.Caption := 'Adding Fallout 1 engine compatibility data...';
+  if not EnsureFallout1PartyCompatibility(F1Dest) then
+    RaiseException('Failed to create Fallout 1 party compatibility data.');
 
   WizardForm.StatusLabel.Caption := 'Copying Fallout 2 game data...';
   if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
