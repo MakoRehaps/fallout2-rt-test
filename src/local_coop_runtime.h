@@ -151,6 +151,12 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
+    // Wake the defender and nearby members of its team on their independent
+    // wall-clock schedules. They chase/shoot while the world remains live.
+    if (!isInCombat()) {
+        localCoopRealtimeAiEngageHostile(target, actor);
+    }
+
     gLocalCoopRealtimeCombatActive = true;
     actor->data.critter.combat.ap = 9999;
     return true;
@@ -408,6 +414,11 @@ inline void localCoopRuntimeTick()
     } else {
         localCoopProcessPostgameWorldSwitch();
         localCoopProcessCombatInput();
+        localCoopRealtimeAiTick();
+
+        if (!gLocalCoopRealtimeWorldCombatActive && gLocalCoopRealtimeAiActors.empty()) {
+            gLocalCoopRealtimeCombatActive = false;
+        }
     }
 
     localCoopUpdateSharedCamera();
