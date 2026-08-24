@@ -4,6 +4,7 @@
 #include "combat_defs.h"
 #include "db.h"
 #include "interpreter.h"
+#include "local_coop_danger.h"
 #include "obj_types.h"
 
 namespace fallout {
@@ -229,7 +230,55 @@ int scriptSetLocalVar(int sid, int var, ProgramValue& value);
 bool _scr_end_combat();
 int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation);
 
+// Script attack opcodes normally queue SCRIPT_REQUEST_COMBAT, which is later
+// converted by scripts.cc into a blocking `_combat()` call. The co-op runtime
+// installs this handler so those same script requests wake realtime hostile AI
+// instead and never create a combat/non-combat phase transition.
+using ScriptCombatRequestRuntimeHandler = int (*)(CombatStartData* combat);
+inline ScriptCombatRequestRuntimeHandler gScriptCombatRequestRuntimeHandler = nullptr;
+
+inline int localCoopScriptsRequestCombatDispatch(CombatStartData* combat)
+{
+    if (gScriptCombatRequestRuntimeHandler != nullptr) {
+        return gScriptCombatRequestRuntimeHandler(combat);
+    }
+    return scriptsRequestCombat(combat);
+}
+
+inline void localCoopScriptsRequestCombatLockedDispatch(CombatStartData* combat)
+{
+    if (gScriptCombatRequestRuntimeHandler != nullptr) {
+        gScriptCombatRequestRuntimeHandler(combat);
+        return;
+    }
+    _scripts_request_combat_locked(combat);
+}
+
+inline void localCoopScriptsRequestTownMapDispatch()
+{
+    if (!localCoopDangerBlocksMapExit()) {
+        scripts_request_townmap();
+    }
+}
+
+inline void localCoopScriptsRequestWorldMapDispatch()
+{
+    if (!localCoopDangerBlocksMapExit()) {
+        scriptsRequestWorldMap();
+    }
+}
+
 } // namespace fallout
+
+// Only interpreter_extra.cc defines this marker before scripts.h is included.
+// That lets script opcodes be redirected without renaming the stock definitions
+// in scripts.cc itself.
+#if defined(LOCAL_COOP_INTERPRETER_EXTRA_TRANSLATION_UNIT)
+#define scriptsRequestCombat localCoopScriptsRequestCombatDispatch
+#define _scripts_request_combat_locked localCoopScriptsRequestCombatLockedDispatch
+#define scripts_request_townmap localCoopScriptsRequestTownMapDispatch
+#define scriptsRequestWorldMap localCoopScriptsRequestWorldMapDispatch
+#endif
 
 #ifdef LOCAL_COOP_F1_SCRIPT_WORLDMAP_PROFILE
 #include "unified_worldmap_profile.h"
