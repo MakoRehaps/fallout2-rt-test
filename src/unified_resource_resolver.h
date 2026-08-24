@@ -1,7 +1,9 @@
 #ifndef UNIFIED_RESOURCE_RESOLVER_H
 #define UNIFIED_RESOURCE_RESOLVER_H
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -129,12 +131,62 @@ inline bool unifiedResourceIsReadOnlyMode(const char* mode)
         && std::strchr(mode, '+') == nullptr;
 }
 
+inline std::string unifiedResourceNormalizeLookupPath(const char* filePath)
+{
+    std::string normalized = filePath != nullptr ? filePath : "";
+    std::replace(normalized.begin(), normalized.end(), '/', '\\');
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    while (normalized.size() >= 2 && normalized[0] == '.' && normalized[1] == '\\') {
+        normalized.erase(0, 2);
+    }
+    return normalized;
+}
+
+inline bool unifiedResourceEndsWith(const std::string& value, const char* suffix)
+{
+    if (suffix == nullptr) {
+        return false;
+    }
+
+    size_t suffixLength = std::strlen(suffix);
+    return value.size() >= suffixLength
+        && value.compare(value.size() - suffixLength, suffixLength, suffix) == 0;
+}
+
+inline bool unifiedResourceUsesFallout2EngineLayer(const char* filePath)
+{
+    std::string path = unifiedResourceNormalizeLookupPath(filePath);
+
+    // The fused executable is the Fallout 2 engine, so shared engine-facing UI
+    // is deliberately F2-owned. World/campaign art remains origin-aware. This
+    // also means artInit obtains the F2 interface/inventory/skilldex LSTs, so
+    // hard-coded F2 UI FIDs (notably the character editor) are indexed against
+    // the table they were authored for instead of an F1 list with colliding IDs.
+    if (path.rfind("art\\intrface\\", 0) == 0
+        || path.rfind("art\\inven\\", 0) == 0
+        || path.rfind("art\\skilldex\\", 0) == 0) {
+        return true;
+    }
+
+    // Engine modal text follows the same rule. Campaign dialogue, maps, scripts,
+    // protos and world-map messages are intentionally NOT listed here and keep
+    // using their originating game's namespace.
+    return unifiedResourceEndsWith(path, "game\\editor.msg")
+        || unifiedResourceEndsWith(path, "game\\options.msg")
+        || unifiedResourceEndsWith(path, "game\\inventry.msg")
+        || unifiedResourceEndsWith(path, "game\\skilldex.msg");
+}
+
 inline XFile* unifiedResourceXfileOpen(const char* filePath, const char* mode)
 {
     if (unifiedCampaignIsEnabled()
         && unifiedResourceIsRelativePath(filePath)
         && unifiedResourceIsReadOnlyMode(mode)) {
-        UnifiedGameId preferred = unifiedResourceGetPreferredGame();
+        UnifiedGameId preferred = unifiedResourceUsesFallout2EngineLayer(filePath)
+            ? UnifiedGameId::Fallout2
+            : unifiedResourceGetPreferredGame();
         UnifiedGameId fallback = unifiedResourceGetOtherGame(preferred);
 
         // Both data sets remain mounted. Promote the fallback first and the
