@@ -47,9 +47,6 @@ inline Object* localCoopFindSimplePickup(LocalCoopPlayer& player)
         return nullptr;
     }
 
-    // Prefer an item on the actor's tile, then search a short right-stick/facing
-    // wedge. P2-P4 deliberately do not focus scenery, critters or containers;
-    // those remain P1-authoritative world interactions.
     Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
     while (object != nullptr) {
         if (object != actor && localCoopIsSimplePickup(object)) {
@@ -92,9 +89,6 @@ inline bool localCoopPlayerOneInteract()
         return false;
     }
 
-    // Controller-native interaction: no virtual mouse. Right-stick direction
-    // establishes a soft focus wedge; A dispatches the stock Fallout action for
-    // the focused object directly.
     Object* target = localCoopFocusFindInteractable(player);
     if (target == nullptr) {
         return false;
@@ -164,9 +158,6 @@ inline bool localCoopMouseMovePlayerOneToCursor()
         return true;
     }
 
-    // Do not stomp an attack/use animation. A new right click can be issued as
-    // soon as the actor is free, matching the controller's realtime movement
-    // rule and avoiding old queued Fallout turn movement.
     if (animationIsBusy(actor)) {
         return true;
     }
@@ -267,9 +258,8 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
     Object* weapon = critterGetItem2(actor);
     int hitMode = weapon != nullptr ? HIT_MODE_RIGHT_WEAPON_PRIMARY : HIT_MODE_PUNCH;
 
-    // Diablo-style combat is a world action, not a request to enter Fallout's
-    // turn loop. Give the stock attack sequencer a temporary AP budget so its
-    // LOS/range/ammo/damage/animation code can be reused without calling _combat.
+    // Mouse combat is the same live-world action as controller combat. No
+    // `isInCombat()` gate and no transition into the turn loop.
     actor->data.critter.combat.ap = 9999;
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
@@ -277,11 +267,9 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
         badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     }
 
-    if (badShot == COMBAT_BAD_SHOT_OK) {
-        if (_combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0
-            && !isInCombat()) {
-            localCoopRealtimeAiEngageHostile(target, actor);
-        }
+    if (badShot == COMBAT_BAD_SHOT_OK
+        && _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0) {
+        localCoopRealtimeAiEngageHostile(target, actor);
     }
 
     actor->data.critter.combat.ap = 9999;
@@ -297,8 +285,6 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
     Object* actor = gLocalCoopPlayers[0].actor;
     Object* target = localCoopMouseFindTargetAtCursor();
     if (target == nullptr) {
-        // Diablo-style split: left click is action/attack only. Empty ground is
-        // intentionally not a movement command; right click owns movement.
         return true;
     }
 
@@ -312,9 +298,6 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
             return true;
         }
 
-        // Hostile team membership wins over the generic Fallout "can talk"
-        // capability. Left-clicking an enemy attacks immediately; friendly or
-        // neutral living critters retain their normal dialogue/use behavior.
         if (target->data.critter.combat.team != actor->data.critter.combat.team) {
             return localCoopMouseAttackPlayerOne(target);
         }
@@ -355,9 +338,6 @@ inline bool localCoopHandlePlayerOneMouseInput(int keyCode)
     int mouseY;
     mouseGetPosition(&mouseX, &mouseY);
 
-    // Keep stock mouse behavior for the interface bar, inventory/dialogue
-    // windows, and every other non-ISO window. Only the actual world view gets
-    // the Diablo-style P1 mapping.
     if (windowGetAtPoint(mouseX, mouseY) != gIsoWindow) {
         return false;
     }
@@ -397,9 +377,6 @@ inline bool localCoopCompanionPickup(int slot)
 
     bool pickedUp = actionPickUp(actor, target) == 0;
     if (pickedUp) {
-        // The item exists in the companion inventory only long enough for the
-        // stock pickup script/animation to run. The shared-pool sweep then moves
-        // it to P1's party inventory unless it somehow became equipped.
         localCoopSweepSharedInventory();
     }
     return pickedUp;
@@ -427,9 +404,9 @@ inline void localCoopInteractionTick()
 
         bool interactDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
 
-        if (slot > 0
-            && !isInCombat()
-            && player.uiMode == LocalCoopUiMode::World) {
+        // Danger does not disable pickup or interaction. Only map exits are
+        // locked, so P2-P4 can still collect items while enemies are active.
+        if (slot > 0 && player.uiMode == LocalCoopUiMode::World) {
             Object* pickup = localCoopFindSimplePickup(player);
             if (pickup != nullptr) {
                 localCoopFocusApplyOutline(slot, pickup, false);
@@ -442,7 +419,7 @@ inline void localCoopInteractionTick()
             && player.uiMode == LocalCoopUiMode::World) {
             if (slot == 0) {
                 localCoopPlayerOneInteract();
-            } else if (!isInCombat()) {
+            } else {
                 localCoopCompanionPickup(slot);
             }
             state.nextInteractTick = now + 300;
