@@ -14,6 +14,7 @@
 #include "kb.h"
 #include "local_coop.h"
 #include "local_coop_ai_realtime.h"
+#include "local_coop_danger.h"
 #include "local_coop_focus.h"
 #include "object.h"
 #include "proto_types.h"
@@ -23,6 +24,8 @@
 
 namespace fallout {
 
+// These legacy fields remain only because older load/reset glue references them.
+// The realtime runtime no longer schedules or yields Fallout combat turns.
 inline constexpr Uint32 kLocalCoopInitialSchedulerHeartbeatMs = 200;
 inline constexpr Uint32 kLocalCoopBookkeepingHeartbeatMs = 1000;
 
@@ -132,6 +135,9 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     }
 
     int hitMode = localCoopGetHitMode(actor, secondary);
+
+    // AP is supplied only because stock attack validation expects a budget.
+    // It is never a turn resource in the co-op game.
     actor->data.critter.combat.ap = 9999;
 
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
@@ -144,76 +150,25 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
-    // Directly sequence the stock Fallout attack animation/damage calculation.
-    // Do not call _combat() here: the fused game has no player-facing transition
-    // into the original turn loop. Combat is simply another realtime world action.
+    // Sequence the original Fallout attack animation/damage calculation directly
+    // in the live world. Never call `_combat()` and never switch game modes.
     if (_combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) != 0) {
         return false;
     }
 
-    // Wake the defender and nearby members of its team on their independent
-    // wall-clock schedules. They chase/shoot while the world remains live.
-    if (!isInCombat()) {
-        localCoopRealtimeAiEngageHostile(target, actor);
-    }
-
+    // Every successful attack creates/refreshes danger and wakes hostile AI.
+    // This is true even if a stray legacy combat flag was left by old save data.
+    localCoopRealtimeAiEngageHostile(target, actor);
     gLocalCoopRealtimeCombatActive = true;
     actor->data.critter.combat.ap = 9999;
     return true;
 }
 
-inline void localCoopSuppressHumanCompanionAi()
-{
-    if (!isInCombat()) {
-        return;
-    }
-
-    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
-        Object* actor = gLocalCoopPlayers[slot].actor;
-        if (actor == nullptr
-            || !gLocalCoopPlayers[slot].humanOwned
-            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
-            continue;
-        }
-
-        actor->data.critter.combat.results |= DAM_LOSE_TURN;
-    }
-}
-
-inline Uint32 localCoopLegacyHeartbeatDelay()
-{
-    return localCoopRealtimeAiHasRegisteredActors()
-        ? kLocalCoopBookkeepingHeartbeatMs
-        : kLocalCoopInitialSchedulerHeartbeatMs;
-}
-
-inline void localCoopYieldLegacyPlayerTurn()
-{
-    if (!isInCombat() || !gLocalCoopRealtimeCombatActive) {
-        gLocalCoopLegacyYieldQueued = false;
-        gLocalCoopNextLegacyYieldTick = 0;
-        return;
-    }
-
-    Object* current = _combat_whose_turn();
-    if (current != gDude) {
-        gLocalCoopLegacyYieldQueued = false;
-        return;
-    }
-
-    Uint32 now = SDL_GetTicks();
-    if (!gLocalCoopLegacyYieldQueued
-        && (gLocalCoopNextLegacyYieldTick == 0
-            || localCoopTickReached(now, gLocalCoopNextLegacyYieldTick))) {
-        enqueueInputEvent(KEY_SPACE);
-        gLocalCoopLegacyYieldQueued = true;
-        gLocalCoopNextLegacyYieldTick = now + localCoopLegacyHeartbeatDelay();
-    }
-}
-
 inline void localCoopProcessPostgameWorldSwitch()
 {
-    if (isInCombat() || !unifiedCampaignBothGamesCompleted()) {
+    // Danger blocks leaving the current encounter/map, but does not change how
+    // the player moves or interacts inside it.
+    if (localCoopDangerBlocksMapExit() || !unifiedCampaignBothGamesCompleted()) {
         return;
     }
 
@@ -247,10 +202,8 @@ inline void localCoopProcessPostgameWorldSwitch()
 
 inline void localCoopProcessCombatInput()
 {
-    // Controller attacks are valid directly in the world. The original beta
-    // waited for isInCombat(), which forced the first trigger pull through
-    // Fallout's modal/turn-based _combat() loop. Keep the same wall-clock
-    // cooldowns but never require a legacy combat state.
+    // There is intentionally no combat-state check here. Trigger/shoulder attacks
+    // are ordinary realtime world inputs with wall-clock cooldowns.
     Uint32 now = SDL_GetTicks();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
@@ -302,13 +255,6 @@ inline void localCoopProcessCombatInput()
     }
 }
 
-inline void localCoopProcessWorldCombatStart()
-{
-    // Kept as a compatibility hook for older callers. Player input no longer
-    // enters Fallout's _combat() loop; localCoopProcessCombatInput performs the
-    // attack directly in the normal world simulation.
-}
-
 inline void localCoopUpdateSharedCamera()
 {
     if (gDude == nullptr || !tileIsValid(gDude->tile)) {
@@ -354,6 +300,8 @@ inline void localCoopUpdateSharedCamera()
 
 inline void localCoopSetRealtimeCombatActive(bool active)
 {
+    // Compatibility name retained for existing reset/load code. `active` now
+    // means realtime danger only; it never toggles Fallout's combat state.
     gLocalCoopRealtimeCombatActive = active;
 
     if (!active) {
@@ -402,23 +350,21 @@ inline void localCoopRuntimeTick()
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
 
+    // Safety net for an untouched old script/save path that somehow manages to
+    // set the stock combat bit. Do not participate in that mode or yield turns;
+    // request it to abort while keeping our realtime encounter alive.
     if (isInCombat()) {
-        // Legacy combat can still be entered temporarily by untouched game
-        // scripts while that conversion is being completed. Keep the old bridge
-        // safe for those cases, but player input itself never starts this state.
+        localCoopDangerBegin();
         gLocalCoopRealtimeCombatActive = true;
-        localCoopSuppressHumanCompanionAi();
-        localCoopRealtimeAiTick();
-        localCoopProcessCombatInput();
-        localCoopYieldLegacyPlayerTurn();
-    } else {
-        localCoopProcessPostgameWorldSwitch();
-        localCoopProcessCombatInput();
-        localCoopRealtimeAiTick();
+        _game_user_wants_to_quit = 1;
+    }
 
-        if (!gLocalCoopRealtimeWorldCombatActive && gLocalCoopRealtimeAiActors.empty()) {
-            gLocalCoopRealtimeCombatActive = false;
-        }
+    localCoopProcessPostgameWorldSwitch();
+    localCoopProcessCombatInput();
+    localCoopRealtimeAiTick();
+
+    if (!gLocalCoopDangerActive && gLocalCoopRealtimeAiActors.empty()) {
+        gLocalCoopRealtimeCombatActive = false;
     }
 
     localCoopUpdateSharedCamera();
