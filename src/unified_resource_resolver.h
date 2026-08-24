@@ -245,9 +245,19 @@ inline XFile* unifiedResourceXfileOpen(const char* filePath, const char* mode)
                 return writableEngineFile;
             }
         } else {
-            UnifiedGameId preferred = unifiedResourceUsesFallout2EngineLayer(filePath)
-                ? UnifiedGameId::Fallout2
-                : unifiedResourceGetPreferredGame();
+            // Explicit origin scopes are used by the small number of original
+            // F1-only UI surfaces (world map/town map/end slides). They take
+            // precedence over the normal F2 shared-engine ownership rule. With
+            // no explicit scope, engine UI stays F2-owned and campaign content
+            // follows the active map/content origin.
+            UnifiedGameId preferred;
+            if (gUnifiedResourceOriginOverrideActive) {
+                preferred = gUnifiedResourceOriginOverride;
+            } else if (unifiedResourceUsesFallout2EngineLayer(filePath)) {
+                preferred = UnifiedGameId::Fallout2;
+            } else {
+                preferred = unifiedCampaignGetActiveGame();
+            }
             UnifiedGameId fallback = unifiedResourceGetOtherGame(preferred);
 
             // Both data sets remain mounted. Promote the fallback first and the
