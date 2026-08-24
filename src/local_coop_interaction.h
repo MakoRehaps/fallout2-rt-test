@@ -12,6 +12,7 @@
 #include "item.h"
 #include "kb.h"
 #include "local_coop.h"
+#include "local_coop_ai_realtime.h"
 #include "local_coop_focus.h"
 #include "local_coop_loot_ui.h"
 #include "map.h"
@@ -277,7 +278,10 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
     }
 
     if (badShot == COMBAT_BAD_SHOT_OK) {
-        _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
+        if (_combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0
+            && !isInCombat()) {
+            localCoopRealtimeAiEngageHostile(target, actor);
+        }
     }
 
     actor->data.critter.combat.ap = 9999;
