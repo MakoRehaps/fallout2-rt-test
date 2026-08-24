@@ -144,10 +144,14 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
+    // Directly sequence the stock Fallout attack animation/damage calculation.
+    // Do not call _combat() here: the fused game has no player-facing transition
+    // into the original turn loop. Combat is simply another realtime world action.
     if (_combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) != 0) {
         return false;
     }
 
+    gLocalCoopRealtimeCombatActive = true;
     actor->data.critter.combat.ap = 9999;
     return true;
 }
@@ -237,10 +241,10 @@ inline void localCoopProcessPostgameWorldSwitch()
 
 inline void localCoopProcessCombatInput()
 {
-    if (!isInCombat()) {
-        return;
-    }
-
+    // Controller attacks are valid directly in the world. The original beta
+    // waited for isInCombat(), which forced the first trigger pull through
+    // Fallout's modal/turn-based _combat() loop. Keep the same wall-clock
+    // cooldowns but never require a legacy combat state.
     Uint32 now = SDL_GetTicks();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
@@ -294,47 +298,9 @@ inline void localCoopProcessCombatInput()
 
 inline void localCoopProcessWorldCombatStart()
 {
-    if (isInCombat()) {
-        return;
-    }
-
-    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected
-            || !player.humanOwned
-            || player.controller == nullptr
-            || player.actor == nullptr
-            || player.uiMode != LocalCoopUiMode::World) {
-            continue;
-        }
-
-        LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
-        int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-        bool primaryDown = rightTrigger > 12000;
-
-        if (primaryDown && !runtime.primaryWasDown) {
-            Object* target = localCoopFocusFindEnemy(player);
-            runtime.aimTarget = target;
-            if (target != nullptr) {
-                for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
-                    Object* companion = gLocalCoopPlayers[slot].actor;
-                    if (companion != nullptr) {
-                        companion->data.critter.combat.results |= DAM_LOSE_TURN;
-                    }
-                }
-
-                localCoopRealtimeAiReset();
-                gLocalCoopNextLegacyYieldTick = SDL_GetTicks() + kLocalCoopInitialSchedulerHeartbeatMs;
-                gLocalCoopRealtimeCombatActive = true;
-
-                CombatStartData csd {};
-                csd.attacker = player.actor;
-                csd.defender = target;
-                _combat(&csd);
-            }
-        }
-
-        runtime.primaryWasDown = primaryDown;
-    }
+    // Kept as a compatibility hook for older callers. Player input no longer
+    // enters Fallout's _combat() loop; localCoopProcessCombatInput performs the
+    // attack directly in the normal world simulation.
 }
 
 inline void localCoopUpdateSharedCamera()
@@ -431,17 +397,17 @@ inline void localCoopRuntimeTick()
     localCoopPollControllers();
 
     if (isInCombat()) {
+        // Legacy combat can still be entered temporarily by untouched game
+        // scripts while that conversion is being completed. Keep the old bridge
+        // safe for those cases, but player input itself never starts this state.
         gLocalCoopRealtimeCombatActive = true;
         localCoopSuppressHumanCompanionAi();
         localCoopRealtimeAiTick();
         localCoopProcessCombatInput();
         localCoopYieldLegacyPlayerTurn();
     } else {
-        if (gLocalCoopRealtimeCombatActive) {
-            localCoopSetRealtimeCombatActive(false);
-        }
         localCoopProcessPostgameWorldSwitch();
-        localCoopProcessWorldCombatStart();
+        localCoopProcessCombatInput();
     }
 
     localCoopUpdateSharedCamera();
