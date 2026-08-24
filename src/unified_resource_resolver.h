@@ -9,6 +9,12 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include "platform_compat.h"
 #include "unified_resource_origin.h"
 #include "xfile.h"
@@ -191,21 +197,63 @@ inline bool unifiedResourceUsesFallout2EngineLayer(const char* filePath)
         || unifiedResourceEndsWith(path, "game\\skilldex.msg");
 }
 
+inline void unifiedResourceEnsureDirectory(const std::string& path)
+{
+    if (path.empty() || compat_access(path.c_str(), 0) == 0) {
+        return;
+    }
+#if defined(_WIN32)
+    _mkdir(path.c_str());
+#else
+    mkdir(path.c_str(), 0755);
+#endif
+}
+
+inline XFile* unifiedResourceOpenWritableEngineFile(const char* filePath, const char* mode)
+{
+    if (!unifiedCampaignIsEnabled() || filePath == nullptr || mode == nullptr) {
+        return nullptr;
+    }
+
+    std::string normalized = unifiedResourceNormalizeLookupPath(filePath);
+    if (normalized != "sound\\sfx\\sndlist.lst") {
+        return nullptr;
+    }
+
+    const std::string& fallout2Root = unifiedCampaignGetRoot(UnifiedGameId::Fallout2);
+    if (fallout2Root.empty()) {
+        return nullptr;
+    }
+
+    std::string soundDir = unifiedResourceJoinPath(fallout2Root, "sound");
+    std::string sfxDir = unifiedResourceJoinPath(fallout2Root, "sound\\sfx");
+    unifiedResourceEnsureDirectory(soundDir);
+    unifiedResourceEnsureDirectory(sfxDir);
+
+    std::string destination = unifiedResourceJoinPath(fallout2Root, filePath);
+    return xfileOpen(destination.c_str(), mode);
+}
+
 inline XFile* unifiedResourceXfileOpen(const char* filePath, const char* mode)
 {
-    if (unifiedCampaignIsEnabled()
-        && unifiedResourceIsRelativePath(filePath)
-        && unifiedResourceIsReadOnlyMode(mode)) {
-        UnifiedGameId preferred = unifiedResourceUsesFallout2EngineLayer(filePath)
-            ? UnifiedGameId::Fallout2
-            : unifiedResourceGetPreferredGame();
-        UnifiedGameId fallback = unifiedResourceGetOtherGame(preferred);
+    if (unifiedCampaignIsEnabled() && unifiedResourceIsRelativePath(filePath)) {
+        if (!unifiedResourceIsReadOnlyMode(mode)) {
+            XFile* writableEngineFile = unifiedResourceOpenWritableEngineFile(filePath, mode);
+            if (writableEngineFile != nullptr) {
+                return writableEngineFile;
+            }
+        } else {
+            UnifiedGameId preferred = unifiedResourceUsesFallout2EngineLayer(filePath)
+                ? UnifiedGameId::Fallout2
+                : unifiedResourceGetPreferredGame();
+            UnifiedGameId fallback = unifiedResourceGetOtherGame(preferred);
 
-        // Both data sets remain mounted. Promote the fallback first and the
-        // requested origin last so legacy unqualified paths resolve in the
-        // intended namespace without ever tearing the other game down.
-        unifiedResourcePromoteDataset(fallback);
-        unifiedResourcePromoteDataset(preferred);
+            // Both data sets remain mounted. Promote the fallback first and the
+            // requested origin last so legacy unqualified paths resolve in the
+            // intended namespace without ever tearing the other game down.
+            unifiedResourcePromoteDataset(fallback);
+            unifiedResourcePromoteDataset(preferred);
+        }
     }
 
     return xfileOpen(filePath, mode);
