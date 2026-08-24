@@ -170,6 +170,18 @@ inline bool unifiedResourceUsesFallout2EngineLayer(const char* filePath)
         return true;
     }
 
+    // These tables belong to the Fallout 2-derived engine framework. They are
+    // not Fallout 1 campaign content. Keeping them F2-owned removes the old
+    // installer stubs and prevents the F2 parsers from consuming F1-era or
+    // incomplete compatibility files. F1 companions/ending content will be
+    // represented in the unified systems rather than by swapping this framework
+    // table out underneath the engine.
+    if (path == "data\\ai.txt"
+        || path == "data\\party.txt"
+        || path == "data\\enddeath.txt") {
+        return true;
+    }
+
     // Engine modal text follows the same rule. Campaign dialogue, maps, scripts,
     // protos and world-map messages are intentionally NOT listed here and keep
     // using their originating game's namespace.
