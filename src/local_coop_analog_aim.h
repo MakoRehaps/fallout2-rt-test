@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 
-#include "color.h"
 #include "kb.h"
 #include "local_coop.h"
 #include "local_coop_focus.h"
@@ -15,15 +14,12 @@
 #include "object.h"
 #include "svga.h"
 #include "tile.h"
-#include "window_manager.h"
 
 namespace fallout {
 
-// The original controller slice issued a fresh one-hex animation after every
-// completed step. That works, but it makes held-stick movement visibly stop and
-// restart at every hex. This layer keeps a short path queued and only rebuilds
-// it when the stick changes direction, producing continuous Fallout animation
-// while preserving the engine's hex collision/path rules.
+// Continuous analog movement keeps a short path queued and rebuilds it only
+// when the requested direction changes. Aiming remains full-angle screen-space
+// rather than being reduced to one of Fallout's six hex directions.
 inline constexpr float kLocalCoopRadialDeadzone = 0.20f;
 inline constexpr int kLocalCoopWalkLookAheadTiles = 4;
 inline constexpr int kLocalCoopRunLookAheadTiles = 7;
@@ -42,9 +38,6 @@ struct LocalCoopAnalogState {
 };
 
 inline std::array<LocalCoopAnalogState, kLocalCoopMaxPlayers> gLocalCoopAnalogStates;
-inline int gLocalCoopAimBeadWindow = -1;
-inline int gLocalCoopAimBeadWidth = 0;
-inline int gLocalCoopAimBeadHeight = 0;
 
 inline float localCoopNormalizeControllerAxis(Sint16 value)
 {
@@ -148,8 +141,6 @@ inline void localCoopUpdateAnalogAxes(LocalCoopPlayer& player)
         state.aimX,
         state.aimY);
 
-    // Keep all of the existing combat/focus/interaction code fed from the same
-    // radially-deadzoned stick instead of the old per-axis square deadzone.
     player.moveX = static_cast<int>(state.moveX * 32767.0f);
     player.moveY = static_cast<int>(state.moveY * 32767.0f);
     player.aimX = static_cast<int>(state.aimX * 32767.0f);
@@ -220,9 +211,8 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
         return;
     }
 
-    // Never cancel a weapon animation to steer. Movement resumes naturally as
-    // soon as the attack animation finishes. Keyboard-only P1 has no controller
-    // to sample here, so guard the trigger/shoulder reads.
+    // Weapon animations temporarily own the actor, but danger/combat state does
+    // not. As soon as the attack finishes the same movement input resumes.
     bool attacking = false;
     if (player.controller != nullptr) {
         int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
@@ -240,8 +230,6 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
             return;
         }
 
-        // A direction change should feel like steering, not like waiting for a
-        // mouse-click path to finish. Cancel only when movement input is active.
         reg_anim_clear(actor);
     }
 
@@ -273,10 +261,6 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
     state.steeringRotation = rotation;
 }
 
-// Runs before the legacy controller runtime. By occupying the actor with a
-// multi-hex movement path first, the old one-hex polling code sees the actor as
-// busy and does not inject its stop/start step. P1 is processed even without a
-// controller so held WASD works as a true realtime input source.
 inline void localCoopAnalogAimPreRuntimeTick()
 {
     if (!gLocalCoopInitialized) {
@@ -302,9 +286,6 @@ inline void localCoopAnalogAimPreRuntimeTick()
     }
 }
 
-// The legacy runtime samples controller axes internally, so refresh our radial
-// values again afterward before focus/interaction selection runs. Reapply P1's
-// keyboard vector after that sampling so controller and keyboard can be mixed.
 inline void localCoopAnalogAimPostRuntimeTick()
 {
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
@@ -319,56 +300,6 @@ inline void localCoopAnalogAimPostRuntimeTick()
     }
 }
 
-inline void localCoopAimBeadDestroy()
-{
-    if (gLocalCoopAimBeadWindow != -1) {
-        windowDestroy(gLocalCoopAimBeadWindow);
-    }
-    gLocalCoopAimBeadWindow = -1;
-    gLocalCoopAimBeadWidth = 0;
-    gLocalCoopAimBeadHeight = 0;
-}
-
-inline bool localCoopAimBeadEnsureWindow()
-{
-    if (gIsoWindow == -1 || isoIsDisabled()) {
-        return false;
-    }
-
-    int width = windowGetWidth(gIsoWindow);
-    int height = windowGetHeight(gIsoWindow);
-    if (width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (gLocalCoopAimBeadWindow != -1
-        && (width != gLocalCoopAimBeadWidth || height != gLocalCoopAimBeadHeight)) {
-        localCoopAimBeadDestroy();
-    }
-
-    if (gLocalCoopAimBeadWindow == -1) {
-        Rect isoRect {};
-        if (windowGetRect(gIsoWindow, &isoRect) != 0) {
-            return false;
-        }
-
-        gLocalCoopAimBeadWindow = windowCreate(isoRect.left,
-            isoRect.top,
-            width,
-            height,
-            0,
-            WINDOW_TRANSPARENT | WINDOW_MOVE_ON_TOP);
-        if (gLocalCoopAimBeadWindow == -1) {
-            return false;
-        }
-
-        gLocalCoopAimBeadWidth = width;
-        gLocalCoopAimBeadHeight = height;
-    }
-
-    return true;
-}
-
 inline bool localCoopAimBeadObjectPoint(Object* object, int& x, int& y)
 {
     if (object == nullptr || !tileIsValid(object->tile)) {
@@ -379,56 +310,62 @@ inline bool localCoopAimBeadObjectPoint(Object* object, int& x, int& y)
         return false;
     }
 
-    // Hex screen coordinates are the upper-left of the 32x16 tile diamond.
     x += 16;
     y += 8;
     return true;
 }
 
-inline void localCoopAimBeadDrawCross(int win, int x, int y, int color)
+inline Object* localCoopAimBeadTarget(LocalCoopPlayer& player)
 {
-    windowDrawLine(win, x - 5, y, x + 5, y, color);
-    windowDrawLine(win, x, y - 5, x, y + 5, color);
+    LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
+
+    // Prefer an acquired hostile target whenever it is still valid, regardless
+    // of any old Fallout combat bit. Otherwise show the normal interaction focus.
+    if (localCoopFocusIsEnemy(player.actor, focus.combatTarget)) {
+        return focus.combatTarget;
+    }
+
+    return focus.outlinedTarget;
 }
 
-inline void localCoopAimBeadTick()
+inline void localCoopAimBeadDrawCross(SDL_Renderer* renderer, int x, int y)
 {
-    bool anyVisible = false;
-    for (const LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected || !player.humanOwned || player.actor == nullptr || player.uiMode != LocalCoopUiMode::World) {
-            continue;
-        }
+    SDL_RenderDrawLine(renderer, x - 5, y, x + 5, y);
+    SDL_RenderDrawLine(renderer, x, y - 5, x, y + 5);
+}
 
-        const LocalCoopAnalogState& analog = gLocalCoopAnalogStates[player.slot];
-        const LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
-        if (analog.aimMagnitude > 0.0f || (isInCombat() && focus.combatTarget != nullptr)) {
-            anyVisible = true;
-            break;
-        }
-    }
-
-    if (!anyVisible) {
-        if (gLocalCoopAimBeadWindow != -1) {
-            windowHide(gLocalCoopAimBeadWindow);
-        }
+// Called from svga.cc after Fallout's RGB world texture has already been copied
+// to SDL's renderer. This is deliberately outside the 8-bit palette/GNW window
+// system: holding the right stick can no longer blank the screen black/white.
+inline void localCoopAimBeadRenderOverlay()
+{
+    if (gSdlRenderer == nullptr || isoIsDisabled()) {
         return;
     }
 
-    if (!localCoopAimBeadEnsureWindow()) {
-        return;
-    }
+    Uint8 oldR = 0;
+    Uint8 oldG = 0;
+    Uint8 oldB = 0;
+    Uint8 oldA = 0;
+    SDL_GetRenderDrawColor(gSdlRenderer, &oldR, &oldG, &oldB, &oldA);
 
-    windowFill(gLocalCoopAimBeadWindow, 0, 0, gLocalCoopAimBeadWidth, gLocalCoopAimBeadHeight, 0);
+    SDL_BlendMode oldBlendMode = SDL_BLENDMODE_NONE;
+    SDL_GetRenderDrawBlendMode(gSdlRenderer, &oldBlendMode);
+    SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
+
+    int maxX = std::max(0, screenGetWidth() - 1);
+    int maxY = std::max(0, screenGetVisibleHeight() - 1);
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected || !player.humanOwned || player.actor == nullptr || player.uiMode != LocalCoopUiMode::World) {
+        if (!player.connected
+            || !player.humanOwned
+            || player.actor == nullptr
+            || player.uiMode != LocalCoopUiMode::World) {
             continue;
         }
 
         LocalCoopAnalogState& analog = gLocalCoopAnalogStates[player.slot];
-        LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
-        Object* target = isInCombat() ? focus.combatTarget : focus.outlinedTarget;
-        if (analog.aimMagnitude <= 0.0f && target == nullptr) {
+        if (analog.aimMagnitude <= 0.0f) {
             continue;
         }
 
@@ -438,6 +375,7 @@ inline void localCoopAimBeadTick()
             continue;
         }
 
+        Object* target = localCoopAimBeadTarget(player);
         int endX = startX;
         int endY = startY;
         bool hasTargetPoint = target != nullptr && localCoopAimBeadObjectPoint(target, endX, endY);
@@ -446,17 +384,42 @@ inline void localCoopAimBeadTick()
             endY = startY + static_cast<int>(analog.aimY * kLocalCoopAimBeadLength);
         }
 
-        endX = std::max(0, std::min(gLocalCoopAimBeadWidth - 1, endX));
-        endY = std::max(0, std::min(gLocalCoopAimBeadHeight - 1, endY));
+        startX = std::max(0, std::min(maxX, startX));
+        startY = std::max(0, std::min(maxY, startY));
+        endX = std::max(0, std::min(maxX, endX));
+        endY = std::max(0, std::min(maxY, endY));
 
         bool hostile = target != nullptr && localCoopFocusIsEnemy(player.actor, target);
-        int color = hostile ? _colorTable[31744] : _colorTable[32767];
-        windowDrawLine(gLocalCoopAimBeadWindow, startX, startY, endX, endY, color);
-        localCoopAimBeadDrawCross(gLocalCoopAimBeadWindow, endX, endY, color);
+        if (hostile) {
+            SDL_SetRenderDrawColor(gSdlRenderer, 255, 70, 70, 235);
+        } else {
+            SDL_SetRenderDrawColor(gSdlRenderer, 255, 255, 255, 225);
+        }
+
+        // Two parallel pixels make the bead readable after desktop scaling while
+        // still remaining much thinner than the old full-window overlay.
+        SDL_RenderDrawLine(gSdlRenderer, startX, startY, endX, endY);
+        SDL_RenderDrawLine(gSdlRenderer, startX, startY + 1, endX, endY + 1);
+        localCoopAimBeadDrawCross(gSdlRenderer, endX, endY);
     }
 
-    windowShow(gLocalCoopAimBeadWindow);
-    windowRefresh(gLocalCoopAimBeadWindow);
+    SDL_SetRenderDrawBlendMode(gSdlRenderer, oldBlendMode);
+    SDL_SetRenderDrawColor(gSdlRenderer, oldR, oldG, oldB, oldA);
+}
+
+inline void localCoopAimBeadDestroy()
+{
+    if (gSdlRenderOverlayProc == localCoopAimBeadRenderOverlay) {
+        gSdlRenderOverlayProc = nullptr;
+    }
+}
+
+inline void localCoopAimBeadTick()
+{
+    // Installation is cheap and persistent. The overlay callback itself checks
+    // current right-stick magnitude every presented frame and draws nothing when
+    // nobody is aiming, so releasing aim immediately restores the untouched world.
+    gSdlRenderOverlayProc = localCoopAimBeadRenderOverlay;
 }
 
 } // namespace fallout
