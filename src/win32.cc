@@ -139,11 +139,19 @@ static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* excepti
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+static int fullDebugSehFilter(EXCEPTION_POINTERS* exceptionInfo)
+{
+    // Do not rely solely on SetUnhandledExceptionFilter. SDL/the CRT or another
+    // library can replace that process-wide filter. The __try/__except around
+    // falloutMain owns the game's top-level SEH boundary and records the crash
+    // before returning from the Windows entry point.
+    fullDebugUnhandledExceptionFilter(exceptionInfo);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 // 0x4DE700
 int main(int argc, char* argv[])
 {
-    // Full Debug means a crash produces actionable files beside fallout2-ce.exe.
-    // Keep the PDB in the same directory so WinDbg/Visual Studio can resolve it.
     SetUnhandledExceptionFilter(fullDebugUnhandledExceptionFilter);
 
     _GNW95_mutex = CreateMutexA(0, TRUE, "GNW95MUTEX");
@@ -151,7 +159,12 @@ int main(int argc, char* argv[])
         SDL_ShowCursor(SDL_DISABLE);
 
         gProgramIsActive = true;
-        falloutMain(argc, argv);
+
+        __try {
+            falloutMain(argc, argv);
+        } __except (fullDebugSehFilter(GetExceptionInformation())) {
+            // Crash artifacts were written by fullDebugSehFilter.
+        }
 
         CloseHandle(_GNW95_mutex);
     }
