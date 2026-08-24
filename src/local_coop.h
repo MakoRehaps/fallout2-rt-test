@@ -11,6 +11,7 @@
 #include "game.h"
 #include "inventory.h"
 #include "item.h"
+#include "local_coop_danger.h"
 #include "object.h"
 #include "party_member.h"
 #include "proto_types.h"
@@ -214,6 +215,7 @@ inline void localCoopShutdown()
         player = LocalCoopPlayer{};
     }
 
+    localCoopDangerEnd();
     gLocalCoopInitialized = false;
 }
 
@@ -317,7 +319,18 @@ inline bool localCoopPlayerCanMove(const LocalCoopPlayer& player)
 
 inline bool localCoopMoveRespectsSharedScreen(Object* actor, int destination)
 {
-    if (actor == nullptr || !tileIsValid(destination) || !tileIsValid(gCenterTile)) {
+    if (actor == nullptr || !tileIsValid(destination)) {
+        return true;
+    }
+
+    // Danger is not Fallout combat mode. Movement, running and interaction stay
+    // fully realtime; only stepping onto an actual exit grid is denied until the
+    // hostile encounter is cleared.
+    if (localCoopDangerBlocksMapExit() && isExitGridAt(destination, actor->elevation)) {
+        return false;
+    }
+
+    if (!tileIsValid(gCenterTile)) {
         return true;
     }
 
