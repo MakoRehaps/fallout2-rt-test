@@ -5,6 +5,7 @@
 
 #ifdef LOCAL_COOP_UNIFIED_PROFILE_SFALL
 #include "unified_campaign.h"
+#include "game_movie.h"
 #endif
 
 namespace fallout {
@@ -99,31 +100,30 @@ inline bool localCoopUnifiedProfileSfallConfigInit(int argc, char** argv)
         return initialized;
     }
 
-    // scripts.cc consumes these immediately during _scr_game_init. Fallout 2
-    // stores month/day as zero-based values: F1's 2161-12-05 therefore becomes
-    // StartYear=2161, StartMonth=11, StartDay=4.
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_YEAR, 2161);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_MONTH, 11);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_DAY, 4);
-
-    // main.cc already honors sfall's StartingMap override before falling back
-    // to its compiled Fallout 2 "artemple.map" default. F1's original main.cc
-    // starts at V13Ent.map, so set the profile override after parsing ddraw.ini
-    // to prevent stale user/F2 settings from sending the unified F1 campaign to
-    // an F2-only map.
     configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_STARTING_MAP_KEY, "V13Ent.map");
 
-    // The F1 data set uses a different movie ID table from Fallout 2. Until
-    // that table is fully translated in game_movie.cc, bypass only the opening
-    // movies so startup reaches the F1 main menu instead of dying in F2 movie
-    // post-processing. This is deliberately profile-scoped; Fallout 2 keeps
-    // its normal opening movie behavior.
+    // Keep F1 on the menu while its original movie table is being ported.
+    // F2's MOVIE_ELDER slot is not Fallout 1's new-game cutscene.
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_SKIP_OPENING_MOVIES_KEY, 1);
 
     return true;
 }
 
+inline int localCoopUnifiedProfileGameMoviePlay(int movie, int flags)
+{
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1 && movie == MOVIE_ELDER) {
+        debugPrint("\nF1 new game: skipping F2-only MOVIE_ELDER during compatibility bring-up\n");
+        return 0;
+    }
+
+    return gameMoviePlay(movie, flags);
+}
+
 #define sfallConfigInit localCoopUnifiedProfileSfallConfigInit
+#define gameMoviePlay localCoopUnifiedProfileGameMoviePlay
 #endif
 
 } // namespace fallout
