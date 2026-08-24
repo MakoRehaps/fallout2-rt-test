@@ -128,9 +128,9 @@ inline int localCoopMainInputGetInput()
     localCoopLiveLootTick();
     localCoopGenericUiControllerTick();
 
-    // A campaign transition request must leave the current gameplay loop before
-    // any cwd/database switch occurs. main.cc's normal teardown then returns to
-    // mainMenuWindowInit, where the full engine rebootstrap is performed.
+    // Legacy proto/script/message tables are still reinitialized when a save or
+    // campaign transition changes their origin. Both physical data sets remain
+    // mounted throughout; this flag no longer implies a cwd/data-root swap.
     if (gUnifiedCampaignRuntime.loadedSaveRequiresContentReload
         && gUnifiedCampaignRuntime.requestedContentGame != gUnifiedCampaignRuntime.activeGame) {
         _game_user_wants_to_quit = 2;
@@ -171,9 +171,10 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
 
     unifiedCampaignConfigureFromArgs(argc, argv);
 
-    // A fresh combined-campaign process always begins in Fallout 1. Save-load
-    // and explicit postgame transitions still use the requested-content path
-    // below and are not affected by this one-time bootstrap selection.
+    // A fresh combined-campaign process begins on the Fallout 1 side of the
+    // fused world. This chooses the origin for legacy unqualified map/script/
+    // proto IDs; it does NOT unmount Fallout 2 or turn the process into an F1
+    // working directory.
     if (unifiedCampaignIsEnabled()) {
         unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
         gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout1;
@@ -182,7 +183,10 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
 
     unifiedCampaignSetBeforeGameResetHook(localCoopResetTransientStateForLoad);
 
-    if (!unifiedCampaignActivateContentRoot()) {
+    // Non-unified compatibility launches retain the old root activation. The
+    // fused runtime deliberately stays in the unified install directory and
+    // addresses both original games through absolute dataset roots/xbase mounts.
+    if (!unifiedCampaignIsEnabled() && !unifiedCampaignActivateContentRoot()) {
         return -1;
     }
 
@@ -227,7 +231,10 @@ inline bool unifiedCampaignRebootstrapRequestedContent()
     unifiedCampaignSetActiveGame(requestedGame);
     gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
 
-    if (!unifiedCampaignActivateContentRoot()) {
+    // Both data sets are already part of the same fused install. Rebootstrap is
+    // currently only for the still-singleton legacy proto/script/message tables;
+    // never chdir into the requested original game.
+    if (!unifiedCampaignIsEnabled() && !unifiedCampaignActivateContentRoot()) {
         return false;
     }
 
