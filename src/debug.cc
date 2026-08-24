@@ -37,6 +37,16 @@ static DebugPrintProc* gDebugPrintProc = nullptr;
 void _GNW_debug_init()
 {
     atexit(_debug_exit);
+
+#ifdef _DEBUG
+    // Unified full-debug builds must always leave the engine's own startup
+    // diagnostics beside the executable. Do not depend on DEBUGACTIVE or the
+    // game config being parsed successfully first; many porting failures occur
+    // before either mechanism can help us.
+    _debug_register_log("debug.log", "wt");
+#else
+    _debug_register_env();
+#endif
 }
 
 // 0x4C6CDC
