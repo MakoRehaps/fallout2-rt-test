@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -70,6 +71,63 @@ inline bool unifiedFallout1DatPathEndsWith(const char* path, const char* suffix)
     }
 
     return compat_stricmp(path + pathLength - suffixLength, suffix) == 0;
+}
+
+inline std::string unifiedDatNormalizeRootPath(const std::string& value)
+{
+    std::string normalized = value;
+    for (char& ch : normalized) {
+        if (ch == '/') {
+            ch = '\\';
+        }
+#if defined(_WIN32)
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = static_cast<char>(ch - 'A' + 'a');
+        }
+#endif
+    }
+    while (!normalized.empty() && normalized.back() == '\\') {
+        normalized.pop_back();
+    }
+    return normalized;
+}
+
+inline bool unifiedDatPathBelongsToRoot(const char* path, const std::string& root)
+{
+    if (path == nullptr || root.empty()) {
+        return false;
+    }
+
+    std::string normalizedPath = unifiedDatNormalizeRootPath(path);
+    std::string normalizedRoot = unifiedDatNormalizeRootPath(root);
+    if (normalizedPath.size() < normalizedRoot.size()) {
+        return false;
+    }
+
+    if (normalizedPath.compare(0, normalizedRoot.size(), normalizedRoot) != 0) {
+        return false;
+    }
+
+    return normalizedPath.size() == normalizedRoot.size()
+        || normalizedPath[normalizedRoot.size()] == '\\';
+}
+
+inline bool unifiedDatShouldUseFallout1Reader(const char* path)
+{
+    // In the fused runtime both Fallout data sets can be mounted at the same
+    // time. Archive format is therefore a property of the archive's origin,
+    // not of whichever campaign happens to own the current map.
+    if (unifiedDatPathBelongsToRoot(path, unifiedCampaignGetRoot(UnifiedGameId::Fallout2))) {
+        return false;
+    }
+
+    if (unifiedDatPathBelongsToRoot(path, unifiedCampaignGetRoot(UnifiedGameId::Fallout1))) {
+        return true;
+    }
+
+    // Relative patch DATs still belong to the current content root. Preserve
+    // the old behavior for those until they receive explicit origin metadata.
+    return unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1;
 }
 
 inline bool unifiedFallout1DatValidateBase(UnifiedFallout1DatBase* base, const char* path)
@@ -147,7 +205,7 @@ inline bool unifiedFallout1DatValidateBase(UnifiedFallout1DatBase* base, const c
 
 inline DBase* unifiedDbaseOpenGuarded(const char* path)
 {
-    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+    if (!unifiedDatShouldUseFallout1Reader(path)) {
         return dbaseOpen(path);
     }
 
