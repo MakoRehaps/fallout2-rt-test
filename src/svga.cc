@@ -33,6 +33,7 @@ SDL_Surface* gSdlSurface = nullptr;
 SDL_Renderer* gSdlRenderer = nullptr;
 SDL_Texture* gSdlTexture = nullptr;
 SDL_Surface* gSdlTextureSurface = nullptr;
+SdlRenderOverlayProc gSdlRenderOverlayProc = nullptr;
 
 // TODO: Remove once migration to update-render cycle is completed.
 FpsLimiter sharedFpsLimiter;
@@ -450,6 +451,14 @@ void renderPresent()
     SDL_UpdateTexture(gSdlTexture, nullptr, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, nullptr, nullptr);
+
+    // Draw controller/world overlays only after the palette-indexed Fallout
+    // framebuffer has become an RGB SDL texture. They can never clear, recolor,
+    // or replace the GNW world window this way.
+    if (gSdlRenderOverlayProc != nullptr) {
+        gSdlRenderOverlayProc();
+    }
+
     SDL_RenderPresent(gSdlRenderer);
 }
 
