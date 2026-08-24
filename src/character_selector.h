@@ -18,6 +18,8 @@ void premadeCharactersExit();
 // selector presentation is fully ported.
 #if defined(MAIN_H)
 #include "character_editor.h"
+#include "color.h"
+#include "palette.h"
 #include "proto.h"
 #include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
@@ -37,6 +39,15 @@ inline int unifiedCampaignCharacterSelectorOpen()
 
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
         _ResetPlayer();
+
+        // mainMenuWindowHide(true) fades the hardware palette to black before
+        // calling the selector. The stock Fallout 2 selector restores color.pal
+        // before opening its UI, but this unified Fallout 1 path intentionally
+        // bypasses that selector and enters the editor directly. Restore the
+        // normal game palette here or the editor is fully functional but renders
+        // as a black screen (Esc still works, which is the telltale symptom).
+        colorPaletteLoad("color.pal");
+        paletteFadeTo(_cmap);
 
         // The fused game uses the Fallout 2 engine/UI layer. Keep the player's
         // F1 world/proto origin intact, but resolve the character editor's
