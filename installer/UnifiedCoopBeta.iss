@@ -186,6 +186,21 @@ begin
   Result := SaveStringToFile(PartyPath, PartyText, False);
 end;
 
+function EnsureFallout1EndDeathCompatibility(const F1Dest: String): Boolean;
+var
+  EndDeathPath: String;
+  EndDeathText: String;
+begin
+  EndDeathPath := AddBackslash(F1Dest) + 'data\enddeath.txt';
+  ForceDirectories(AddBackslash(F1Dest) + 'data');
+
+  { Fallout 2 CE treats a missing enddeath.txt as fatal during startup. Fallout 1
+    does not use Fallout 2's death-ending table. Keep the file parseable but empty
+    until the Fallout 1 ending/death system is ported properly. }
+  EndDeathText := '# Fallout 1 compatibility stub - no Fallout 2 death ending entries' + #13#10;
+  Result := SaveStringToFile(EndDeathPath, EndDeathText, False);
+end;
+
 procedure InitializeWizard;
 var
   F1: String;
@@ -245,6 +260,8 @@ begin
   WizardForm.StatusLabel.Caption := 'Adding Fallout 1 engine compatibility data...';
   if not EnsureFallout1PartyCompatibility(F1Dest) then
     RaiseException('Failed to create Fallout 1 party compatibility data.');
+  if not EnsureFallout1EndDeathCompatibility(F1Dest) then
+    RaiseException('Failed to create Fallout 1 enddeath compatibility data.');
 
   WizardForm.StatusLabel.Caption := 'Copying Fallout 2 game data...';
   if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
