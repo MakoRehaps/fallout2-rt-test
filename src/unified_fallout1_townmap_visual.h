@@ -13,6 +13,7 @@
 #include "svga.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_travel_profile.h"
+#include "unified_origin_art.h"
 #include "window_manager.h"
 
 namespace fallout {
@@ -82,9 +83,9 @@ inline void unifiedFallout1TownMapDrawHotspot(
 
 inline bool unifiedFallout1TownMapRender(
     int win,
-    FrmImage& townImage,
-    FrmImage& boxImage,
-    FrmImage& labelsImage,
+    UnifiedOriginFrmImage& townImage,
+    UnifiedOriginFrmImage& boxImage,
+    UnifiedOriginFrmImage& labelsImage,
     int town,
     const std::array<int, 6>& entrances,
     int entranceCount,
@@ -205,19 +206,13 @@ inline int unifiedFallout1SelectAndLoadTownEntranceVisual(int town)
         return -1;
     }
 
-    FrmImage townImage;
-    FrmImage boxImage;
-    FrmImage labelsImage;
-    int townFid = buildFid(
-        OBJ_TYPE_INTERFACE,
-        kUnifiedFallout1TownMapFirstArtId + town,
-        0,
-        0,
-        0);
-    int boxFid = buildFid(OBJ_TYPE_INTERFACE, kUnifiedFallout1TownMapBoxArtId, 0, 0, 0);
-    int labelsFid = buildFid(OBJ_TYPE_INTERFACE, kUnifiedFallout1TownMapLabelsArtId, 0, 0, 0);
+    UnifiedOriginFrmImage townImage;
+    UnifiedOriginFrmImage boxImage;
+    UnifiedOriginFrmImage labelsImage;
 
-    if (!townImage.lock(townFid)
+    if (!townImage.lock(UnifiedGameId::Fallout1,
+            OBJ_TYPE_INTERFACE,
+            kUnifiedFallout1TownMapFirstArtId + town)
         || screenGetWidth() < kUnifiedFallout1TownMapWindowWidth
         || screenGetVisibleHeight() < kUnifiedFallout1TownMapWindowHeight) {
         return unifiedFallout1SelectAndLoadTownEntrance(town);
@@ -225,8 +220,8 @@ inline int unifiedFallout1SelectAndLoadTownEntranceVisual(int town)
 
     // BOX/LABELS are visual polish rather than functional requirements; use
     // them when the owned F1 installation exposes the expected original FRMs.
-    boxImage.lock(boxFid);
-    labelsImage.lock(labelsFid);
+    boxImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kUnifiedFallout1TownMapBoxArtId);
+    labelsImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kUnifiedFallout1TownMapLabelsArtId);
 
     int win = windowCreate(
         (screenGetWidth() - kUnifiedFallout1TownMapWindowWidth) / 2,
