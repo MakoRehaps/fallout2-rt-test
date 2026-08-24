@@ -298,9 +298,17 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     actor->data.critter.combat.ap = 0;
 
     // Out of range, blocked shot, or melee target too far away: chase using the
-    // normal Fallout pathfinder/animation system. This is asynchronous and does
-    // not claim a combat turn.
-    int moveRc = animationRegisterRunToObject(actor, target, -1, 0);
+    // normal Fallout pathfinder/animation registry. This remains asynchronous
+    // and never claims a combat turn.
+    int moveRc = -1;
+    if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED | ANIMATION_REQUEST_INSIGNIFICANT) != -1) {
+        moveRc = animationRegisterRunToObject(actor, target, -1, 0);
+        if (moveRc == -1) {
+            reg_anim_clear(actor);
+        } else {
+            reg_anim_end();
+        }
+    }
     state.nextActionTick = now + (moveRc == -1 ? 300 : 450);
 }
 
