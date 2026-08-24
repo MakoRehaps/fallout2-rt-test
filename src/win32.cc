@@ -1,7 +1,9 @@
 #include "win32.h"
 
-#include <stdlib.h>
+#include <exception>
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <SDL.h>
 
@@ -30,6 +32,8 @@ bool gProgramIsActive = false;
 // GNW95MUTEX
 HANDLE _GNW95_mutex = nullptr;
 
+static volatile LONG gCrashArtifactsStarted = 0;
+
 static void buildCrashPath(char* out, size_t outSize, const char* fileName)
 {
     char modulePath[MAX_PATH] = { 0 };
@@ -48,8 +52,14 @@ static void buildCrashPath(char* out, size_t outSize, const char* fileName)
     }
 }
 
-static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
+static void writeFullDebugCrashArtifacts(const char* reason, EXCEPTION_POINTERS* exceptionInfo)
 {
+    // Crash handlers can cascade (for example invalid-parameter -> abort -> SIGABRT).
+    // Only the first handler owns the files so the useful report is not overwritten.
+    if (InterlockedCompareExchange(&gCrashArtifactsStarted, 1, 0) != 0) {
+        return;
+    }
+
     char logPath[MAX_PATH];
     char dumpPath[MAX_PATH];
     buildCrashPath(logPath, sizeof(logPath), "fallout2-ce-crash.log");
@@ -65,6 +75,7 @@ static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* excepti
             : nullptr;
 
         fprintf(log, "Fallout Unified Co-op full debug crash report\n");
+        fprintf(log, "Reason=%s\n", reason != nullptr ? reason : "unknown");
         fprintf(log, "ExceptionCode=0x%08lX\n", static_cast<unsigned long>(code));
         fprintf(log, "ExceptionAddress=%p\n", address);
         fprintf(log, "ProcessId=%lu\n", static_cast<unsigned long>(GetCurrentProcessId()));
@@ -83,6 +94,7 @@ static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* excepti
         }
 #endif
         fprintf(log, "MiniDump=%s\n", dumpPath);
+        fflush(log);
         fclose(log);
     }
 
@@ -135,24 +147,83 @@ static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* excepti
 
         FreeLibrary(dbghelp);
     }
+}
 
+static LONG WINAPI fullDebugUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
+{
+    writeFullDebugCrashArtifacts("unhandled-seh", exceptionInfo);
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
 static int fullDebugSehFilter(EXCEPTION_POINTERS* exceptionInfo)
 {
-    // Do not rely solely on SetUnhandledExceptionFilter. SDL/the CRT or another
-    // library can replace that process-wide filter. The __try/__except around
-    // falloutMain owns the game's top-level SEH boundary and records the crash
-    // before returning from the Windows entry point.
-    fullDebugUnhandledExceptionFilter(exceptionInfo);
+    writeFullDebugCrashArtifacts("top-level-seh", exceptionInfo);
     return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void fullDebugTerminateHandler()
+{
+    writeFullDebugCrashArtifacts("std::terminate", nullptr);
+    TerminateProcess(GetCurrentProcess(), 0xE0000001);
+}
+
+static void __cdecl fullDebugPureCallHandler()
+{
+    writeFullDebugCrashArtifacts("pure-virtual-call", nullptr);
+    TerminateProcess(GetCurrentProcess(), 0xE0000002);
+}
+
+static void __cdecl fullDebugInvalidParameterHandler(
+    const wchar_t*,
+    const wchar_t*,
+    const wchar_t*,
+    unsigned int,
+    uintptr_t)
+{
+    writeFullDebugCrashArtifacts("crt-invalid-parameter", nullptr);
+    TerminateProcess(GetCurrentProcess(), 0xE0000003);
+}
+
+static void fullDebugSignalHandler(int signalNumber)
+{
+    const char* reason = "fatal-signal";
+    switch (signalNumber) {
+    case SIGABRT:
+        reason = "SIGABRT/abort";
+        break;
+    case SIGFPE:
+        reason = "SIGFPE";
+        break;
+    case SIGILL:
+        reason = "SIGILL";
+        break;
+    case SIGSEGV:
+        reason = "SIGSEGV";
+        break;
+    default:
+        break;
+    }
+
+    writeFullDebugCrashArtifacts(reason, nullptr);
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(0xE0000100u + (signalNumber & 0xFF)));
+}
+
+static void installFullDebugCrashHandlers()
+{
+    SetUnhandledExceptionFilter(fullDebugUnhandledExceptionFilter);
+    std::set_terminate(fullDebugTerminateHandler);
+    _set_purecall_handler(fullDebugPureCallHandler);
+    _set_invalid_parameter_handler(fullDebugInvalidParameterHandler);
+    signal(SIGABRT, fullDebugSignalHandler);
+    signal(SIGFPE, fullDebugSignalHandler);
+    signal(SIGILL, fullDebugSignalHandler);
+    signal(SIGSEGV, fullDebugSignalHandler);
 }
 
 // 0x4DE700
 int main(int argc, char* argv[])
 {
-    SetUnhandledExceptionFilter(fullDebugUnhandledExceptionFilter);
+    installFullDebugCrashHandlers();
 
     _GNW95_mutex = CreateMutexA(0, TRUE, "GNW95MUTEX");
     if (GetLastError() == ERROR_SUCCESS) {
