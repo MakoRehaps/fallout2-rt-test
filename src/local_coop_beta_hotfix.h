@@ -9,6 +9,7 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_focus.h"
 #include "local_coop_runtime.h"
+#include "local_coop_analog_aim.h"
 #include "object.h"
 #include "tile.h"
 
@@ -23,6 +24,11 @@ inline bool gLocalCoopHotfixCombatWasActive = false;
 inline void localCoopBetaHotfixBeginFrame()
 {
     gLocalCoopHotfixCameraTileBeforeTick = gCenterTile;
+
+    // Run the continuous steering layer before the legacy controller runtime.
+    // This queues a multi-hex movement path first, so the old one-hex poll sees
+    // the actor as busy instead of injecting a stop/start step.
+    localCoopAnalogAimPreRuntimeTick();
 }
 
 inline int localCoopBetaHotfixPartyCenterTile()
@@ -178,8 +184,16 @@ inline void localCoopBetaHotfixCombatInput()
 
 inline void localCoopBetaHotfixAfterRuntime()
 {
+    // The legacy runtime samples axes internally. Restore the radial stick
+    // values before focus, interaction and the visual aim bead consume them.
+    localCoopAnalogAimPostRuntimeTick();
     localCoopBetaHotfixCameraAfterRuntime();
     localCoopBetaHotfixCombatInput();
+
+    // Draw from the controlled critter toward the selected world target (or the
+    // raw right-stick direction when nothing is acquired). This is a controller
+    // overlay and never moves Fallout's mouse cursor.
+    localCoopAimBeadTick();
 }
 
 } // namespace fallout
