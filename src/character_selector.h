@@ -21,6 +21,7 @@ void premadeCharactersExit();
 #include "proto.h"
 #include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
+#include "unified_resource_origin.h"
 
 namespace fallout {
 
@@ -36,6 +37,13 @@ inline int unifiedCampaignCharacterSelectorOpen()
 
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
         _ResetPlayer();
+
+        // The fused game uses the Fallout 2 engine/UI layer. Keep the player's
+        // F1 world/proto origin intact, but resolve the character editor's
+        // editor.msg and interface art from the F2 dataset for the duration of
+        // this modal screen. Leaving the scope immediately restores F1-preferred
+        // world resources before V13Ent.map is loaded.
+        UnifiedResourceOriginScope editorResources(UnifiedGameId::Fallout2);
         return characterEditorShow(true) == 0 ? 2 : 3;
     }
 
