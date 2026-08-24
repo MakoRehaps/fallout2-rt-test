@@ -151,16 +151,22 @@ inline DBase* unifiedDbaseOpenGuarded(const char* path)
         return dbaseOpen(path);
     }
 
-    // Fallout's database list contains both DAT archives and ordinary directories.
-    // Only DAT files use the Fallout 1 DAT1 adapter. Directories must stay on the
-    // engine's normal DBase path or loose assets (including fonts) disappear.
+    // xbaseOpen first probes every path as an archive. For ordinary directories,
+    // returning nullptr here is intentional: xbaseOpen then mounts the directory.
     if (path == nullptr || !unifiedFallout1DatPathEndsWith(path, ".dat")) {
-        DBase* base = dbaseOpen(path);
+#if defined(_WIN32)
+        DWORD attributes = path != nullptr ? GetFileAttributesA(path) : INVALID_FILE_ATTRIBUTES;
+        bool directoryExists = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         unifiedFallout1StartupTrace(
-            "Fallout 1 loose-data path: %s result=%s",
+            "Fallout 1 directory candidate: %s exists=%d; deferring to xbaseOpen directory mount",
             path != nullptr ? path : "<null>",
-            base != nullptr ? "ok" : "failed");
-        return base;
+            directoryExists ? 1 : 0);
+#else
+        unifiedFallout1StartupTrace(
+            "Fallout 1 directory candidate: %s; deferring to xbaseOpen directory mount",
+            path != nullptr ? path : "<null>");
+#endif
+        return nullptr;
     }
 
     unifiedFallout1StartupTrace("Opening Fallout 1 DAT1: %s", path);
@@ -168,7 +174,6 @@ inline DBase* unifiedDbaseOpenGuarded(const char* path)
     UnifiedFallout1DatBase* base = unifiedFallout1DatOpenBaseFixed(path);
     if (!unifiedFallout1DatValidateBase(base, path)) {
         delete base;
-        // Fail closed. Never feed a Fallout 1 archive to Fallout 2's DAT2 reader.
         return nullptr;
     }
 
