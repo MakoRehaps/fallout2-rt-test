@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include "actions.h"
 #include "combat.h"
@@ -47,9 +48,6 @@ inline int localCoopFocusCombatRange(const Object* actor)
         weaponRange = 1;
     }
 
-    // Give the stick a small acquisition buffer outside exact firing range so
-    // melee/short-range players can lock while closing distance, but never let
-    // a controller snap to an irrelevant critter across the entire map.
     return std::max(4, std::min(60, weaponRange + 2));
 }
 
@@ -85,8 +83,6 @@ inline bool localCoopFocusIsEnemy(const Object* actor, const Object* target)
         return false;
     }
 
-    // Controller focus follows Fallout's own sight rules. The right-stick cone
-    // can no longer snap/outline an enemy through walls or other sight blockers.
     return _can_see(const_cast<Object*>(actor), const_cast<Object*>(target));
 }
 
@@ -188,6 +184,34 @@ inline void localCoopFocusApplyOutline(int slot, Object* target, bool hostile)
     }
 }
 
+// Return a continuous screen-space angular error between the right stick and a
+// candidate object. The old implementation reduced the stick to one of six hex
+// rotations, which made targets snap across a very wide wedge. This keeps the
+// hex world for movement while aiming behaves like a twin-stick action game.
+inline double localCoopFocusAimError(const LocalCoopPlayer& player, const Object* target)
+{
+    if (player.actor == nullptr || target == nullptr || (player.aimX == 0 && player.aimY == 0)) {
+        return 0.0;
+    }
+
+    int actorX = 0;
+    int actorY = 0;
+    int targetX = 0;
+    int targetY = 0;
+    if (tileToScreenXY(player.actor->tile, &actorX, &actorY, player.actor->elevation) != 0
+        || tileToScreenXY(target->tile, &targetX, &targetY, target->elevation) != 0) {
+        return 3.14159265358979323846;
+    }
+
+    double aimAngle = std::atan2(static_cast<double>(player.aimY), static_cast<double>(player.aimX));
+    double targetAngle = std::atan2(static_cast<double>(targetY - actorY), static_cast<double>(targetX - actorX));
+    double difference = std::fabs(aimAngle - targetAngle);
+    if (difference > 3.14159265358979323846) {
+        difference = 6.28318530717958647692 - difference;
+    }
+    return difference;
+}
+
 inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
 {
     Object* actor = player.actor;
@@ -196,9 +220,9 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
     }
 
     LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
-    int aimRotation = localCoopDirectionFromStick(player.aimX, player.aimY);
+    bool activelyAiming = player.aimX != 0 || player.aimY != 0;
 
-    if (aimRotation == -1 && localCoopFocusIsEnemy(actor, focus.combatTarget)) {
+    if (!activelyAiming && localCoopFocusIsEnemy(actor, focus.combatTarget)) {
         return focus.combatTarget;
     }
 
@@ -210,7 +234,8 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
     }
 
     Object* best = nullptr;
-    int bestScore = 0x7FFFFFFF;
+    double bestScore = 1.0e30;
+    constexpr double kAimAcquireHalfAngle = 0.72; // about 41 degrees
 
     for (int index = 0; index < count; index++) {
         Object* candidate = critters[index];
@@ -218,17 +243,16 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
             continue;
         }
 
-        int distance = objectGetDistanceBetween(actor, candidate);
-        int rotationDifference = 0;
-        if (aimRotation != -1) {
-            int targetRotation = tileGetRotationTo(actor->tile, candidate->tile);
-            rotationDifference = localCoopFocusRotationDifference(aimRotation, targetRotation);
-            if (rotationDifference > 1) {
+        double angularError = 0.0;
+        if (activelyAiming) {
+            angularError = localCoopFocusAimError(player, candidate);
+            if (angularError > kAimAcquireHalfAngle) {
                 continue;
             }
         }
 
-        int score = rotationDifference * 1000 + distance;
+        int distance = objectGetDistanceBetween(actor, candidate);
+        double score = angularError * 1000.0 + static_cast<double>(distance);
         if (score < bestScore) {
             bestScore = score;
             best = candidate;
@@ -259,50 +283,74 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
     }
 
     Object* best = nullptr;
-    int bestScore = 0x7FFFFFFF;
+    double bestScore = 1.0e30;
+    bool activelyAiming = player.aimX != 0 || player.aimY != 0;
+    constexpr double kInteractAcquireHalfAngle = 0.82; // about 47 degrees
 
-    for (int rotationOffset = -1; rotationOffset <= 1; rotationOffset++) {
-        int rotation = (aimRotation + rotationOffset + ROTATION_COUNT) % ROTATION_COUNT;
-        int angularPenalty = std::abs(rotationOffset) * 100;
-
-        for (int distance = 1; distance <= 6; distance++) {
-            int tile = tileGetTileInDirection(actor->tile, rotation, distance);
-            if (!tileIsValid(tile)) {
-                break;
-            }
-
-            Object* object = objectFindFirstAtLocation(actor->elevation, tile);
-            while (object != nullptr) {
-                if (localCoopFocusIsInteractable(actor, object)) {
-                    int score = angularPenalty + distance;
-                    int type = PID_TYPE(object->pid);
-                    if (type == OBJ_TYPE_CRITTER) {
-                        score -= 20;
-                    } else if (type == OBJ_TYPE_SCENERY) {
-                        score -= 10;
-                    }
-
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = object;
-                    }
-                }
-
-                object = objectFindNextAtLocation();
-            }
+    // Scan critters/items/scenery directly so the non-combat bead selects the
+    // object nearest the actual right-stick ray rather than one of six sectors.
+    const int types[3] = { OBJ_TYPE_CRITTER, OBJ_TYPE_ITEM, OBJ_TYPE_SCENERY };
+    for (int typeIndex = 0; typeIndex < 3; typeIndex++) {
+        Object** objects = nullptr;
+        int count = objectListCreate(-1, actor->elevation, types[typeIndex], &objects);
+        if (count <= 0 || objects == nullptr) {
+            continue;
         }
-    }
 
-    Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
-    while (object != nullptr) {
-        if (localCoopFocusIsInteractable(actor, object) && object != actor) {
-            int score = PID_TYPE(object->pid) == OBJ_TYPE_ITEM ? 2 : 5;
+        for (int index = 0; index < count; index++) {
+            Object* candidate = objects[index];
+            if (!localCoopFocusIsInteractable(actor, candidate)) {
+                continue;
+            }
+
+            int distance = objectGetDistanceBetween(actor, candidate);
+            double angularError = 0.0;
+            if (activelyAiming) {
+                angularError = localCoopFocusAimError(player, candidate);
+                if (angularError > kInteractAcquireHalfAngle) {
+                    continue;
+                }
+            } else {
+                int targetRotation = tileGetRotationTo(actor->tile, candidate->tile);
+                int rotationDifference = localCoopFocusRotationDifference(aimRotation, targetRotation);
+                if (rotationDifference > 1) {
+                    continue;
+                }
+                angularError = static_cast<double>(rotationDifference);
+            }
+
+            double typeBias = 0.0;
+            int candidateType = PID_TYPE(candidate->pid);
+            if (candidateType == OBJ_TYPE_CRITTER) {
+                typeBias = -20.0;
+            } else if (candidateType == OBJ_TYPE_SCENERY) {
+                typeBias = -10.0;
+            }
+
+            double score = angularError * 1000.0 + static_cast<double>(distance) * 10.0 + typeBias;
             if (score < bestScore) {
                 bestScore = score;
-                best = object;
+                best = candidate;
             }
         }
-        object = objectFindNextAtLocation();
+
+        objectListFree(objects);
+    }
+
+    // Items at the actor's feet should remain easy to pick up even when the
+    // right stick is centered.
+    if (!activelyAiming) {
+        Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
+        while (object != nullptr) {
+            if (localCoopFocusIsInteractable(actor, object) && object != actor) {
+                int score = PID_TYPE(object->pid) == OBJ_TYPE_ITEM ? 2 : 5;
+                if (static_cast<double>(score) < bestScore) {
+                    bestScore = static_cast<double>(score);
+                    best = object;
+                }
+            }
+            object = objectFindNextAtLocation();
+        }
     }
 
     focus.interactionTarget = best;
@@ -315,14 +363,14 @@ inline Object* localCoopFocusUpdateForPlayer(LocalCoopPlayer& player)
     bool hostile = false;
 
     if (player.uiMode == LocalCoopUiMode::World) {
-        bool activelyAiming = localCoopDirectionFromStick(player.aimX, player.aimY) != -1;
+        bool activelyAiming = player.aimX != 0 || player.aimY != 0;
 
         if (isInCombat() || activelyAiming) {
             focusTarget = localCoopFocusFindEnemy(player);
             hostile = focusTarget != nullptr;
         }
 
-        if (focusTarget == nullptr && player.slot == 0) {
+        if (focusTarget == nullptr) {
             focusTarget = localCoopFocusFindInteractable(player);
             hostile = false;
         }
