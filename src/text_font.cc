@@ -7,13 +7,11 @@
 #include "db.h"
 #include "memory.h"
 #include "platform_compat.h"
+#include "unified_fallout1_dat1_guard.h"
 
 namespace fallout {
 
-// The maximum number of text fonts.
 #define TEXT_FONT_MAX (10)
-
-// The maximum number of font managers.
 #define FONT_MANAGER_MAX (10)
 
 typedef struct TextFontGlyph {
@@ -118,10 +116,21 @@ int textFontLoad(int font)
     textFontDescriptor->data = nullptr;
     textFontDescriptor->glyphs = nullptr;
 
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        unifiedFallout1StartupTrace("FONT0 load: resolving %s through xfile search chain", path);
+    }
+
     File* stream = fileOpen(path, "rb");
-    int dataSize;
+    int dataSize = 0;
     if (stream == nullptr) {
+        if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+            unifiedFallout1StartupTrace("FONT0 load failed: fileOpen(%s) returned null", path);
+        }
         goto out;
+    }
+
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        unifiedFallout1StartupTrace("FONT0 stream opened successfully");
     }
 
     if (fileRead(&(textFontDescriptor->glyphCount), 4, 1, stream) != 1) goto out;
@@ -134,6 +143,8 @@ int textFontLoad(int font)
     int dataPtr;
     if (fileRead(&dataPtr, 4, 1, stream) != 1) goto out;
 
+    if (textFontDescriptor->glyphCount <= 0) goto out;
+
     textFontDescriptor->glyphs = (TextFontGlyph*)internal_malloc(textFontDescriptor->glyphCount * sizeof(TextFontGlyph));
     if (textFontDescriptor->glyphs == nullptr) {
         goto out;
@@ -144,6 +155,8 @@ int textFontLoad(int font)
     }
 
     dataSize = textFontDescriptor->lineHeight * ((textFontDescriptor->glyphs[textFontDescriptor->glyphCount - 1].width + 7) >> 3) + textFontDescriptor->glyphs[textFontDescriptor->glyphCount - 1].dataOffset;
+    if (dataSize <= 0) goto out;
+
     textFontDescriptor->data = (unsigned char*)internal_malloc(dataSize);
     if (textFontDescriptor->data == nullptr) {
         goto out;
@@ -156,6 +169,24 @@ int textFontLoad(int font)
     rc = 0;
 
 out:
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        if (rc == 0) {
+            unifiedFallout1StartupTrace(
+                "FONT0 parsed: glyphs=%d height=%d spacing=%d data=%d",
+                textFontDescriptor->glyphCount,
+                textFontDescriptor->lineHeight,
+                textFontDescriptor->letterSpacing,
+                dataSize);
+        } else if (stream != nullptr) {
+            unifiedFallout1StartupTrace(
+                "FONT0 parse failed: glyphs=%d height=%d spacing=%d data=%d",
+                textFontDescriptor->glyphCount,
+                textFontDescriptor->lineHeight,
+                textFontDescriptor->letterSpacing,
+                dataSize);
+        }
+    }
+
     if (rc != 0) {
         if (textFontDescriptor->data != nullptr) {
             internal_free(textFontDescriptor->data);
