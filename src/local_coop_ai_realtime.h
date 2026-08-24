@@ -13,6 +13,7 @@
 #include "inventory.h"
 #include "item.h"
 #include "local_coop.h"
+#include "local_coop_danger.h"
 #include "object.h"
 #include "proto_types.h"
 #include "scripts.h"
@@ -20,11 +21,10 @@
 
 namespace fallout {
 
-// Legacy combat and the new world-realtime layer share the same stable actor-ID
-// registry. In legacy combat the untouched Fallout AI brain is sliced by a wall
-// clock. Outside legacy combat we use a deliberately small realtime driver that
-// reuses stock pathfinding, reload, bad-shot validation and attack sequencing,
-// but never enters Fallout's turn loop.
+// The fused co-op game has no combat/non-combat phase. Hostiles are registered
+// here when a script or player attack starts an encounter, then act on independent
+// wall-clock schedules in the normal live world. `local_coop_danger.h` tracks
+// only whether map exits should be locked; it never changes movement/AP/UI mode.
 struct LocalCoopRealtimeAiActorState {
     Uint32 nextActionTick = 0;
     int preferredTargetId = -1;
@@ -48,8 +48,6 @@ inline Uint32 localCoopRealtimeAiInitialStagger(const Object* actor)
         return 100;
     }
 
-    // Distribute the first action so a room full of enemies does not fire on
-    // the same frame. IDs are stable while the object is alive.
     return 100 + static_cast<Uint32>((actor->id & 0x0F) * 35);
 }
 
@@ -135,7 +133,9 @@ inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferr
         state.nextActionTick = now + localCoopRealtimeAiInitialStagger(actor);
     }
     state.preferredTargetId = preferredTarget != nullptr ? preferredTarget->id : -1;
+
     gLocalCoopRealtimeWorldCombatActive = true;
+    localCoopDangerBegin();
 }
 
 inline void localCoopRealtimeAiEngageHostile(Object* hostile, Object* preferredTarget)
@@ -146,8 +146,8 @@ inline void localCoopRealtimeAiEngageHostile(Object* hostile, Object* preferredT
 
     localCoopRealtimeAiRegisterWorldActor(hostile, preferredTarget);
 
-    // Wake nearby members of the same hostile team so initiating a fight feels
-    // like a realtime encounter instead of one NPC responding in isolation.
+    // Wake nearby members of the same team. This is encounter propagation only;
+    // it does not create turns or alter the player's movement state.
     Object** critters = nullptr;
     int count = objectListCreate(-1, hostile->elevation, OBJ_TYPE_CRITTER, &critters);
     if (count <= 0 || critters == nullptr) {
@@ -170,76 +170,117 @@ inline void localCoopRealtimeAiEngageHostile(Object* hostile, Object* preferredT
     objectListFree(critters);
 }
 
+inline Object* localCoopRealtimeAiFindScriptHostile(Object* preferredTarget)
+{
+    if (gDude == nullptr) {
+        return nullptr;
+    }
+
+    Object* human = preferredTarget != nullptr && localCoopActorIsHumanOwned(preferredTarget)
+        ? preferredTarget
+        : gDude;
+
+    Object** critters = nullptr;
+    int count = objectListCreate(-1, human->elevation, OBJ_TYPE_CRITTER, &critters);
+    if (count <= 0 || critters == nullptr) {
+        return nullptr;
+    }
+
+    Object* best = nullptr;
+    int bestDistance = 0x7FFFFFFF;
+    for (int index = 0; index < count; index++) {
+        Object* candidate = critters[index];
+        if (!localCoopRealtimeAiActorCanAct(candidate)
+            || candidate->data.critter.combat.team == human->data.critter.combat.team) {
+            continue;
+        }
+
+        int distance = objectGetDistanceBetween(candidate, human);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = candidate;
+        }
+    }
+
+    objectListFree(critters);
+    return best;
+}
+
+// Script attack opcodes call this instead of queuing SCRIPT_REQUEST_COMBAT.
+// The exact same attacker/defender intent becomes a realtime engagement and the
+// interpreter continues running in the normal world immediately.
+inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
+{
+    if (!gLocalCoopInitialized || gDude == nullptr) {
+        return -1;
+    }
+
+    Object* attacker = combat != nullptr ? combat->attacker : nullptr;
+    Object* defender = combat != nullptr ? combat->defender : nullptr;
+
+    Object* hostile = nullptr;
+    Object* humanTarget = nullptr;
+
+    if (attacker != nullptr && !localCoopActorIsHumanOwned(attacker)) {
+        hostile = attacker;
+        humanTarget = defender != nullptr && localCoopActorIsHumanOwned(defender)
+            ? defender
+            : localCoopRealtimeAiFindNearestHuman(attacker);
+    } else if (defender != nullptr && !localCoopActorIsHumanOwned(defender)) {
+        hostile = defender;
+        humanTarget = attacker != nullptr && localCoopActorIsHumanOwned(attacker)
+            ? attacker
+            : localCoopRealtimeAiFindNearestHuman(defender);
+    }
+
+    if (hostile == nullptr) {
+        humanTarget = attacker != nullptr && localCoopActorIsHumanOwned(attacker)
+            ? attacker
+            : (defender != nullptr && localCoopActorIsHumanOwned(defender) ? defender : gDude);
+        hostile = localCoopRealtimeAiFindScriptHostile(humanTarget);
+    }
+
+    if (hostile != nullptr && humanTarget != nullptr) {
+        localCoopRealtimeAiEngageHostile(hostile, humanTarget);
+    } else {
+        // A combat request without a resolvable pair still becomes danger rather
+        // than entering the stock turn loop. It will clear once no hostile actor
+        // is registered by the normal critter/script update path.
+        localCoopDangerBegin();
+        gLocalCoopRealtimeWorldCombatActive = true;
+    }
+
+    return 0;
+}
+
+// Compatibility bridge retained for any old combat AI dispatch that still gets
+// reached by a save/script while conversion continues. New encounters do not use
+// this path and never require isInCombat().
 inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferredTarget)
 {
     if (actor == nullptr) {
         return;
     }
 
-    // Outside stock combat, legacy script-side AI calls retain their old
-    // behavior. Explicit realtime encounters are registered through
-    // localCoopRealtimeAiEngageHostile instead.
     if (!isInCombat() || !gLocalCoopInitialized) {
+        if (gLocalCoopInitialized && localCoopRealtimeAiActorCanAct(actor)) {
+            localCoopRealtimeAiRegisterWorldActor(actor,
+                preferredTarget != nullptr ? preferredTarget : localCoopRealtimeAiFindNearestHuman(actor));
+            return;
+        }
         combatAiStock(actor, preferredTarget);
         return;
     }
 
-    // Human-owned companions never fall through to Fallout's combat AI even if
-    // some legacy path accidentally attempts to schedule them.
     if (localCoopActorIsHumanOwned(actor)
         || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
         actor->data.critter.combat.ap = 0;
         return;
     }
 
-    if (actor->id == -1) {
-        actor->data.critter.combat.ap = 0;
-        return;
-    }
-
-    Uint32 now = SDL_GetTicks();
-    auto result = gLocalCoopRealtimeAiActors.emplace(actor->id, LocalCoopRealtimeAiActorState {});
-    LocalCoopRealtimeAiActorState& state = result.first->second;
-
-    if (result.second || state.nextActionTick == 0) {
-        state.nextActionTick = now + localCoopRealtimeAiInitialStagger(actor);
-    }
-
-    state.preferredTargetId = preferredTarget != nullptr ? preferredTarget->id : -1;
-
-    // The old turn has done its scripts/stand-up/bookkeeping work, but it does
-    // not get to spend the AP bar that `_combat_set_move_all` just assigned.
+    localCoopRealtimeAiRegisterWorldActor(actor,
+        preferredTarget != nullptr ? preferredTarget : localCoopRealtimeAiFindNearestHuman(actor));
     actor->data.critter.combat.ap = 0;
-}
-
-inline void localCoopRealtimeAiRunLegacyActor(Object* actor,
-    Object* preferredTarget,
-    LocalCoopRealtimeAiActorState& state,
-    Uint32 now)
-{
-    if (!localCoopRealtimeAiActorCanAct(actor) || animationIsBusy(actor)) {
-        if (actor != nullptr) {
-            actor->data.critter.combat.ap = 0;
-        }
-        return;
-    }
-
-    if (static_cast<Sint32>(now - state.nextActionTick) < 0) {
-        actor->data.critter.combat.ap = 0;
-        return;
-    }
-
-    int actionSlice = localCoopRealtimeAiActionSlice(actor);
-    if (actionSlice <= 0) {
-        actor->data.critter.combat.ap = 0;
-        state.nextActionTick = now + 300;
-        return;
-    }
-
-    actor->data.critter.combat.ap = actionSlice;
-    combatAiStock(actor, preferredTarget);
-    actor->data.critter.combat.ap = 0;
-    state.nextActionTick = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
 }
 
 inline void localCoopRealtimeAiRunWorldActor(Object* actor,
@@ -279,8 +320,8 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         actionSlice = 2;
     }
 
-    // AP is no longer a turn permission gate; it is only supplied so stock
-    // attack/reload calculations have the budget they expect internally.
+    // AP exists only as a temporary compatibility budget for the original
+    // attack/reload calculations. It never grants or removes a turn.
     actor->data.critter.combat.ap = std::max(20, actionSlice);
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
@@ -292,14 +333,12 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
         actor->data.critter.combat.ap = 0;
         state.nextActionTick = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
+        localCoopDangerTouch();
         return;
     }
 
     actor->data.critter.combat.ap = 0;
 
-    // Out of range, blocked shot, or melee target too far away: chase using the
-    // normal Fallout pathfinder/animation registry. This remains asynchronous
-    // and never claims a combat turn.
     int moveRc = -1;
     if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED | ANIMATION_REQUEST_INSIGNIFICANT) != -1) {
         moveRc = animationRegisterRunToObject(actor, target, -1, 0);
@@ -310,16 +349,12 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         }
     }
     state.nextActionTick = now + (moveRc == -1 ? 300 : 450);
+    localCoopDangerTouch();
 }
 
 inline void localCoopRealtimeAiTick()
 {
-    if (gLocalCoopRealtimeAiInsideTick) {
-        return;
-    }
-
-    bool legacyCombat = isInCombat();
-    if (!legacyCombat && !gLocalCoopRealtimeWorldCombatActive) {
+    if (gLocalCoopRealtimeAiInsideTick || !gLocalCoopDangerActive) {
         return;
     }
 
@@ -330,7 +365,7 @@ inline void localCoopRealtimeAiTick()
     for (auto it = gLocalCoopRealtimeAiActors.begin(); it != gLocalCoopRealtimeAiActors.end();) {
         Object* actor = objectFindById(it->first);
         if (actor == nullptr
-            || (actor->data.critter.combat.results & DAM_DEAD) != 0) {
+            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
             it = gLocalCoopRealtimeAiActors.erase(it);
             continue;
         }
@@ -340,19 +375,16 @@ inline void localCoopRealtimeAiTick()
             preferredTarget = objectFindById(it->second.preferredTargetId);
         }
 
-        if (legacyCombat) {
-            localCoopRealtimeAiRunLegacyActor(actor, preferredTarget, it->second, now);
-        } else {
-            localCoopRealtimeAiRunWorldActor(actor, preferredTarget, it->second, now);
-            if (localCoopRealtimeAiActorCanAct(actor)) {
-                liveWorldActors++;
-            }
+        localCoopRealtimeAiRunWorldActor(actor, preferredTarget, it->second, now);
+        if (localCoopRealtimeAiActorCanAct(actor)) {
+            liveWorldActors++;
         }
         ++it;
     }
 
-    if (!legacyCombat && liveWorldActors == 0) {
+    if (liveWorldActors == 0) {
         gLocalCoopRealtimeWorldCombatActive = false;
+        localCoopDangerEnd();
     }
 
     gLocalCoopRealtimeAiInsideTick = false;
@@ -366,6 +398,7 @@ inline bool localCoopRealtimeAiHasRegisteredActors()
 inline void localCoopRealtimeAiInstall()
 {
     gCombatAiRuntimeHandler = localCoopRealtimeAiRegisterLegacyTurn;
+    gScriptCombatRequestRuntimeHandler = localCoopRealtimeAiHandleScriptCombatRequest;
 }
 
 inline void localCoopRealtimeAiReset()
@@ -374,6 +407,7 @@ inline void localCoopRealtimeAiReset()
     gLocalCoopRealtimeCombatClockTick = SDL_GetTicks();
     gLocalCoopRealtimeAiInsideTick = false;
     gLocalCoopRealtimeWorldCombatActive = false;
+    localCoopDangerEnd();
 }
 
 inline void localCoopRealtimeCombatAdvanceTime(int legacyRoundSeconds)
@@ -387,9 +421,6 @@ inline void localCoopRealtimeCombatAdvanceTime(int legacyRoundSeconds)
     }
 
     Uint32 elapsed = now - gLocalCoopRealtimeCombatClockTick;
-
-    // A large gap means a previous combat ended and another started. Do not
-    // accidentally count out-of-combat wall time as combat time.
     if (elapsed > 5000) {
         gLocalCoopRealtimeCombatClockTick = now;
         return;
