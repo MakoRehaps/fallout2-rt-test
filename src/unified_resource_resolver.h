@@ -184,7 +184,9 @@ inline bool unifiedResourceUsesFallout2EngineLayer(const char* filePath)
     // table out underneath the engine.
     if (path == "data\\ai.txt"
         || path == "data\\party.txt"
-        || path == "data\\enddeath.txt") {
+        || path == "data\\enddeath.txt"
+        || path == "data\\karmavar.txt"
+        || path == "data\\genrep.txt") {
         return true;
     }
 
