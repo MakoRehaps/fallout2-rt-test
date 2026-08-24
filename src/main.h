@@ -138,10 +138,33 @@ inline int localCoopMainInputGetInput()
 
     int keyCode = inputGetInput();
 
-    // P1 is hybrid-input. Keyboard remains untouched, while ISO-world mouse
-    // clicks use the co-op Diablo mapping: right click moves; left click performs
-    // the context action or attacks. Returning -1 prevents the stock world mouse
-    // handler from also cycling modes or treating left click as movement.
+    // P1 is hybrid-input. Keyboard remains available, but the world view now
+    // treats WASD as held realtime locomotion instead of passing those letters
+    // to Fallout's legacy hotkeys (notably A = enter turn-based combat).
+    if (gLocalCoopInitialized) {
+        LocalCoopPlayer& playerOne = gLocalCoopPlayers[0];
+        if (playerOne.humanOwned
+            && playerOne.actor == gDude
+            && playerOne.uiMode == LocalCoopUiMode::World) {
+            if (keyCode == KEY_LOWERCASE_W || keyCode == KEY_UPPERCASE_W
+                || keyCode == KEY_LOWERCASE_A || keyCode == KEY_UPPERCASE_A
+                || keyCode == KEY_LOWERCASE_S || keyCode == KEY_UPPERCASE_S
+                || keyCode == KEY_LOWERCASE_D || keyCode == KEY_UPPERCASE_D) {
+                return -1;
+            }
+
+            // E is a keyboard companion to controller A: interact with the
+            // current aim/facing target without changing mouse mode.
+            if (keyCode == KEY_LOWERCASE_E || keyCode == KEY_UPPERCASE_E) {
+                localCoopPlayerOneInteract();
+                return -1;
+            }
+        }
+    }
+
+    // ISO-world mouse clicks use the co-op Diablo mapping: right click moves;
+    // left click performs the context action or attacks. Returning -1 prevents
+    // the stock world mouse handler from also cycling modes or moving the dude.
     if (localCoopHandlePlayerOneMouseInput(keyCode)) {
         return -1;
     }
