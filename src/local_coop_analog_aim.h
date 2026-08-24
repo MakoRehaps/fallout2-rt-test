@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "color.h"
+#include "kb.h"
 #include "local_coop.h"
 #include "local_coop_focus.h"
 #include "map.h"
@@ -155,11 +156,60 @@ inline void localCoopUpdateAnalogAxes(LocalCoopPlayer& player)
     player.aimY = static_cast<int>(state.aimY * 32767.0f);
 }
 
+inline bool localCoopPlayerOneKeyboardCanMove(const LocalCoopPlayer& player)
+{
+    return player.slot == 0
+        && player.humanOwned
+        && player.actor != nullptr
+        && player.uiMode == LocalCoopUiMode::World
+        && (player.actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) == 0;
+}
+
+inline void localCoopApplyPlayerOneKeyboardMovement(LocalCoopPlayer& player)
+{
+    if (!localCoopPlayerOneKeyboardCanMove(player)) {
+        return;
+    }
+
+    int x = 0;
+    int y = 0;
+    if (gPressedPhysicalKeys[SDL_SCANCODE_A]) {
+        x--;
+    }
+    if (gPressedPhysicalKeys[SDL_SCANCODE_D]) {
+        x++;
+    }
+    if (gPressedPhysicalKeys[SDL_SCANCODE_W]) {
+        y--;
+    }
+    if (gPressedPhysicalKeys[SDL_SCANCODE_S]) {
+        y++;
+    }
+
+    if (x == 0 && y == 0) {
+        return;
+    }
+
+    LocalCoopAnalogState& state = gLocalCoopAnalogStates[0];
+    float magnitude = std::sqrt(static_cast<float>(x * x + y * y));
+    state.moveX = static_cast<float>(x) / magnitude;
+    state.moveY = static_cast<float>(y) / magnitude;
+    state.moveMagnitude = 1.0f;
+
+    player.moveX = static_cast<int>(state.moveX * 32767.0f);
+    player.moveY = static_cast<int>(state.moveY * 32767.0f);
+    player.wantsRun = gPressedPhysicalKeys[SDL_SCANCODE_LSHIFT]
+        || gPressedPhysicalKeys[SDL_SCANCODE_RSHIFT]
+        || (player.controller != nullptr
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0);
+}
+
 inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
 {
     LocalCoopAnalogState& state = gLocalCoopAnalogStates[player.slot];
     Object* actor = player.actor;
-    if (!localCoopPlayerCanMove(player) || actor == nullptr) {
+    bool canMove = localCoopPlayerCanMove(player) || localCoopPlayerOneKeyboardCanMove(player);
+    if (!canMove || actor == nullptr) {
         localCoopStopAnalogSteering(player, state);
         return;
     }
@@ -171,10 +221,14 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
     }
 
     // Never cancel a weapon animation to steer. Movement resumes naturally as
-    // soon as the attack animation finishes.
-    int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-    bool attacking = rightTrigger > 12000
-        || SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
+    // soon as the attack animation finishes. Keyboard-only P1 has no controller
+    // to sample here, so guard the trigger/shoulder reads.
+    bool attacking = false;
+    if (player.controller != nullptr) {
+        int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+        attacking = rightTrigger > 12000
+            || SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
+    }
     if (attacking) {
         state.steering = false;
         state.steeringRotation = -1;
@@ -221,7 +275,8 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
 
 // Runs before the legacy controller runtime. By occupying the actor with a
 // multi-hex movement path first, the old one-hex polling code sees the actor as
-// busy and does not inject its stop/start step.
+// busy and does not inject its stop/start step. P1 is processed even without a
+// controller so held WASD works as a true realtime input source.
 inline void localCoopAnalogAimPreRuntimeTick()
 {
     if (!gLocalCoopInitialized) {
@@ -232,25 +287,35 @@ inline void localCoopAnalogAimPreRuntimeTick()
     localCoopRefreshActorBindings();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected || player.controller == nullptr) {
+        bool hasController = player.connected && player.controller != nullptr;
+        if (!hasController && player.slot != 0) {
             continue;
         }
 
-        player.wantsRun = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+        player.wantsRun = hasController
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
         localCoopUpdateAnalogAxes(player);
+        if (player.slot == 0) {
+            localCoopApplyPlayerOneKeyboardMovement(player);
+        }
         localCoopAnalogSteerPlayer(player);
     }
 }
 
 // The legacy runtime samples controller axes internally, so refresh our radial
-// values again afterward before focus/interaction selection runs.
+// values again afterward before focus/interaction selection runs. Reapply P1's
+// keyboard vector after that sampling so controller and keyboard can be mixed.
 inline void localCoopAnalogAimPostRuntimeTick()
 {
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected || player.controller == nullptr) {
+        bool hasController = player.connected && player.controller != nullptr;
+        if (!hasController && player.slot != 0) {
             continue;
         }
         localCoopUpdateAnalogAxes(player);
+        if (player.slot == 0) {
+            localCoopApplyPlayerOneKeyboardMovement(player);
+        }
     }
 }
 
