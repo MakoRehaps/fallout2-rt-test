@@ -106,9 +106,8 @@ bool settingsExit(bool shouldSave);
 
 // game.cc includes game.h before settings.h. Restrict this wrapper to that
 // consumer so settings.cc still defines the stock settingsInit symbol normally.
-// Unified mode must never inherit stale Fallout 2 asset paths from fallout2.cfg:
-// the active campaign root is authoritative immediately before gameDbInit opens
-// MASTER.DAT, CRITTER.DAT and the loose patch directory.
+// The selected content origin determines which dataset owns unqualified legacy
+// IDs for the current map, but it no longer determines which game is mounted.
 #ifdef GAME_H
 inline bool unifiedCampaignSettingsInit(bool isMapper, int argc, char** argv)
 {
@@ -144,39 +143,53 @@ inline bool unifiedCampaignSettingsInit(bool isMapper, int argc, char** argv)
     return true;
 }
 
-// The runtime is the Fallout 2 engine for both campaigns. When Fallout 1 is
-// active, keep Fallout 1 authoritative but mount the Fallout 2 installation
-// underneath it as an engine/UI compatibility fallback. xbaseOpen moves each
-// newly opened base to the front, so mounting F2 first and then letting the
-// stock gameDbInit open active F1 data preserves this lookup order:
-//   F1 loose data -> F1 critter/master -> F2 loose data -> F2 critter/master.
-// Fallout 2 mode remains the stock/native F2 database chain.
+inline std::string unifiedCampaignDatasetPath(UnifiedGameId game, const char* relative)
+{
+    const std::string& root = unifiedCampaignGetRoot(game);
+    if (root.empty()) {
+        return std::string();
+    }
+
+#if defined(_WIN32)
+    constexpr char kDatasetPathSeparator = '\\';
+#else
+    constexpr char kDatasetPathSeparator = '/';
+#endif
+
+    std::string path = root;
+    if (!path.empty() && path.back() != '/' && path.back() != '\\') {
+        path.push_back(kDatasetPathSeparator);
+    }
+    path.append(relative != nullptr ? relative : "");
+    return path;
+}
+
+// A unified process always exposes both original data sets. The current map's
+// origin is still mounted last so old unqualified lookups preserve that game's
+// semantics, while explicit origin-aware systems can address either set. The
+// DAT reader itself now dispatches by archive origin (DAT1 for F1, DAT2 for F2)
+// rather than by active campaign.
 inline int unifiedCampaignDbOpen(const char* filePath1, int a2, const char* filePath2, int a4)
 {
     if (unifiedCampaignIsEnabled()
-        && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1
         && filePath1 != nullptr
         && settings.system.master_dat_path == filePath1) {
-        const std::string& fallout2Root = unifiedCampaignGetRoot(UnifiedGameId::Fallout2);
-        if (!fallout2Root.empty()) {
-#if defined(_WIN32)
-            constexpr char kFallbackPathSeparator = '\\';
-#else
-            constexpr char kFallbackPathSeparator = '/';
-#endif
-            std::string prefix = fallout2Root;
-            if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\') {
-                prefix.push_back(kFallbackPathSeparator);
-            }
+        UnifiedGameId active = unifiedCampaignGetActiveGame();
+        UnifiedGameId other = active == UnifiedGameId::Fallout1
+            ? UnifiedGameId::Fallout2
+            : UnifiedGameId::Fallout1;
 
-            std::string fallout2Master = prefix + "master.dat";
-            std::string fallout2Critter = prefix + "critter.dat";
-            std::string fallout2Data = prefix + "data";
+        std::string otherMaster = unifiedCampaignDatasetPath(other, "master.dat");
+        std::string otherCritter = unifiedCampaignDatasetPath(other, "critter.dat");
+        std::string otherData = unifiedCampaignDatasetPath(other, "data");
 
-            // Best-effort fallback. Missing F2 compatibility data must not
-            // replace the normal active-profile error handling below.
-            dbOpen(fallout2Master.c_str(), 0, fallout2Data.c_str(), 1);
-            dbOpen(fallout2Critter.c_str(), 0, fallout2Data.c_str(), 1);
+        if (!otherMaster.empty() && !otherCritter.empty() && !otherData.empty()) {
+            // Mount the other game's master first, then critter/data. dbOpen /
+            // xbaseOpen place newer bases at the head; the stock active dataset
+            // is opened immediately after this wrapper returns and therefore
+            // remains the legacy default without hiding the other game.
+            dbOpen(otherMaster.c_str(), 0, otherData.c_str(), 1);
+            dbOpen(otherCritter.c_str(), 0, otherData.c_str(), 1);
         }
     }
 
