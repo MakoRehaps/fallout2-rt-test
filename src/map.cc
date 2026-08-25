@@ -43,6 +43,7 @@
 #include "tile.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_worldmap_state.h"
+#include "unified_wilderness_generator.h"
 #include "unified_world_system.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
@@ -941,6 +942,7 @@ static int mapLoad(File* stream)
     objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
     objectSetRotation(gDude, gEnteringRotation, nullptr);
     gMapHeader.field_34 = wmMapMatchNameToIdx(gMapHeader.name);
+    unifiedWildernessGenerateLoadedMap(gMapHeader.field_34);
     unifiedWorldSystemMarkMapVisited(
         unifiedCampaignGetActiveGame(),
         gMapHeader.field_34,
@@ -1236,7 +1238,7 @@ static void mapPlacePartyAtRoadEntry(
         &method);
     if (tile == -1) {
         debugPrint(
-            "[COOP ROAD] no safe authored entry sourceMap=%d map=%d headerTile=%d currentTile=%d\\n",
+            "[COOP ROAD] no safe authored entry sourceMap=%d map=%d headerTile=%d currentTile=%d\n",
             sourceMap,
             gMapHeader.field_34,
             authoredStartTile,
@@ -1248,7 +1250,7 @@ static void mapPlacePartyAtRoadEntry(
     if (tile != oldTile
         && objectSetLocation(gDude, tile, gDude->elevation, nullptr) == -1) {
         debugPrint(
-            "[COOP ROAD] authored entry placement failed method=%s tile=%d\\n",
+            "[COOP ROAD] authored entry placement failed method=%s tile=%d\n",
             method,
             tile);
         return;
@@ -1276,7 +1278,7 @@ static void mapPlacePartyAtRoadEntry(
     tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW);
 
     debugPrint(
-        "[COOP ROAD] authored entry method=%s sourceMap=%d map=%d direction=%d oldTile=%d headerTile=%d tile=%d x=%d y=%d open=%d\\n",
+        "[COOP ROAD] authored entry method=%s sourceMap=%d map=%d direction=%d oldTile=%d headerTile=%d tile=%d x=%d y=%d open=%d\n",
         method,
         sourceMap,
         gMapHeader.field_34,
@@ -1698,7 +1700,7 @@ int _map_save_in_game(bool a1)
 
     char name[16];
 
-    if (a1 && !wmMapIsSaveable()) {
+    if (!wmMapIsSaveable()) {
         debugPrint("\nNot saving RANDOM encounter map.");
 
         strcpy(name, gMapHeader.name);

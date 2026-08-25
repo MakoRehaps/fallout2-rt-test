@@ -3475,7 +3475,7 @@ static int _combatai_rating(Object* obj)
     int weapon_damage_min;
     int weapon_damage_max;
 
-    if (obj == nullptr) {
+    if (!objectPointerIsLive(obj)) {
         return 0;
     }
 
@@ -3505,7 +3505,19 @@ static int _combatai_rating(Object* obj)
 // 0x42B9D4
 void _combatai_check_retaliation(Object* a1, Object* a2)
 {
+    if (!objectPointerIsLive(a1) || !objectPointerIsLive(a2)) {
+        return;
+    }
+
     Object* whoHitMe = a1->data.critter.combat.whoHitMe;
+    if (whoHitMe != nullptr && !objectPointerIsLive(whoHitMe)) {
+        debugPrint("[COMBAT AI] cleared stale retaliation target critter=%d target=%p\n",
+            a1->id,
+            static_cast<void*>(whoHitMe));
+        a1->data.critter.combat.whoHitMe = nullptr;
+        whoHitMe = nullptr;
+    }
+
     if (whoHitMe != nullptr) {
         int candidateRating = _combatai_rating(a2);
         int whoHitMeRating = _combatai_rating(whoHitMe);

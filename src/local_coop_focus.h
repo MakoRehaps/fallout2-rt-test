@@ -30,19 +30,7 @@ inline std::array<LocalCoopFocusSlot, kLocalCoopMaxPlayers> gLocalCoopFocusSlots
 // until it has been found in the engine's current live-object list.
 inline bool localCoopFocusPointerIsLive(const Object* candidate)
 {
-    if (candidate == nullptr) {
-        return false;
-    }
-
-    Object* object = objectFindFirst();
-    while (object != nullptr) {
-        if (object == candidate) {
-            return true;
-        }
-        object = objectFindNext();
-    }
-
-    return false;
+    return objectPointerIsLive(candidate);
 }
 
 inline Object* localCoopFocusResolveLivePointer(Object* candidate)

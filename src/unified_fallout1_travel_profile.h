@@ -28,6 +28,7 @@
 #include "unified_worldmap_grid_profile.h"
 #include "unified_worldmap_profile.h"
 #include "unified_worldmap_state_profile.h"
+#include "unified_vehicle_system.h"
 #include "window_manager.h"
 
 namespace fallout {
@@ -383,6 +384,7 @@ inline void unifiedFallout1TravelTiming(int& milesPerDay, int& timeAdder)
     float ticks = 864000.0f / static_cast<float>(milesPerDay);
     int pathfinder = gDude != nullptr ? perkGetRank(gDude, PERK_PATHFINDER) : 0;
     ticks *= 1.0f - static_cast<float>(pathfinder) * 0.25f;
+    ticks *= static_cast<float>(unifiedVehicleTravelTimePercent()) / 100.0f;
     timeAdder = std::max(1, static_cast<int>(ticks));
 }
 

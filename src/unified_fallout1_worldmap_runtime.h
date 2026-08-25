@@ -6,6 +6,8 @@
 #include "unified_fallout1_travel_profile.h"
 #include "unified_fallout1_townmap_visual.h"
 #include "unified_fallout1_worldmap_events.h"
+#include "display_monitor.h"
+#include "unified_vehicle_system.h"
 
 namespace fallout {
 
@@ -66,6 +68,12 @@ inline void unifiedWmWorldMapRuntime()
 {
     if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
         unifiedWmWorldMapVisual();
+        return;
+    }
+
+    if (!unifiedVehicleCanFastTravel()) {
+        displayMonitorAddMessage(
+            "Fast travel requires a working vehicle. Walk the wilderness roads or repair a wreck.");
         return;
     }
 
