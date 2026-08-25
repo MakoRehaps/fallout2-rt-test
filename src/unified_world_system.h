@@ -705,6 +705,7 @@ void unifiedWorldSystemRestoreFallout2EncounterContext(
     int mapIdx,
     int encounterTableId,
     int encounterEntryId);
+void unifiedWorldSystemClearFallout2EncounterContext();
 
 
 inline int unifiedWorldSystemRoadMask(UnifiedGameId game)
@@ -800,10 +801,14 @@ inline bool unifiedWorldSystemTraverseRoad(
                 cell->lastVisitGameTime = static_cast<int32_t>(gameTime);
             }
             if (game == UnifiedGameId::Fallout2) {
-                unifiedWorldSystemRestoreFallout2EncounterContext(
-                    active.currentMapIdx,
-                    active.encounterTableId,
-                    active.encounterEntryId);
+                if (active.special != 0) {
+                    unifiedWorldSystemClearFallout2EncounterContext();
+                } else {
+                    unifiedWorldSystemRestoreFallout2EncounterContext(
+                        active.currentMapIdx,
+                        active.encounterTableId,
+                        active.encounterEntryId);
+                }
             }
             *mapIdxPtr = active.currentMapIdx;
             unifiedWorldSystemAppendLog(
@@ -861,6 +866,10 @@ inline bool unifiedWorldSystemTraverseRoad(
         gameTime);
 
     UnifiedWorldSystemActiveChain& nextActive = state.activeChain;
+    // A cleared cell is still physically traversable, but remains population-
+    // empty until its game-time regeneration condition succeeds.
+    nextActive.special =
+        (nextCell->flags & UNIFIED_WORLD_CELL_CLEARED) != 0 ? 1 : 0;
     int entryDepth = direction == UnifiedWorldSystemRoadDirection::North
             || direction == UnifiedWorldSystemRoadDirection::West
         ? static_cast<int>(nextActive.length) - 1
@@ -874,10 +883,14 @@ inline bool unifiedWorldSystemTraverseRoad(
         unifiedWorldSystemCellIndex(nextX, nextY));
 
     if (game == UnifiedGameId::Fallout2) {
-        unifiedWorldSystemRestoreFallout2EncounterContext(
-            nextActive.currentMapIdx,
-            -1,
-            -1);
+        if (nextActive.special != 0) {
+            unifiedWorldSystemClearFallout2EncounterContext();
+        } else {
+            unifiedWorldSystemRestoreFallout2EncounterContext(
+                nextActive.currentMapIdx,
+                -1,
+                -1);
+        }
     }
 
     *mapIdxPtr = nextActive.currentMapIdx;
