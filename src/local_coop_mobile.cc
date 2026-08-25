@@ -13,6 +13,8 @@
 #include <string>
 #include <thread>
 
+#include "qrcodegen.hpp"
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -28,6 +30,7 @@
 #include "debug.h"
 #include "display_monitor.h"
 #include "local_coop.h"
+#include "kb.h"
 
 namespace fallout {
 namespace {
@@ -75,6 +78,8 @@ std::thread gMobileServerThread;
 MobileSocket gMobileListenSocket = kInvalidMobileSocket;
 int gMobilePin = 0;
 bool gMobileNoticeShown = false;
+int gMobileHostWindow = -1;
+uint64_t gMobileHostWindowLastDraw = 0;
 
 uint64_t mobileNow()
 {
@@ -170,6 +175,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 <script>
 let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false;
 const $=id=>document.getElementById(id);
+$('pin').value=new URLSearchParams(location.search).get('pin')||'';
 function bindButton(id,bit,axis){
  const e=$(id); const down=ev=>{ev.preventDefault();e.setPointerCapture?.(ev.pointerId);if(axis!==undefined)axes[axis]=32767;else buttons|=(1<<bit)};
  const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit)};
@@ -421,6 +427,111 @@ std::string mobileHostAddress()
     return address;
 }
 
+std::string mobilePairingUrl()
+{
+    std::ostringstream url;
+    url << "http://" << mobileHostAddress() << ":" << kMobilePort
+        << "/?pin=" << gMobilePin;
+    return url.str();
+}
+
+void mobileDrawQrCode(int window, const std::string& text, int left, int top)
+{
+    qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(
+        text.c_str(),
+        qrcodegen::QrCode::Ecc::MEDIUM);
+    constexpr int scale = 5;
+    constexpr int border = 3;
+    int side = (qr.getSize() + border * 2) * scale;
+    windowFill(window, left, top, side, side, _colorTable[32767]);
+
+    for (int y = 0; y < qr.getSize(); y++) {
+        for (int x = 0; x < qr.getSize(); x++) {
+            if (qr.getModule(x, y)) {
+                windowFill(
+                    window,
+                    left + (x + border) * scale,
+                    top + (y + border) * scale,
+                    scale,
+                    scale,
+                    _colorTable[0]);
+            }
+        }
+    }
+}
+
+void mobileDrawHostWindow()
+{
+    if (gMobileHostWindow == -1) {
+        return;
+    }
+
+    windowFill(gMobileHostWindow, 0, 0, 620, 420, _colorTable[0]);
+    windowDrawBorder(gMobileHostWindow);
+    windowDrawText(
+        gMobileHostWindow,
+        "NOKIA BLACKBERRY PHOBOI - PHONE HOST",
+        350,
+        20,
+        18,
+        _colorTable[992]);
+
+    std::string address = mobilePairingUrl();
+    char line[256] {};
+    snprintf(line, sizeof(line), "OPEN OR SCAN: %s", address.c_str());
+    windowDrawText(gMobileHostWindow, line, 360, 20, 54, _colorTable[992]);
+
+    snprintf(line, sizeof(line), "SESSION PIN: %06d", gMobilePin);
+    windowDrawText(gMobileHostWindow, line, 340, 20, 82, _colorTable[32767]);
+    windowDrawText(gMobileHostWindow, "LOCAL WIFI OR PRIVATE VPN", 340, 20, 112, _colorTable[992]);
+
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        const char* status = "OPEN";
+        if (gMobileSlots[slot].claimed.load()) {
+            status = "PHONE CONNECTED";
+        } else if (gLocalCoopPlayers[slot].connected) {
+            status = "PHYSICAL CONTROLLER";
+        } else if (gLocalCoopPlayers[slot].slotLocked) {
+            status = "RESERVED";
+        }
+
+        snprintf(line, sizeof(line), "PLAYER %d: %s", slot + 1, status);
+        windowDrawText(gMobileHostWindow, line, 340, 20, 150 + (slot - 1) * 34, _colorTable[992]);
+    }
+
+    windowDrawText(gMobileHostWindow, "2 / 3 / 4: KICK PHONE SLOT", 340, 20, 278, _colorTable[992]);
+    windowDrawText(gMobileHostWindow, "F11 OR ESC: CLOSE", 340, 20, 308, _colorTable[992]);
+    windowDrawText(gMobileHostWindow, "REMOTE: USE TAILSCALE ADDRESS", 340, 20, 350, _colorTable[992]);
+
+    mobileDrawQrCode(gMobileHostWindow, address, 395, 145);
+    windowRefresh(gMobileHostWindow);
+    gMobileHostWindowLastDraw = mobileNow();
+}
+
+void mobileOpenHostWindow()
+{
+    if (gMobileHostWindow != -1) {
+        return;
+    }
+
+    gMobileHostWindow = windowCreate(
+        (screenGetWidth() - 620) / 2,
+        (screenGetVisibleHeight() - 420) / 2,
+        620,
+        420,
+        _colorTable[0],
+        WINDOW_MOVE_ON_TOP);
+    mobileDrawHostWindow();
+}
+
+void mobileCloseHostWindow()
+{
+    if (gMobileHostWindow != -1) {
+        windowDestroy(gMobileHostWindow);
+        gMobileHostWindow = -1;
+    }
+}
+
 bool mobileStartServer()
 {
     if (gMobileServerStarted.exchange(true)) {
@@ -593,6 +704,10 @@ void localCoopMobileTick()
 
     SDL_JoystickUpdate();
 
+    if (gMobileHostWindow != -1 && now - gMobileHostWindowLastDraw >= 250) {
+        mobileDrawHostWindow();
+    }
+
     if (!gMobileNoticeShown && gDude != nullptr) {
         gMobileNoticeShown = true;
         std::ostringstream message;
@@ -606,8 +721,50 @@ void localCoopMobileTick()
     }
 }
 
+bool localCoopMobileHandleKey(int keyCode)
+{
+    if (keyCode == KEY_F11) {
+        if (gMobileHostWindow == -1) {
+            mobileOpenHostWindow();
+        } else {
+            mobileCloseHostWindow();
+        }
+        return true;
+    }
+
+    if (gMobileHostWindow == -1) {
+        return false;
+    }
+
+    if (keyCode == KEY_ESCAPE) {
+        mobileCloseHostWindow();
+        return true;
+    }
+
+    int slot = -1;
+    if (keyCode == KEY_2) {
+        slot = 1;
+    } else if (keyCode == KEY_3) {
+        slot = 2;
+    } else if (keyCode == KEY_4) {
+        slot = 3;
+    }
+
+    if (slot != -1 && gMobileSlots[slot].claimed.load()) {
+        mobileResetInput(gMobileSlots[slot]);
+        gMobileSlots[slot].claimed.store(false);
+        gMobileSlots[slot].token.store(0);
+        mobileDrawHostWindow();
+        return true;
+    }
+
+    return keyCode != -1;
+}
+
 void localCoopMobileShutdown()
 {
+    mobileCloseHostWindow();
+
     if (!gMobileServerStarted.load()) {
         return;
     }
