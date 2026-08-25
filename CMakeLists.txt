@@ -65,6 +65,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/cycle.h"
     "src/datafile.cc"
     "src/datafile.h"
+    "src/dat_extractor.cc"
+    "src/dat_extractor.h"
     "src/db.cc"
     "src/db.h"
     "src/dbox.cc"

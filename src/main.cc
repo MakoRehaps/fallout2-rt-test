@@ -9,6 +9,7 @@
 #include "color.h"
 #include "credits.h"
 #include "cycle.h"
+#include "dat_extractor.h"
 #include "db.h"
 #include "debug.h"
 #include "draw.h"
@@ -96,6 +97,11 @@ static bool _main_death_voiceover_done;
 // 0x48099C
 int falloutMain(int argc, char** argv)
 {
+    int extractorResult = datExtractorTryRun(argc, argv);
+    if (extractorResult != kDatExtractorNotRequested) {
+        return extractorResult;
+    }
+
     if (!autorunMutexCreate()) {
         return 1;
     }

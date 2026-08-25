@@ -61,7 +61,6 @@ function HasGameData(const Root: String; NeedPatch: Boolean): Boolean;
 begin
   Result := ExistingFileEitherCase(Root, 'master.dat', 'MASTER.DAT') <> '';
   Result := Result and (ExistingFileEitherCase(Root, 'critter.dat', 'CRITTER.DAT') <> '');
-  Result := Result and (ExistingDirEitherCase(Root, 'data', 'DATA') <> '');
   if NeedPatch then
     Result := Result and (ExistingFileEitherCase(Root, 'patch000.dat', 'PATCH000.DAT') <> '');
 end;
@@ -139,7 +138,6 @@ end;
 
 function CopyGameData(const SourceRoot, DestRoot: String; NeedPatch: Boolean): Boolean;
 var
-  DataDir: String;
   SoundDir: String;
 begin
   Result := CopyRequiredFile(SourceRoot, DestRoot, 'master.dat', 'MASTER.DAT');
@@ -154,19 +152,62 @@ begin
     if not Result then exit;
   end;
 
-  DataDir := ExistingDirEitherCase(SourceRoot, 'data', 'DATA');
-  if DataDir = '' then
-  begin
-    Result := False;
-    exit;
-  end;
-
-  Result := CopyTreeWithRobocopy(DataDir, AddBackslash(DestRoot) + 'data');
-  if not Result then exit;
-
   SoundDir := ExistingDirEitherCase(SourceRoot, 'sound', 'SOUND');
   if SoundDir <> '' then
     Result := CopyTreeWithRobocopy(SoundDir, AddBackslash(DestRoot) + 'sound');
+end;
+
+function CopyLooseGameData(const SourceRoot, DestRoot: String): Boolean;
+var
+  DataDir: String;
+begin
+  DataDir := ExistingDirEitherCase(SourceRoot, 'data', 'DATA');
+  if DataDir = '' then
+  begin
+    Result := True;
+    exit;
+  end;
+
+  { Loose files are copied last so an owned installation's mods and official
+    loose overrides retain higher priority than patch and base DAT contents. }
+  Result := CopyTreeWithRobocopy(DataDir, AddBackslash(DestRoot) + 'data');
+end;
+
+function ExtractDat(const DatPath, DestData, F1Root, F2Root: String): Boolean;
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  ForceDirectories(DestData);
+  Params := '--extract-dat=' + QuoteCmdArg(DatPath)
+    + ' --extract-to=' + QuoteCmdArg(DestData)
+    + ' --fallout1-root=' + QuoteCmdArg(F1Root)
+    + ' --fallout2-root=' + QuoteCmdArg(F2Root);
+  Result := Exec(ExpandConstant('{app}\{#MyAppExeName}'), Params,
+    ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
+function ExtractCopiedGameData(const GameRoot, F1Root, F2Root: String;
+  NeedPatch: Boolean): Boolean;
+var
+  DataRoot: String;
+begin
+  DataRoot := AddBackslash(GameRoot) + 'data';
+
+  { Base content first, critter assets second, then the official patch layer. }
+  Result := ExtractDat(AddBackslash(GameRoot) + 'master.dat', DataRoot, F1Root, F2Root);
+  if not Result then exit;
+  Result := ExtractDat(AddBackslash(GameRoot) + 'critter.dat', DataRoot, F1Root, F2Root);
+  if not Result then exit;
+  if NeedPatch then
+    Result := ExtractDat(AddBackslash(GameRoot) + 'patch000.dat', DataRoot, F1Root, F2Root);
+end;
+
+function VerifyExtractedMaps(const F1Root, F2Root: String): Boolean;
+begin
+  Result := FileExists(AddBackslash(F1Root) + 'data\maps\V13ENT.MAP')
+    and FileExists(AddBackslash(F2Root) + 'data\maps\ARTEMPLE.MAP');
 end;
 
 function EnsureFallout1PartyCompatibility(const F1Dest: String): Boolean;
@@ -228,14 +269,14 @@ begin
   begin
     if not HasGameData(GameRootsPage.Values[0], False) then
     begin
-      MsgBox('Fallout 1 data was not found there. Select the folder containing master.dat, critter.dat, and the data folder.', mbError, MB_OK);
+      MsgBox('Fallout 1 data was not found there. Select the folder containing master.dat and critter.dat.', mbError, MB_OK);
       Result := False;
       exit;
     end;
 
     if not HasGameData(GameRootsPage.Values[1], True) then
     begin
-      MsgBox('Fallout 2 data was not found there. Select the folder containing master.dat, critter.dat, patch000.dat, and the data folder.', mbError, MB_OK);
+      MsgBox('Fallout 2 data was not found there. Select the folder containing master.dat, critter.dat, and patch000.dat.', mbError, MB_OK);
       Result := False;
       exit;
     end;
@@ -257,15 +298,33 @@ begin
   if not CopyGameData(GameRootsPage.Values[0], F1Dest, False) then
     RaiseException('Failed to copy Fallout 1 game data into the beta installation.');
 
+  WizardForm.StatusLabel.Caption := 'Copying Fallout 2 game data...';
+  if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
+    RaiseException('Failed to copy Fallout 2 game data into the beta installation.');
+
+  WizardForm.StatusLabel.Caption := 'Unpacking Fallout 1 DAT archives...';
+  if not ExtractCopiedGameData(F1Dest, F1Dest, F2Dest, False) then
+    RaiseException('Failed to unpack Fallout 1 DAT data. See GameData\Fallout1\data\dat-extract.log.');
+
+  WizardForm.StatusLabel.Caption := 'Unpacking Fallout 2 DAT archives...';
+  if not ExtractCopiedGameData(F2Dest, F1Dest, F2Dest, True) then
+    RaiseException('Failed to unpack Fallout 2 DAT data. See GameData\Fallout2\data\dat-extract.log.');
+
+  WizardForm.StatusLabel.Caption := 'Applying loose Fallout data overrides...';
+  if not CopyLooseGameData(GameRootsPage.Values[0], F1Dest) then
+    RaiseException('Failed to copy loose Fallout 1 data overrides.');
+  if not CopyLooseGameData(GameRootsPage.Values[1], F2Dest) then
+    RaiseException('Failed to copy loose Fallout 2 data overrides.');
+
   WizardForm.StatusLabel.Caption := 'Adding Fallout 1 engine compatibility data...';
   if not EnsureFallout1PartyCompatibility(F1Dest) then
     RaiseException('Failed to create Fallout 1 party compatibility data.');
   if not EnsureFallout1EndDeathCompatibility(F1Dest) then
     RaiseException('Failed to create Fallout 1 enddeath compatibility data.');
 
-  WizardForm.StatusLabel.Caption := 'Copying Fallout 2 game data...';
-  if not CopyGameData(GameRootsPage.Values[1], F2Dest, True) then
-    RaiseException('Failed to copy Fallout 2 game data into the beta installation.');
+  WizardForm.StatusLabel.Caption := 'Verifying Fallout 1 and Fallout 2 maps...';
+  if not VerifyExtractedMaps(F1Dest, F2Dest) then
+    RaiseException('DAT extraction completed but required maps were not found (V13ENT.MAP / ARTEMPLE.MAP).');
 
-  WizardForm.StatusLabel.Caption := 'Full Debug build installed: EXE + PDB symbols are in the install directory.';
+  WizardForm.StatusLabel.Caption := 'Full Debug build and unpacked Fallout 1 + Fallout 2 data installed.';
 end;
