@@ -233,8 +233,8 @@ inline void unifiedWorldSystemReset(UnifiedWorldSystemState& state)
     state.travel.fallout1TargetTown = -1;
     state.travel.currentCellX[0] = 16;
     state.travel.currentCellY[0] = 1;
-    state.travel.currentCellX[1] = 17;
-    state.travel.currentCellY[1] = 28;
+    state.travel.currentCellX[1] = 3;
+    state.travel.currentCellY[1] = 2;
     for (int gameIndex = 0; gameIndex < kUnifiedWorldSystemGameCount; gameIndex++) {
         state.travel.selectedCellX[gameIndex] = state.travel.currentCellX[gameIndex];
         state.travel.selectedCellY[gameIndex] = state.travel.currentCellY[gameIndex];
@@ -691,6 +691,7 @@ inline UnifiedWorldSystemRoadDirection unifiedWorldSystemRoadDirectionFromTile(i
 
 inline bool unifiedWorldSystemTraverseRoad(
     UnifiedGameId game,
+    int currentMapIdx,
     UnifiedWorldSystemRoadDirection direction,
     uint32_t gameTime,
     int* mapIdxPtr)
@@ -710,7 +711,7 @@ inline bool unifiedWorldSystemTraverseRoad(
 
     bool chainMatches = active.valid
         && active.gameId == static_cast<int32_t>(static_cast<uint32_t>(game))
-        && active.currentMapIdx >= 0;
+        && active.currentMapIdx == currentMapIdx;
     int delta = direction == UnifiedWorldSystemRoadDirection::East
             || direction == UnifiedWorldSystemRoadDirection::South
         ? 1
