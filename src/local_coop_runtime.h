@@ -623,6 +623,7 @@ inline void localCoopUpdateSharedCamera()
             || actor == nullptr
             || actor->elevation != elevation
             || !tileIsValid(actor->tile)
+            || (actor->flags & OBJECT_HIDDEN) != 0
             || (actor->data.critter.combat.results & DAM_DEAD) != 0) {
             continue;
         }
