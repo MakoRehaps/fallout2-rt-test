@@ -743,6 +743,8 @@ inline void localCoopRuntimeTick()
     localCoopRealtimeAiInstall();
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
+    localCoopProcessJoinMenus();
+    localCoopKeepReservedActorsWithParty();
 
     // This should never become the player's normal state anymore. Keep the old
     // escape hatch only as a defensive breaker for an obscure legacy caller;
