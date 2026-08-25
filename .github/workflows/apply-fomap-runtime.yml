@@ -1,0 +1,111 @@
+name: Apply FOMAP runtime wiring
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+
+permissions:
+  contents: write
+
+jobs:
+  patch-runtime:
+    if: ${{ !contains(github.event.head_commit.message, '[fomap-runtime-wired]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+
+      - name: Apply guarded source edits
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_exact(
+              'src/unified_fallout1_encounter_profile.h',
+              '    { 49, 50, -1 }, // MOUNTN1, MOUNTN2\n',
+              '    { 0, 1, 2 }, // MOUNTAIN terrain reuses DESERT1/2/3\n')
+
+          replace_exact(
+              'src/unified_world_system.h',
+              '    // Mountain templates 49/50 are temporarily replaced by duplicated safe,\n'
+              '    // open wilderness templates 19/20.\n'
+              '    0, 1, 2, 19, 20, 21, 19, 20,\n',
+              '    // Mountain templates 49/50 reuse desert templates. Keep duplicate\n'
+              '    // desert entries so mountain weighting remains represented.\n'
+              '    0, 1, 2, 19, 20, 21, 0, 1,\n')
+
+          replace_exact(
+              'src/unified_world_system.h',
+              '        if (mapIdx == 49) return 19;\n'
+              '        if (mapIdx == 50) return 20;\n',
+              '        if (mapIdx == 49) return 0;\n'
+              '        if (mapIdx == 50) return 1;\n')
+
+          replace_exact(
+              'src/local_coop_ai_realtime.h',
+              'inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;\n',
+              'inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;\n'
+              'inline constexpr Uint32 kLocalCoopRealtimeMaximumMapEntryGrace = 1200;\n')
+
+          replace_exact(
+              'src/local_coop_ai_realtime.h',
+              'inline void localCoopRealtimeAiBeginMapEntryGrace(Uint32 duration = 3000)\n'
+              '{\n'
+              '    Uint32 now = SDL_GetTicks();\n',
+              'inline void localCoopRealtimeAiBeginMapEntryGrace(Uint32 duration = 1200)\n'
+              '{\n'
+              '    // Road transitions used to request ten seconds here, which let the\n'
+              '    // party cross most encounter maps before anything could react. Keep\n'
+              '    // a short spawn-safety window, then let speed and distance decide\n'
+              '    // whether the party can genuinely outrun the encounter.\n'
+              '    duration = std::min(duration, kLocalCoopRealtimeMaximumMapEntryGrace);\n'
+              '    Uint32 now = SDL_GetTicks();\n')
+
+          replace_exact(
+              'src/unified_wilderness_generator.h',
+              '#include "unified_campaign.h"\n',
+              '#include "unified_campaign.h"\n'
+              '#include "unified_fomap_encounter_layout.h"\n')
+
+          replace_exact(
+              'src/unified_wilderness_generator.h',
+              'inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int mapIdx)\n'
+              '{\n'
+              '    unifiedVehicleResetEncounterSalvage();\n\n'
+              '    if (!unifiedWildernessIsOpenMountainMap(game, mapIdx)) {\n',
+              'inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int mapIdx)\n'
+              '{\n'
+              '    unifiedVehicleResetEncounterSalvage();\n\n'
+              '    // If the user prepared the reference encounter archive, replace the\n'
+              '    // stock encounter floor/roof with one of its compatible layouts. CE\n'
+              '    // still owns critters, scripts, exits and combat setup.\n'
+              '    (void)unifiedFomapEncounterApplyForLoadedMap();\n\n'
+              '    if (!unifiedWildernessIsOpenMountainMap(game, mapIdx)) {\n')
+
+          replace_exact(
+              'src/unified_fomap_encounter_layout.h',
+              '#include <cstdio>\n',
+              '#include <cstdio>\n#include <cstring>\n')
+
+          Path('.github/workflows/apply-fomap-runtime.yml').unlink()
+
+      - name: Commit wiring
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Wire FOMAP encounter layouts and shorten road grace [fomap-runtime-wired]"
+          git push origin HEAD:fix/no-debug-no-data-copy
