@@ -35,6 +35,7 @@ struct LocalCoopRuntimeSlot {
     Uint32 nextPrimaryAttackTick = 0;
     Uint32 nextSecondaryAttackTick = 0;
     Uint32 nextReloadTick = 0;
+    Uint32 nextHealingSkillTick = 0;
     Uint32 nextApRegenTick = 0;
     int actionPointsHundredths = -1;
     int actionPointsActorId = -1;
@@ -542,18 +543,27 @@ inline Object* localCoopHealingTarget(LocalCoopPlayer& player)
 
 inline bool localCoopUseHealingSkill(LocalCoopPlayer& player, int skill)
 {
-    if (player.actor == nullptr
-        || animationIsBusy(player.actor)
+    Object* actor = player.actor;
+    if (actor == nullptr
+        || animationIsBusy(actor)
         || localCoopDangerBlocksMapExit()) {
         return false;
     }
 
     Object* target = localCoopHealingTarget(player);
-    int rc = actionUseSkill(player.actor, target, skill);
-    debugPrint("[COOP SKILL] slot=%d actorId=%d targetId=%d skill=%d rc=%d\n",
+    if (target == nullptr) {
+        return false;
+    }
+
+    // Save diagnostic values before dispatch. Fallout skill use can run modal
+    // engine work which may refresh bindings before it returns.
+    int actorId = actor->id;
+    int targetId = target->id;
+    int rc = actionUseSkill(actor, target, skill);
+    debugPrint("[COOP SKILL] slot=%d actorId=%d targetId=%d skill=%d rc=%d\\n",
         player.slot,
-        player.actor->id,
-        target != nullptr ? target->id : -1,
+        actorId,
+        targetId,
         skill,
         rc);
     return rc == 0;
@@ -613,10 +623,19 @@ inline void localCoopProcessCombatInput()
             runtime.nextReloadTick = now + 400;
         }
 
-        if (firstAidDown && !runtime.firstAidWasDown) {
+        // Phone packets can briefly cross neutral while a touch remains held,
+        // producing a second rising edge. Share a short cooldown between both
+        // healing skills so modal Fallout skill work cannot be re-entered.
+        if (firstAidDown
+            && !runtime.firstAidWasDown
+            && localCoopTickReached(now, runtime.nextHealingSkillTick)) {
+            runtime.nextHealingSkillTick = now + 1000;
             localCoopUseHealingSkill(player, SKILL_FIRST_AID);
         }
-        if (doctorDown && !runtime.doctorWasDown) {
+        if (doctorDown
+            && !runtime.doctorWasDown
+            && localCoopTickReached(now, runtime.nextHealingSkillTick)) {
+            runtime.nextHealingSkillTick = now + 1000;
             localCoopUseHealingSkill(player, SKILL_DOCTOR);
         }
 
@@ -752,6 +771,7 @@ inline void localCoopSetRealtimeCombatActive(bool active)
             runtime.nextPrimaryAttackTick = 0;
             runtime.nextSecondaryAttackTick = 0;
             runtime.nextReloadTick = 0;
+            runtime.nextHealingSkillTick = 0;
             runtime.nextApRegenTick = 0;
             runtime.actionPointsHundredths = -1;
             runtime.actionPointsActorId = -1;
