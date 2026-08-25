@@ -138,6 +138,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/lips.h"
     "src/loadsave.cc"
     "src/loadsave.h"
+    "src/local_coop_mobile.cc"
+    "src/local_coop_mobile.h"
     "src/main.cc"
     "src/main.h"
     "src/mainmenu.cc"
@@ -343,6 +345,7 @@ endif()
 if(WIN32)
     target_link_libraries(${EXECUTABLE_NAME}
         winmm
+        ws2_32
     )
 endif()
 
