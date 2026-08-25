@@ -411,7 +411,6 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
 
     localCoopClearQueuedAttack(runtime);
     localCoopRealtimeAiEngageHostile(target, actor);
-    localCoopDangerTouch();
     gLocalCoopRealtimeCombatActive = true;
 
     if (actor == gDude && gInterfaceBarWindow != -1) {
@@ -753,7 +752,6 @@ inline void localCoopRuntimeTick()
     // all known HUD/keyboard/mouse/controller/script attack paths are realtime.
     if (isInCombat()) {
         debugPrint("[COOP HYBRID] legacy turn state detected; forcing return to realtime world\n");
-        localCoopDangerBegin();
         gLocalCoopRealtimeCombatActive = true;
         _game_user_wants_to_quit = 1;
     }
