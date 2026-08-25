@@ -35,6 +35,7 @@ inline std::unordered_map<int, LocalCoopRealtimeAiActorState> gLocalCoopRealtime
 inline Uint32 gLocalCoopRealtimeCombatClockTick = 0;
 inline bool gLocalCoopRealtimeAiInsideTick = false;
 inline bool gLocalCoopRealtimeWorldCombatActive = false;
+inline Uint32 gLocalCoopRealtimeMapEntryGraceUntil = 0;
 
 struct LocalCoopRealtimePursuer {
     int pid = -1;
@@ -69,6 +70,24 @@ inline Uint32 localCoopRealtimeAiInitialStagger(const Object* actor)
         return 100;
     }
     return 100 + static_cast<Uint32>((actor->id & 0x0F) * 35);
+}
+
+inline void localCoopRealtimeAiBeginMapEntryGrace(Uint32 duration = 3000)
+{
+    Uint32 now = SDL_GetTicks();
+    gLocalCoopRealtimeMapEntryGraceUntil = now + duration;
+    for (auto& entry : gLocalCoopRealtimeAiActors) {
+        entry.second.nextActionTick =
+            std::max(entry.second.nextActionTick, gLocalCoopRealtimeMapEntryGraceUntil);
+    }
+    debugPrint("[COOP ROAD] entry grace until=%u duration=%u\n",
+        gLocalCoopRealtimeMapEntryGraceUntil,
+        duration);
+}
+
+inline bool localCoopRealtimeAiMapEntryGraceActive(Uint32 now)
+{
+    return static_cast<Sint32>(now - gLocalCoopRealtimeMapEntryGraceUntil) < 0;
 }
 
 inline int localCoopRealtimeAiMaximumApHundredths(Object* actor)
@@ -355,6 +374,14 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     }
 
     localCoopRealtimeAiUpdateActionPoints(actor, state, now);
+
+    // A newly entered wilderness map must give the party time to move away
+    // from the road edge before stock encounter scripts can start attacks.
+    if (localCoopRealtimeAiMapEntryGraceActive(now)) {
+        state.nextActionTick =
+            std::max(state.nextActionTick, gLocalCoopRealtimeMapEntryGraceUntil);
+        return;
+    }
 
     Object* target = preferredTarget;
     if (target == nullptr
@@ -696,6 +723,7 @@ inline void localCoopRealtimeAiReset()
     gLocalCoopRealtimeAiActors.clear();
     gLocalCoopRealtimePursuers.clear();
     gLocalCoopRealtimePursuitDirection = 0;
+    gLocalCoopRealtimeMapEntryGraceUntil = 0;
     gLocalCoopRealtimeCombatClockTick = SDL_GetTicks();
     gLocalCoopRealtimeAiInsideTick = false;
     gLocalCoopRealtimeWorldCombatActive = false;
