@@ -80,6 +80,9 @@ std::vector<std::thread> gMobileClientThreads;
 MobileSocket gMobileListenSocket = kInvalidMobileSocket;
 int gMobilePin = 0;
 bool gMobileNoticeShown = false;
+
+void mobileResetInput(MobileSlotState& state);
+
 int gMobileHostWindow = -1;
 uint64_t gMobileHostWindowLastDraw = 0;
 
