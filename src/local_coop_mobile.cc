@@ -39,7 +39,7 @@ namespace fallout {
 namespace {
 
 constexpr int kMobilePort = 27888;
-constexpr uint64_t kMobileTimeoutMs = 10000;
+constexpr uint64_t kMobileTimeoutMs = 60000;
 
 #ifdef _WIN32
 using MobileSocket = SOCKET;
@@ -1193,8 +1193,9 @@ void localCoopMobileTick()
         uint64_t inputAge = now - state.lastSeen.load();
         if (state.claimed.load() && inputAge > 250) {
             // A lost packet must never leave movement, aiming, or an attack held.
-            // Keep the player's reservation for ten seconds, but neutralize the
-            // virtual pad almost immediately.
+            // Keep the player's reservation for sixty seconds, but neutralize the
+            // virtual pad almost immediately. This lets save/load and other blocking
+            // modal work finish without kicking a remote player.
             mobileResetInput(state);
         }
         if (state.claimed.load() && inputAge > kMobileTimeoutMs) {
