@@ -7,6 +7,7 @@
 
 #include <algorithm>
 
+#include "debug.h"
 #include "display_monitor.h"
 #include "object.h"
 #include "proto.h"
