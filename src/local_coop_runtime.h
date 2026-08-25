@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 
+#include "actions.h"
 #include "combat.h"
 #include "critter.h"
 #include "debug.h"
@@ -42,6 +43,8 @@ struct LocalCoopRuntimeSlot {
     bool reloadWasDown = false;
     bool secondaryWasDown = false;
     bool swapWasDown = false;
+    bool firstAidWasDown = false;
+    bool doctorWasDown = false;
     bool postgameSwitchWasDown = false;
     bool queuedAttackPending = false;
     bool queuedAttackSecondary = false;
@@ -522,6 +525,40 @@ inline void localCoopProcessPostgameWorldSwitch()
     runtime.postgameSwitchWasDown = switchDown;
 }
 
+inline Object* localCoopHealingTarget(LocalCoopPlayer& player)
+{
+    Object* target = localCoopFocusFindInteractable(player);
+    if (target != nullptr
+        && PID_TYPE(target->pid) == OBJ_TYPE_CRITTER
+        && (target->data.critter.combat.results & DAM_DEAD) == 0
+        && !localCoopFocusIsEnemy(player.actor, target)) {
+        return target;
+    }
+
+    // With no friendly critter aimed/selected, heal the invoking player's own
+    // character. This makes the hotkeys useful without requiring a mouse.
+    return player.actor;
+}
+
+inline bool localCoopUseHealingSkill(LocalCoopPlayer& player, int skill)
+{
+    if (player.actor == nullptr
+        || animationIsBusy(player.actor)
+        || localCoopDangerBlocksMapExit()) {
+        return false;
+    }
+
+    Object* target = localCoopHealingTarget(player);
+    int rc = actionUseSkill(player.actor, target, skill);
+    debugPrint("[COOP SKILL] slot=%d actorId=%d targetId=%d skill=%d rc=%d\n",
+        player.slot,
+        player.actor->id,
+        target != nullptr ? target->id : -1,
+        skill,
+        rc);
+    return rc == 0;
+}
+
 inline void localCoopProcessCombatInput()
 {
     Uint32 now = SDL_GetTicks();
@@ -549,6 +586,8 @@ inline void localCoopProcessCombatInput()
         bool secondaryDown = false;
         bool reloadDown = false;
         bool swapDown = false;
+        bool firstAidDown = false;
+        bool doctorDown = false;
 
         if (hasController) {
             int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
@@ -556,6 +595,8 @@ inline void localCoopProcessCombatInput()
             secondaryDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
             reloadDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
             swapDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+            firstAidDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+            doctorDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
         }
 
         if (player.slot == 0) {
@@ -570,6 +611,13 @@ inline void localCoopProcessCombatInput()
         if (reloadDown && !runtime.reloadWasDown && localCoopTickReached(now, runtime.nextReloadTick)) {
             localCoopReloadFromSharedPool(player);
             runtime.nextReloadTick = now + 400;
+        }
+
+        if (firstAidDown && !runtime.firstAidWasDown) {
+            localCoopUseHealingSkill(player, SKILL_FIRST_AID);
+        }
+        if (doctorDown && !runtime.doctorWasDown) {
+            localCoopUseHealingSkill(player, SKILL_DOCTOR);
         }
 
         if (primaryDown && localCoopTickReached(now, runtime.nextPrimaryAttackTick)) {
@@ -596,6 +644,8 @@ inline void localCoopProcessCombatInput()
         runtime.reloadWasDown = reloadDown;
         runtime.secondaryWasDown = secondaryDown;
         runtime.swapWasDown = swapDown;
+        runtime.firstAidWasDown = firstAidDown;
+        runtime.doctorWasDown = doctorDown;
     }
 }
 
