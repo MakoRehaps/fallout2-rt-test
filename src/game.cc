@@ -664,7 +664,7 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
+                phoboiOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
             }
         }
         break;
@@ -749,7 +749,7 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_REST);
+                phoboiOpen(PIPBOY_OPEN_INTENT_REST);
             }
         }
         break;
