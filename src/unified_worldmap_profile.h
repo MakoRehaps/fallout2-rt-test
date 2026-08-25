@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <cstdio>
 
 #include "unified_campaign.h"
 
@@ -183,9 +184,14 @@ inline int unifiedWmMapIdxToName(int mapIdx, char* dest, size_t size)
         return -1;
     }
 
+    // mapLoadByName opens the exact path returned here. Fallout 2's table
+    // includes the .MAP suffix, so preserve that contract for Fallout 1 too.
     const char* name = kUnifiedFallout1MapNames[mapIdx];
-    std::strncpy(dest, name, size - 1);
-    dest[size - 1] = '\0';
+    int written = std::snprintf(dest, size, "%s.MAP", name);
+    if (written < 0 || static_cast<size_t>(written) >= size) {
+        dest[0] = '\0';
+        return -1;
+    }
     return 0;
 }
 
