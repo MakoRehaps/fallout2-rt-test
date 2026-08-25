@@ -24,8 +24,6 @@
 
 namespace fallout {
 
-// These legacy fields remain only because older load/reset glue references them.
-// The realtime runtime no longer schedules or yields Fallout combat turns.
 inline constexpr Uint32 kLocalCoopInitialSchedulerHeartbeatMs = 200;
 inline constexpr Uint32 kLocalCoopBookkeepingHeartbeatMs = 1000;
 
@@ -36,6 +34,7 @@ struct LocalCoopRuntimeSlot {
     bool primaryWasDown = false;
     bool reloadWasDown = false;
     bool secondaryWasDown = false;
+    bool swapWasDown = false;
     bool postgameSwitchWasDown = false;
     Object* aimTarget = nullptr;
 };
@@ -52,14 +51,9 @@ inline bool localCoopTickReached(Uint32 now, Uint32 target)
     return static_cast<Sint32>(now - target) >= 0;
 }
 
-inline int localCoopGetHitMode(Object* actor, bool secondary)
+inline int localCoopGetHitMode(LocalCoopPlayer& player, bool secondary)
 {
-    Object* weapon = critterGetItem2(actor);
-    if (weapon == nullptr) {
-        return secondary ? HIT_MODE_KICK : HIT_MODE_PUNCH;
-    }
-
-    return secondary ? HIT_MODE_RIGHT_WEAPON_SECONDARY : HIT_MODE_RIGHT_WEAPON_PRIMARY;
+    return secondary ? localCoopGetSecondaryHitMode(player) : localCoopGetPrimaryHitMode(player);
 }
 
 inline Uint32 localCoopGetAttackCooldown(Object* actor, int hitMode)
@@ -81,8 +75,8 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
         return false;
     }
 
-    Object* weapon = critterGetItem2(actor);
-    if (weapon == nullptr) {
+    Object* weapon = localCoopGetActiveItem(player);
+    if (weapon == nullptr || itemGetType(weapon) != ITEM_TYPE_WEAPON) {
         return false;
     }
 
@@ -123,8 +117,14 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
 inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
 {
     Object* actor = player.actor;
-    if (actor == nullptr || animationIsBusy(actor)) {
+    if (actor == nullptr) {
         return false;
+    }
+
+    // Realtime input should be able to interrupt a queued movement path. Do not
+    // wait for a Diablo-style right-click/analog run to finish before firing.
+    if (animationIsBusy(actor)) {
+        reg_anim_clear(actor);
     }
 
     LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
@@ -134,40 +134,41 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
-    int hitMode = localCoopGetHitMode(actor, secondary);
-
-    // AP is supplied only because stock attack validation expects a budget.
-    // It is never a turn resource in the co-op game.
+    int hitMode = localCoopGetHitMode(player, secondary);
+    int savedActionPoints = actor->data.critter.combat.ap;
     actor->data.critter.combat.ap = 9999;
 
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO) {
         localCoopReloadFromSharedPool(player);
+        actor->data.critter.combat.ap = savedActionPoints;
         return false;
     }
 
     if (badShot != COMBAT_BAD_SHOT_OK) {
+        actor->data.critter.combat.ap = savedActionPoints;
         return false;
     }
 
-    // Sequence the original Fallout attack animation/damage calculation directly
-    // in the live world. Never call `_combat()` and never switch game modes.
-    if (_combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) != 0) {
+    int rc = _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
+    actor->data.critter.combat.ap = savedActionPoints;
+    if (rc != 0) {
         return false;
     }
 
-    // Every successful attack creates/refreshes danger and wakes hostile AI.
-    // This is true even if a stray legacy combat flag was left by old save data.
     localCoopRealtimeAiEngageHostile(target, actor);
     gLocalCoopRealtimeCombatActive = true;
-    actor->data.critter.combat.ap = 9999;
+
+    // AP is not a visible realtime resource. Stock attack helpers can touch its
+    // HUD, so immediately restore the normal non-combat presentation for P1.
+    if (actor == gDude && gInterfaceBarWindow != -1) {
+        interfaceRenderActionPoints(-1, -1);
+    }
     return true;
 }
 
 inline void localCoopProcessPostgameWorldSwitch()
 {
-    // Danger blocks leaving the current encounter/map, but does not change how
-    // the player moves or interacts inside it.
     if (localCoopDangerBlocksMapExit() || !unifiedCampaignBothGamesCompleted()) {
         return;
     }
@@ -202,8 +203,6 @@ inline void localCoopProcessPostgameWorldSwitch()
 
 inline void localCoopProcessCombatInput()
 {
-    // There is intentionally no combat-state check here. Trigger/shoulder attacks
-    // are ordinary realtime world inputs with wall-clock cooldowns.
     Uint32 now = SDL_GetTicks();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
@@ -223,6 +222,15 @@ inline void localCoopProcessCombatInput()
         bool primaryDown = rightTrigger > 12000;
         bool secondaryDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
         bool reloadDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
+        bool swapDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+        if (player.slot == 0) {
+            swapDown = swapDown || gPressedPhysicalKeys[SDL_SCANCODE_TAB];
+        }
+
+        if (swapDown && !runtime.swapWasDown) {
+            localCoopSwapActiveHand(player.slot, true);
+            runtime.aimTarget = localCoopFocusFindEnemy(player);
+        }
 
         if (reloadDown && !runtime.reloadWasDown && localCoopTickReached(now, runtime.nextReloadTick)) {
             localCoopReloadFromSharedPool(player);
@@ -230,7 +238,7 @@ inline void localCoopProcessCombatInput()
         }
 
         if (primaryDown && localCoopTickReached(now, runtime.nextPrimaryAttackTick)) {
-            int hitMode = localCoopGetHitMode(player.actor, false);
+            int hitMode = localCoopGetHitMode(player, false);
             if (localCoopPerformAttack(player, false)) {
                 runtime.nextPrimaryAttackTick = now + localCoopGetAttackCooldown(player.actor, hitMode);
             } else {
@@ -241,7 +249,7 @@ inline void localCoopProcessCombatInput()
         if (secondaryDown
             && !runtime.secondaryWasDown
             && localCoopTickReached(now, runtime.nextSecondaryAttackTick)) {
-            int hitMode = localCoopGetHitMode(player.actor, true);
+            int hitMode = localCoopGetHitMode(player, true);
             if (localCoopPerformAttack(player, true)) {
                 runtime.nextSecondaryAttackTick = now + localCoopGetAttackCooldown(player.actor, hitMode);
             } else {
@@ -252,6 +260,7 @@ inline void localCoopProcessCombatInput()
         runtime.primaryWasDown = primaryDown;
         runtime.reloadWasDown = reloadDown;
         runtime.secondaryWasDown = secondaryDown;
+        runtime.swapWasDown = swapDown;
     }
 }
 
@@ -300,8 +309,6 @@ inline void localCoopUpdateSharedCamera()
 
 inline void localCoopSetRealtimeCombatActive(bool active)
 {
-    // Compatibility name retained for existing reset/load code. `active` now
-    // means realtime danger only; it never toggles Fallout's combat state.
     gLocalCoopRealtimeCombatActive = active;
 
     if (!active) {
@@ -350,9 +357,6 @@ inline void localCoopRuntimeTick()
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
 
-    // Safety net for an untouched old script/save path that somehow manages to
-    // set the stock combat bit. Do not participate in that mode or yield turns;
-    // request it to abort while keeping our realtime encounter alive.
     if (isInCombat()) {
         localCoopDangerBegin();
         gLocalCoopRealtimeCombatActive = true;
@@ -365,6 +369,11 @@ inline void localCoopRuntimeTick()
 
     if (!gLocalCoopDangerActive && gLocalCoopRealtimeAiActors.empty()) {
         gLocalCoopRealtimeCombatActive = false;
+    }
+
+    // Never leave the AP strip lit as a pseudo turn meter in the realtime game.
+    if (gDude != nullptr && gInterfaceBarWindow != -1) {
+        interfaceRenderActionPoints(-1, -1);
     }
 
     localCoopUpdateSharedCamera();
