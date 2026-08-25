@@ -33,7 +33,7 @@ inline uint32_t unifiedWildernessCurrentSeed(int mapIdx)
 {
     const UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetStateConst().travel;
     int gi = unifiedWorldSystemGameIndex(unifiedCampaignGetActiveGame());
-    const UnifiedWorldSystemCellState* cell = unifiedWorldSystemGetCellConst(
+    const UnifiedWorldSystemCellState* cell = unifiedWorldSystemGetCell(
         unifiedCampaignGetActiveGame(), travel.currentCellX[gi], travel.currentCellY[gi]);
     return cell != nullptr ? cell->seed : unifiedWorldSystemMixSeed(static_cast<uint32_t>(mapIdx));
 }
