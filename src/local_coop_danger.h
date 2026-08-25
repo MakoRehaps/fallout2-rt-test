@@ -5,12 +5,13 @@
 
 namespace fallout {
 
-// Realtime co-op never enters Fallout's turn-based combat mode. Danger is only
-// an encounter lock for leaving the map; movement, attacks and interaction remain
-// ordinary live-world actions.
+// Realtime co-op never enters Fallout's turn-based combat mode. This state is a
+// short post-damage cooldown only. Living enemies, enemy movement, misses and
+// zero-damage hits must never keep the party flagged as being in combat.
+inline constexpr Uint32 kLocalCoopDangerCooldownMs = 1000;
+
 inline bool gLocalCoopDangerActive = false;
-inline Uint32 gLocalCoopDangerStartedTick = 0;
-inline Uint32 gLocalCoopDangerLastHostileTick = 0;
+inline Uint32 gLocalCoopDangerLastPlayerDamageTick = 0;
 inline int gLocalCoopDangerLiveHostiles = 0;
 inline int gLocalCoopPendingMapExitTile = -1;
 
@@ -26,42 +27,28 @@ inline int localCoopConsumeMapExitTile()
     return tile;
 }
 
-
-inline void localCoopDangerBegin()
+inline void localCoopDangerRecordPlayerDamage(int damage)
 {
-    Uint32 now = SDL_GetTicks();
-    if (!gLocalCoopDangerActive) {
-        gLocalCoopDangerStartedTick = now;
+    if (damage <= 0) {
+        return;
     }
+
     gLocalCoopDangerActive = true;
-    gLocalCoopDangerLastHostileTick = now;
-}
-
-inline void localCoopDangerTouch()
-{
-    if (gLocalCoopDangerActive) {
-        gLocalCoopDangerLastHostileTick = SDL_GetTicks();
-    }
+    gLocalCoopDangerLastPlayerDamageTick = SDL_GetTicks();
 }
 
 inline void localCoopDangerEnd()
 {
     gLocalCoopDangerActive = false;
-    gLocalCoopDangerStartedTick = 0;
-    gLocalCoopDangerLastHostileTick = 0;
+    gLocalCoopDangerLastPlayerDamageTick = 0;
     gLocalCoopDangerLiveHostiles = 0;
 }
 
 inline void localCoopDangerSetLiveHostiles(int count)
 {
+    // Retained for diagnostics/AI state only. Hostile count does not control the
+    // player's post-damage combat cooldown.
     gLocalCoopDangerLiveHostiles = count > 0 ? count : 0;
-    if (gLocalCoopDangerLiveHostiles > 0) {
-        if (!gLocalCoopDangerActive) {
-            localCoopDangerBegin();
-        } else {
-            localCoopDangerTouch();
-        }
-    }
 }
 
 inline bool localCoopDangerBlocksMapExit()
@@ -70,16 +57,10 @@ inline bool localCoopDangerBlocksMapExit()
         return false;
     }
 
-    if (gLocalCoopDangerLiveHostiles > 0) {
-        return true;
-    }
-
-    // A script can request combat without identifying a usable hostile. Do not
-    // let that orphan request permanently trap the party on a map. Give a brief
-    // grace period for the AI registrar to resolve an attacker, then unlock.
     Uint32 now = SDL_GetTicks();
-    if (gLocalCoopDangerLastHostileTick == 0
-        || static_cast<Sint32>(now - gLocalCoopDangerLastHostileTick) >= 1000) {
+    if (gLocalCoopDangerLastPlayerDamageTick == 0
+        || static_cast<Sint32>(now - gLocalCoopDangerLastPlayerDamageTick)
+            >= static_cast<Sint32>(kLocalCoopDangerCooldownMs)) {
         localCoopDangerEnd();
         return false;
     }
