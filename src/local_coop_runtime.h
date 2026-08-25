@@ -121,10 +121,25 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
     return reloaded;
 }
 
-inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
+// One attack backend for every human input path: controller RT/RB, controller A
+// context attacks, and P1 mouse left-click all land here. There is no separate
+// Fallout combat-mode attack path in the co-op world.
+inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* target, bool secondary)
 {
     Object* actor = player.actor;
-    if (actor == nullptr) {
+    if (actor == nullptr || target == nullptr || !localCoopFocusPointerIsLive(target)) {
+        debugPrint("[COOP ATTACK] slot=%d invalid-target\n", player.slot);
+        return false;
+    }
+
+    if (!player.humanOwned
+        || player.uiMode != LocalCoopUiMode::World
+        || actor == target
+        || localCoopActorIsHumanOwned(target)
+        || PID_TYPE(target->pid) != OBJ_TYPE_CRITTER
+        || (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+        || target->data.critter.combat.team == actor->data.critter.combat.team) {
+        debugPrint("[COOP ATTACK] slot=%d target-rejected\n", player.slot);
         return false;
     }
 
@@ -141,12 +156,7 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     localCoopSyncActiveHandVisual(player.slot);
 
     LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
-    Object* target = localCoopFocusFindEnemy(player);
     runtime.aimTarget = target;
-    if (target == nullptr) {
-        debugPrint("[COOP ATTACK] slot=%d no-target aim=(%d,%d)\n", player.slot, player.aimX, player.aimY);
-        return false;
-    }
 
     int hand = localCoopGetActiveHand(player);
     Object* activeItem = localCoopGetActiveItem(player);
@@ -174,13 +184,16 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
 
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO) {
-        debugPrint("[COOP ATTACK] no-ammo slot=%d itemPid=%d hitMode=%d\n",
+        debugPrint("[COOP ATTACK] no-ammo slot=%d itemPid=%d hitMode=%d; trying realtime reload\n",
             player.slot,
             activeItem != nullptr ? activeItem->pid : -1,
             hitMode);
-        localCoopReloadFromSharedPool(player);
-        actor->data.critter.combat.ap = savedActionPoints;
-        return false;
+
+        if (localCoopReloadFromSharedPool(player)) {
+            // Reload can change item state; resync before retrying the same shot.
+            localCoopSyncActiveHandVisual(player.slot);
+            badShot = _combat_check_bad_shot(actor, target, hitMode, false);
+        }
     }
 
     if (badShot != COMBAT_BAD_SHOT_OK) {
@@ -193,6 +206,8 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
+    // _combat_attack is retained strictly as Fallout's hit/ammo/crit/damage and
+    // attack-animation service. We never call _combat() or enter its turn loop.
     int rc = _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
     actor->data.critter.combat.ap = savedActionPoints;
     if (rc != 0) {
@@ -214,12 +229,26 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         hitMode);
 
     localCoopRealtimeAiEngageHostile(target, actor);
+    localCoopDangerTouch();
     gLocalCoopRealtimeCombatActive = true;
 
     if (actor == gDude && gInterfaceBarWindow != -1) {
         interfaceRenderActionPoints(-1, -1);
     }
     return true;
+}
+
+inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
+{
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+    Object* target = localCoopFocusFindEnemy(player);
+    runtime.aimTarget = target;
+    if (target == nullptr) {
+        debugPrint("[COOP ATTACK] slot=%d no-target aim=(%d,%d)\n", player.slot, player.aimX, player.aimY);
+        return false;
+    }
+
+    return localCoopPerformAttackAgainst(player, target, secondary);
 }
 
 inline void localCoopProcessPostgameWorldSwitch()
@@ -421,7 +450,11 @@ inline void localCoopRuntimeTick()
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
 
+    // This should never become the player's normal state anymore. Keep the old
+    // escape hatch only as a defensive breaker for an obscure legacy caller;
+    // all known HUD/keyboard/mouse/controller/script attack paths are realtime.
     if (isInCombat()) {
+        debugPrint("[COOP HYBRID] legacy turn state detected; forcing return to realtime world\n");
         localCoopDangerBegin();
         gLocalCoopRealtimeCombatActive = true;
         _game_user_wants_to_quit = 1;
