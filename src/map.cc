@@ -39,6 +39,9 @@
 #include "svga.h"
 #include "text_object.h"
 #include "tile.h"
+#include "unified_campaign.h"
+#include "unified_fallout1_worldmap_state.h"
+#include "unified_world_system.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
@@ -928,6 +931,10 @@ static int mapLoad(File* stream)
     objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
     objectSetRotation(gDude, gEnteringRotation, nullptr);
     gMapHeader.field_34 = wmMapMatchNameToIdx(gMapHeader.name);
+    unifiedWorldSystemMarkMapVisited(
+        unifiedCampaignGetActiveGame(),
+        gMapHeader.field_34,
+        gameTimeGetTime());
 
     if ((gMapHeader.flags & 1) == 0) {
         char path[COMPAT_MAX_PATH];
@@ -1249,7 +1256,49 @@ int mapHandleTransition()
     } else if (gMapTransition.map == -2) {
         if (!isInCombat()) {
             animationStop();
-            wmWorldMap();
+
+            int nextMap = -1;
+            bool loadRouteMap = unifiedWorldSystemAdvanceEncounter(
+                unifiedCampaignGetActiveGame(),
+                gMapHeader.field_34,
+                -2,
+                &nextMap,
+                gameTimeGetTime());
+
+            if (!loadRouteMap) {
+                int worldX = 0;
+                int worldY = 0;
+                if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+                    const UnifiedFallout1WorldMapState& state =
+                        unifiedFallout1WorldMapGetStateConst();
+                    worldX = state.worldX;
+                    worldY = state.worldY;
+                } else {
+                    wmGetPartyWorldPos(&worldX, &worldY);
+                }
+                unifiedWorldSystemSetCurrentWorldPosition(
+                    unifiedCampaignGetActiveGame(),
+                    worldX,
+                    worldY);
+
+                pipboyOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
+                loadRouteMap = unifiedWorldSystemStartNextRouteCell(
+                    unifiedCampaignGetActiveGame(),
+                    gameTimeGetTime(),
+                    &nextMap);
+                if (loadRouteMap
+                    && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout2) {
+                    unifiedWorldSystemRestoreFallout2EncounterContext(nextMap, -1, -1);
+                }
+            }
+
+            if (loadRouteMap && nextMap >= 0) {
+                gMapTransition.map = nextMap;
+                gMapTransition.elevation = 0;
+                gMapTransition.tile = -1;
+                gMapTransition.rotation = 0;
+                mapLoadById(nextMap);
+            }
             memset(&gMapTransition, 0, sizeof(gMapTransition));
         }
     } else {
