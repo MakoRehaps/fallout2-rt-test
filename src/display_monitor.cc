@@ -232,18 +232,25 @@ void displayMonitorExit()
 // 0x43186C
 void displayMonitorAddMessage(const char* string)
 {
-    if (!gDisplayMonitorInitialized || string == nullptr) {
+    if (string == nullptr) {
+        return;
+    }
+
+    // The stock line wrapper temporarily replaces spaces with NUL terminators.
+    // Keep the original mutable overload for engine callbacks, while routing
+    // immutable storage through a private writable copy.
+    std::string mutableString(string);
+    displayMonitorAddMessage(mutableString.data());
+}
+
+void displayMonitorAddMessage(char* str)
+{
+    if (!gDisplayMonitorInitialized) {
         return;
     }
 
     // SFALL
-    consoleFileAddMessage(string);
-
-    // The stock line wrapper temporarily replaces spaces with NUL terminators.
-    // Always work on a private writable copy so callers can safely pass string
-    // literals and other immutable message storage.
-    std::string mutableString(string);
-    char* str = mutableString.data();
+    consoleFileAddMessage(str);
 
     int oldFont = fontGetCurrent();
     fontSetCurrent(DISPLAY_MONITOR_FONT);
