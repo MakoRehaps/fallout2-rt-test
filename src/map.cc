@@ -25,6 +25,7 @@
 #include "item.h"
 #include "light.h"
 #include "loadsave.h"
+#include "local_coop_ai_realtime.h"
 #include "memory.h"
 #include "object.h"
 #include "palette.h"
@@ -1313,12 +1314,17 @@ int mapHandleTransition()
                 travel.currentCellY[gameIndex],
                 nextMap);
 
+            // Alert hostiles occupy the linked road graph too. Transfer them
+            // out of the old map before it is saved, then restore them beside
+            // the party after the destination map finishes loading.
+            localCoopRealtimeAiCapturePursuers();
             localCoopDangerEnd();
             gMapTransition.map = nextMap;
             gMapTransition.elevation = 0;
             gMapTransition.tile = -1;
             gMapTransition.rotation = 0;
             int loadRc = mapLoadById(nextMap);
+            localCoopRealtimeAiRestorePursuers();
             debugPrint(
                 "[COOP ROAD] load map=%d rc=%d now=%d\n",
                 nextMap,
