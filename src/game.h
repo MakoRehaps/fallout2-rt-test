@@ -2,6 +2,7 @@
 #define GAME_H
 
 #ifdef LOCAL_COOP_LOADSAVE_META
+#include "local_coop_character_state.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_state.h"
@@ -60,6 +61,15 @@ inline void localCoopLoadSaveGameReset()
         unifiedFallout1WildernessClearPending();
     }
 
+    if (appliedCampaignMeta) {
+        if (!localCoopCharacterStateApplyPending()) {
+            localCoopCharacterStateResetCurrent();
+        }
+    } else {
+        localCoopCharacterStateClearPending();
+        localCoopCharacterStateResetCurrent();
+    }
+
     gameReset();
 }
 
@@ -74,6 +84,7 @@ inline bool localCoopLoadSaveShouldAbortForContentReload()
     // after rebootstrap will stage it from the same COOPMETA.SAV file.
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WildernessClearPending();
+    localCoopCharacterStateClearPending();
 
     // If this load was requested while playing, leave the gameplay loop through
     // its normal teardown path. The main-menu initializer then performs the
