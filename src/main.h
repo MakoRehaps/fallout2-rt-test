@@ -24,6 +24,7 @@
 #include "local_coop_mode_sync.h"
 #include "local_coop_runtime.h"
 #include "local_coop_beta_hotfix.h"
+#include "local_coop_autosave.h"
 #include "unified_campaign.h"
 
 namespace fallout {
@@ -69,6 +70,7 @@ inline void localCoopResetTransientStateForLoad()
     localCoopGenericUiRestoreMarker();
     localCoopInventoryUiDestroyWindow();
     localCoopLiveLootResetForLoad();
+    localCoopAutosaveReset();
 
     inputEventQueueReset();
     localCoopSetRealtimeCombatActive(false);
@@ -257,6 +259,7 @@ inline int localCoopMainInputGetInput()
     localCoopLiveLootTick();
     localCoopGenericUiControllerTick();
     localCoopSyncPlayerOneWeaponReadyCursor();
+    localCoopAutosaveTick();
 
     // Legacy proto/script/message tables are still reinitialized when a save or
     // campaign transition changes their origin. Both physical data sets remain
