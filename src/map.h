@@ -110,15 +110,13 @@ int mapSetTransition(MapTransition* transition);
 int mapHandleTransition();
 int _map_save_in_game(bool a1);
 
-// Script opcodes are the normal path for stairs, doors and scripted exits to
-// request a different map. While realtime danger is active, consume that request
-// without changing maps. The stock mapSetTransition definition in map.cc is not
-// renamed because only interpreter_extra.cc defines the translation-unit marker.
+// Script opcodes remain the authoritative path for stairs, doors, exit grids,
+// and scripted map changes. Never report success while discarding a transition:
+// exit scripts generally fire once, so a swallowed request permanently traps the
+// party on the current map. Realtime danger continues across the transition and
+// stale hostile registrations are naturally discarded when their actors vanish.
 inline int localCoopMapSetTransitionDispatch(MapTransition* transition)
 {
-    if (localCoopDangerBlocksMapExit()) {
-        return 0;
-    }
     return mapSetTransition(transition);
 }
 
