@@ -140,6 +140,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/loadsave.h"
     "src/local_coop_mobile.cc"
     "src/local_coop_mobile.h"
+    "third_party/qrcodegen/qrcodegen.cpp"
+    "third_party/qrcodegen/qrcodegen.hpp"
     "src/main.cc"
     "src/main.h"
     "src/mainmenu.cc"
@@ -403,6 +405,7 @@ endif()
 add_subdirectory("third_party/fpattern")
 target_link_libraries(${EXECUTABLE_NAME} ${FPATTERN_LIBRARY})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${FPATTERN_INCLUDE_DIR})
+target_include_directories(${EXECUTABLE_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/third_party/qrcodegen")
 
 if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD"))
     add_subdirectory("third_party/zlib")
