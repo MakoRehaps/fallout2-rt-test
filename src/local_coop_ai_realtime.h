@@ -50,6 +50,10 @@ inline std::vector<LocalCoopRealtimePursuer> gLocalCoopRealtimePursuers;
 
 inline constexpr int kLocalCoopRealtimeTeamWakeDistance = 18;
 inline constexpr int kLocalCoopRealtimeMaximumPursuers = 24;
+inline constexpr int kLocalCoopRealtimePursuitExitDistance = 8;
+inline constexpr int kLocalCoopRealtimeMapWidth = 200;
+inline constexpr int kLocalCoopRealtimeMapHeight = 200;
+inline int gLocalCoopRealtimePursuitDirection = 0;
 inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;
 
 inline Uint32 localCoopRealtimeAiCooldownForSlice(int actionPoints)
@@ -428,7 +432,10 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
 
     int moveRc = -1;
     if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED | ANIMATION_REQUEST_INSIGNIFICANT) != -1) {
-        moveRc = animationRegisterRunToObject(actor, target, -1, 0);
+        // Use stock walking for generic critters. Several small-creature FRMs
+        // have no valid run sequence; requesting one can visually snap them
+        // across the map.
+        moveRc = animationRegisterMoveToObject(actor, target, -1, 0);
         if (moveRc == -1) {
             reg_anim_clear(actor);
         } else {
@@ -504,9 +511,10 @@ inline void localCoopRealtimeAiTick()
     gLocalCoopRealtimeAiInsideTick = false;
 }
 
-inline void localCoopRealtimeAiCapturePursuers()
+inline void localCoopRealtimeAiCapturePursuers(int exitTile, int roadDirection)
 {
     gLocalCoopRealtimePursuers.clear();
+    gLocalCoopRealtimePursuitDirection = roadDirection;
 
     for (const auto& entry : gLocalCoopRealtimeAiActors) {
         if (static_cast<int>(gLocalCoopRealtimePursuers.size())
@@ -515,7 +523,11 @@ inline void localCoopRealtimeAiCapturePursuers()
         }
 
         Object* actor = objectFindById(entry.first);
-        if (actor == nullptr || !localCoopRealtimeAiThreatStillEngaged(actor)) {
+        if (actor == nullptr
+            || !localCoopRealtimeAiThreatStillEngaged(actor)
+            || !tileIsValid(exitTile)
+            || tileDistanceBetween(actor->tile, exitTile)
+                > kLocalCoopRealtimePursuitExitDistance) {
             continue;
         }
 
@@ -541,11 +553,71 @@ inline void localCoopRealtimeAiCapturePursuers()
         objectDestroy(actor, nullptr);
     }
 
-    debugPrint("[COOP PURSUIT] captured=%d\n",
-        static_cast<int>(gLocalCoopRealtimePursuers.size()));
+    debugPrint("[COOP PURSUIT] captured=%d exitTile=%d direction=%d radius=%d\n",
+        static_cast<int>(gLocalCoopRealtimePursuers.size()),
+        exitTile,
+        roadDirection,
+        kLocalCoopRealtimePursuitExitDistance);
     gLocalCoopRealtimeAiActors.clear();
     gLocalCoopRealtimeWorldCombatActive = false;
     localCoopDangerSetLiveHostiles(0);
+}
+
+inline int localCoopRealtimeAiFindPursuitEntryTile(
+    Object* actor,
+    int ordinal)
+{
+    if (actor == nullptr || gDude == nullptr || !tileIsValid(gDude->tile)) {
+        return -1;
+    }
+
+    int partyX = gDude->tile % kLocalCoopRealtimeMapWidth;
+    int partyY = gDude->tile / kLocalCoopRealtimeMapWidth;
+    for (int depth = 3; depth <= 14; depth++) {
+        for (int spread = 0; spread <= 16; spread++) {
+            int signedSpread = spread == 0
+                ? 0
+                : ((spread + ordinal) % 2 == 0 ? spread : -spread);
+            int x = partyX;
+            int y = partyY;
+            switch (gLocalCoopRealtimePursuitDirection) {
+            case 0: // Party travelled north; pursuers enter from the south.
+                x = std::max(1, std::min(
+                    kLocalCoopRealtimeMapWidth - 2,
+                    partyX + signedSpread));
+                y = kLocalCoopRealtimeMapHeight - 1 - depth;
+                break;
+            case 1: // East; pursuers enter from the west.
+                x = depth;
+                y = std::max(1, std::min(
+                    kLocalCoopRealtimeMapHeight - 2,
+                    partyY + signedSpread));
+                break;
+            case 2: // South; pursuers enter from the north.
+                x = std::max(1, std::min(
+                    kLocalCoopRealtimeMapWidth - 2,
+                    partyX + signedSpread));
+                y = depth;
+                break;
+            case 3: // West; pursuers enter from the east.
+                x = kLocalCoopRealtimeMapWidth - 1 - depth;
+                y = std::max(1, std::min(
+                    kLocalCoopRealtimeMapHeight - 2,
+                    partyY + signedSpread));
+                break;
+            default:
+                break;
+            }
+
+            int tile = y * kLocalCoopRealtimeMapWidth + x;
+            if (tileIsValid(tile)
+                && _obj_blocking_at(actor, tile, gDude->elevation) == nullptr) {
+                return tile;
+            }
+        }
+    }
+
+    return localCoopFindSpawnTile(gDude, 12);
 }
 
 inline void localCoopRealtimeAiRestorePursuers()
@@ -555,6 +627,7 @@ inline void localCoopRealtimeAiRestorePursuers()
     }
 
     int restored = 0;
+    int ordinal = 0;
     for (const LocalCoopRealtimePursuer& pursuer : gLocalCoopRealtimePursuers) {
         Object* actor = nullptr;
         if (pursuer.pid == -1
@@ -574,7 +647,7 @@ inline void localCoopRealtimeAiRestorePursuers()
         actor->data.critter.combat.ap =
             critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS);
 
-        int spawnTile = localCoopFindSpawnTile(gDude, 12);
+        int spawnTile = localCoopRealtimeAiFindPursuitEntryTile(actor, ordinal++);
         if (spawnTile == -1
             || objectSetLocation(actor, spawnTile, gDude->elevation, nullptr) == -1) {
             objectDestroy(actor, nullptr);
@@ -622,6 +695,7 @@ inline void localCoopRealtimeAiReset()
 {
     gLocalCoopRealtimeAiActors.clear();
     gLocalCoopRealtimePursuers.clear();
+    gLocalCoopRealtimePursuitDirection = 0;
     gLocalCoopRealtimeCombatClockTick = SDL_GetTicks();
     gLocalCoopRealtimeAiInsideTick = false;
     gLocalCoopRealtimeWorldCombatActive = false;
