@@ -25,6 +25,7 @@
 #include "local_coop_runtime.h"
 #include "local_coop_beta_hotfix.h"
 #include "local_coop_autosave.h"
+#include "local_coop_mobile.h"
 #include "unified_campaign.h"
 
 namespace fallout {
@@ -245,6 +246,10 @@ inline int localCoopMainInputGetInput()
     localCoopGenericUiControllerEnsureTicker();
     localCoopLiveLootEnsureTicker();
     localCoopSyncLegacyModes();
+
+    // Phone browsers are surfaced as normal SDL gamepads before the runtime
+    // polls controllers, so every existing combat and menu path sees them.
+    localCoopMobileTick();
 
     // Preserve the pre-runtime camera center so the beta correction can apply a
     // shared-screen dead-zone after the old runtime has processed movement.
