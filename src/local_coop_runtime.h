@@ -881,6 +881,14 @@ inline void localCoopRuntimeTick()
     localCoopRestoreCharactersFromSave();
     localCoopKeepReservedActorsWithParty();
 
+    // COOP_EXPLICIT_SIMULATION_PAUSE_RUNTIME_V1
+    // Keep polling controllers and join UI while paused, but freeze the world.
+    // Alt+Tab/focus loss is intentionally NOT part of this condition.
+    if (localCoopSimulationPaused()) {
+        gLocalCoopRuntimeInsideTick = false;
+        return;
+    }
+
     // This should never become the player's normal state anymore. Keep the old
     // escape hatch only as a defensive breaker for an obscure legacy caller;
     // all known HUD/keyboard/mouse/controller/script attack paths are realtime.

@@ -91,6 +91,31 @@ inline uint32_t gLocalCoopAppliedCharacterStateRevision = 0xFFFFFFFF;
 inline int gLocalCoopModalControllerSlot = -1;
 inline int gLocalCoopSkilldexInvokerSlot = -1;
 
+// COOP_EXPLICIT_SIMULATION_PAUSE_V1
+// Window focus/Alt+Tab must never pause realtime co-op. Only explicit gameplay
+// flows such as joining a player or choosing a level-up perk freeze simulation.
+inline bool gLocalCoopLevelChoiceActive = false;
+
+inline bool localCoopJoinChoiceActive()
+{
+    for (const LocalCoopPlayer& player : gLocalCoopPlayers) {
+        if (player.joinMenuActive) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool localCoopSimulationPaused()
+{
+    return gLocalCoopLevelChoiceActive || localCoopJoinChoiceActive();
+}
+
+inline void localCoopSetLevelChoiceActive(bool active)
+{
+    gLocalCoopLevelChoiceActive = active;
+}
+
 inline int localCoopFindSpawnTile(Object* anchor, int distance);
 
 inline void localCoopClearActorBindings()
