@@ -39,6 +39,7 @@
 #include "text_font.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_wilderness_state.h"
+#include "unified_origin_art.h"
 #include "unified_worldmap_state_profile.h"
 #include "window_manager.h"
 #include "word_wrap.h"
@@ -1493,6 +1494,151 @@ static char pipboyWildernessCellGlyph(int cellX, int cellY, int partyCellX, int 
     return ' ';
 }
 
+static bool pipboyWindowRenderWildernessArt()
+{
+    inline constexpr int kWorldMapArtId = 135;
+    inline constexpr int kMapLeft = 260;
+    inline constexpr int kMapTop = 62;
+    inline constexpr int kMapWidth = 350;
+    inline constexpr int kMapHeight = 248;
+
+    UnifiedOriginFrmImage worldMapImage;
+    if (!worldMapImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kWorldMapArtId)) {
+        return false;
+    }
+
+    int imageWidth = worldMapImage.getWidth();
+    int imageHeight = worldMapImage.getHeight();
+    if (imageWidth <= 0 || imageHeight <= 0) {
+        return false;
+    }
+
+    unsigned char* destination =
+        gPipboyWindowBuffer + kMapTop * PIPBOY_WINDOW_WIDTH + kMapLeft;
+    blitBufferToBufferStretch(
+        worldMapImage.getData(),
+        imageWidth,
+        imageHeight,
+        imageWidth,
+        destination,
+        kMapWidth,
+        kMapHeight,
+        PIPBOY_WINDOW_WIDTH);
+
+    windowDrawText(
+        gPipboyWindow,
+        "WILDERNESS WORLD MAP",
+        kMapWidth,
+        kMapLeft,
+        PIPBOY_WINDOW_CONTENT_VIEW_Y,
+        _colorTable[992]);
+    windowDrawRect(
+        gPipboyWindow,
+        kMapLeft - 1,
+        kMapTop - 1,
+        kMapLeft + kMapWidth,
+        kMapTop + kMapHeight,
+        _colorTable[992]);
+
+    const UnifiedFallout1WildernessState& wilderness =
+        unifiedFallout1WildernessGetStateConst();
+    for (int cellY = 0; cellY < kUnifiedFallout1WildernessRows; cellY++) {
+        for (int cellX = 0; cellX < kUnifiedFallout1WildernessColumns; cellX++) {
+            const UnifiedFallout1WildernessCellState& cell =
+                wilderness.cells[cellY][cellX];
+            if ((cell.flags & UNIFIED_WILDERNESS_DISCOVERED) == 0) {
+                continue;
+            }
+
+            int left = kMapLeft + cellX * kUnifiedFallout1EncounterCellSize
+                * kMapWidth / imageWidth;
+            int top = kMapTop + cellY * kUnifiedFallout1EncounterCellSize
+                * kMapHeight / imageHeight;
+            int right = kMapLeft + (cellX + 1) * kUnifiedFallout1EncounterCellSize
+                * kMapWidth / imageWidth;
+            int bottom = kMapTop + (cellY + 1) * kUnifiedFallout1EncounterCellSize
+                * kMapHeight / imageHeight;
+            right = std::min(right, kMapLeft + kMapWidth - 1);
+            bottom = std::min(bottom, kMapTop + kMapHeight - 1);
+
+            windowDrawRect(
+                gPipboyWindow,
+                left,
+                top,
+                right,
+                bottom,
+                _colorTable[992]);
+
+            if ((cell.flags
+                    & (UNIFIED_WILDERNESS_ACTIVE_EVENT
+                        | UNIFIED_WILDERNESS_TEMPORARY_DUNGEON))
+                != 0) {
+                int centerX = (left + right) / 2;
+                int centerY = (top + bottom) / 2;
+                windowDrawLine(
+                    gPipboyWindow,
+                    centerX - 3,
+                    centerY,
+                    centerX + 3,
+                    centerY,
+                    _colorTable[992]);
+                windowDrawLine(
+                    gPipboyWindow,
+                    centerX,
+                    centerY - 3,
+                    centerX,
+                    centerY + 3,
+                    _colorTable[992]);
+            }
+        }
+    }
+
+    unifiedFallout1WorldMapSyncFromGlobals();
+    for (int town = 0; town < kUnifiedFallout1TownCountForState; town++) {
+        if (!unifiedWmAreaIsKnown(town)) {
+            continue;
+        }
+
+        int markerX = kMapLeft + unifiedFallout1TownWorldX(town) * kMapWidth / imageWidth;
+        int markerY = kMapTop + unifiedFallout1TownWorldY(town) * kMapHeight / imageHeight;
+        windowDrawRect(
+            gPipboyWindow,
+            markerX - 2,
+            markerY - 2,
+            markerX + 2,
+            markerY + 2,
+            _colorTable[992]);
+    }
+
+    const UnifiedFallout1WorldMapState& world =
+        unifiedFallout1WorldMapGetStateConst();
+    int partyX = kMapLeft + world.worldX * kMapWidth / imageWidth;
+    int partyY = kMapTop + world.worldY * kMapHeight / imageHeight;
+    windowDrawLine(
+        gPipboyWindow,
+        partyX - 5,
+        partyY,
+        partyX + 5,
+        partyY,
+        _colorTable[992]);
+    windowDrawLine(
+        gPipboyWindow,
+        partyX,
+        partyY - 5,
+        partyX,
+        partyY + 5,
+        _colorTable[992]);
+
+    windowDrawText(
+        gPipboyWindow,
+        "BOX VISITED   + PARTY/EVENT   SQUARE TOWN",
+        kMapWidth,
+        kMapLeft,
+        kMapTop + kMapHeight + 3,
+        _colorTable[992]);
+    return true;
+}
+
 static void pipboyWindowRenderWildernessMap()
 {
     pipboyWindowDestroyButtons();
@@ -1508,28 +1654,36 @@ static void pipboyWindowRenderWildernessMap()
             + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_WIDTH);
 
-    gPipboyCurrentLine = 0;
-    pipboyDrawText(
-        "WILDERNESS GRID  @ YOU  T TOWN  # VISITED  + CLEARED  ! EVENT  D DUNGEON",
-        PIPBOY_TEXT_NO_INDENT,
-        _colorTable[992]);
-
-    const UnifiedFallout1WorldMapState& world = unifiedFallout1WorldMapGetStateConst();
+    bool renderedArt = pipboyWindowRenderWildernessArt();
+    const UnifiedFallout1WorldMapState& world =
+        unifiedFallout1WorldMapGetStateConst();
     int partyCellX = world.worldX / kUnifiedFallout1WorldCellSize;
     int partyCellY = world.worldY / kUnifiedFallout1WorldCellSize;
 
     char line[64];
-    for (int cellY = 0; cellY < kUnifiedFallout1WildernessRows; cellY++) {
-        int offset = snprintf(line, sizeof(line), "%02d ", cellY);
-        for (int cellX = 0; cellX < kUnifiedFallout1WildernessColumns; cellX++) {
-            line[offset++] = pipboyWildernessCellGlyph(
-                cellX,
-                cellY,
-                partyCellX,
-                partyCellY);
+    if (!renderedArt) {
+        gPipboyCurrentLine = 0;
+        pipboyDrawText(
+            "WILDERNESS GRID  @ YOU  T TOWN  # VISITED  + CLEARED  ! EVENT  D DUNGEON",
+            PIPBOY_TEXT_NO_INDENT,
+            _colorTable[992]);
+
+        for (int cellY = 0; cellY < kUnifiedFallout1WildernessRows; cellY++) {
+            int offset = snprintf(line, sizeof(line), "%02d ", cellY);
+            for (int cellX = 0; cellX < kUnifiedFallout1WildernessColumns; cellX++) {
+                line[offset++] = pipboyWildernessCellGlyph(
+                    cellX,
+                    cellY,
+                    partyCellX,
+                    partyCellY);
+            }
+            line[offset] = '\0';
+            pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
         }
-        line[offset] = '\0';
-        pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
+    } else {
+        gPipboyCurrentLine =
+            (kMapHeight + kMapTop - PIPBOY_WINDOW_CONTENT_VIEW_Y + 24)
+            / fontGetLineHeight();
     }
 
     const UnifiedFallout1WildernessCellState* current =
