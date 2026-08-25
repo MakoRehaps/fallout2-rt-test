@@ -12,6 +12,20 @@ inline bool gLocalCoopDangerActive = false;
 inline Uint32 gLocalCoopDangerStartedTick = 0;
 inline Uint32 gLocalCoopDangerLastHostileTick = 0;
 inline int gLocalCoopDangerLiveHostiles = 0;
+inline int gLocalCoopPendingMapExitTile = -1;
+
+inline void localCoopMarkMapExitTile(int tile)
+{
+    gLocalCoopPendingMapExitTile = tile;
+}
+
+inline int localCoopConsumeMapExitTile()
+{
+    int tile = gLocalCoopPendingMapExitTile;
+    gLocalCoopPendingMapExitTile = -1;
+    return tile;
+}
+
 
 inline void localCoopDangerBegin()
 {
