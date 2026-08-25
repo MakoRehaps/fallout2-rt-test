@@ -37,6 +37,9 @@
 #include "stat.h"
 #include "svga.h"
 #include "text_font.h"
+#include "unified_campaign.h"
+#include "unified_fallout1_wilderness_state.h"
+#include "unified_worldmap_state_profile.h"
 #include "window_manager.h"
 #include "word_wrap.h"
 #include "worldmap.h"
@@ -207,6 +210,7 @@ static void pipboyRenderHolodiskText();
 static int pipboyWindowRenderHolodiskList(int a1);
 static int _qscmp(const void* a1, const void* a2);
 static void pipboyWindowHandleAutomaps(int a1);
+static void pipboyWindowHandleWildernessMap(int a1);
 static int _PrintAMelevList(int a1);
 static int _PrintAMList(int a1);
 static void pipboyHandleVideoArchive(int a1);
@@ -285,7 +289,7 @@ const HolidayDescription gHolidayDescriptions[HOLIDAY_COUNT] = {
 // 0x51C170
 PipboyRenderProc* _PipFnctn[5] = {
     pipboyWindowHandleStatus,
-    pipboyWindowHandleAutomaps,
+    pipboyWindowHandleWildernessMap,
     pipboyHandleVideoArchive,
     pipboyHandleAlarmClock,
     pipboyHandleAlarmClock,
@@ -1431,6 +1435,155 @@ static int _qscmp(const void* a1, const void* a2)
 }
 
 // 0x498D40
+static const char* pipboyWildernessLogTypeName(uint8_t eventType)
+{
+    switch (static_cast<UnifiedFallout1WildernessLogType>(eventType)) {
+    case UnifiedFallout1WildernessLogType::Entered:
+        return "ENTER";
+    case UnifiedFallout1WildernessLogType::Encounter:
+        return "ENCOUNTER";
+    case UnifiedFallout1WildernessLogType::ChainAdvanced:
+        return "CHAIN";
+    case UnifiedFallout1WildernessLogType::Cleared:
+        return "CLEARED";
+    case UnifiedFallout1WildernessLogType::Looted:
+        return "LOOTED";
+    case UnifiedFallout1WildernessLogType::EventCreated:
+        return "EVENT";
+    case UnifiedFallout1WildernessLogType::EventExpired:
+        return "EXPIRED";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static char pipboyWildernessCellGlyph(int cellX, int cellY, int partyCellX, int partyCellY)
+{
+    if (cellX == partyCellX && cellY == partyCellY) {
+        return '@';
+    }
+
+    if (unifiedFallout1TownAtWorldPos(
+            cellX * kUnifiedFallout1WorldCellSize + kUnifiedFallout1WorldCellSize / 2,
+            cellY * kUnifiedFallout1WorldCellSize + kUnifiedFallout1WorldCellSize / 2)
+        != -1) {
+        return 'T';
+    }
+
+    const UnifiedFallout1WildernessCellState* cell =
+        unifiedFallout1WildernessGetCellConst(cellX, cellY);
+    if (cell == nullptr) {
+        return ' ';
+    }
+    if ((cell->flags & UNIFIED_WILDERNESS_TEMPORARY_DUNGEON) != 0) {
+        return 'D';
+    }
+    if ((cell->flags & UNIFIED_WILDERNESS_ACTIVE_EVENT) != 0) {
+        return '!';
+    }
+    if ((cell->flags & UNIFIED_WILDERNESS_CLEARED) != 0) {
+        return '+';
+    }
+    if ((cell->flags & UNIFIED_WILDERNESS_VISITED) != 0) {
+        return '#';
+    }
+    if ((cell->flags & UNIFIED_WILDERNESS_DISCOVERED) != 0) {
+        return '.';
+    }
+    return ' ';
+}
+
+static void pipboyWindowRenderWildernessMap()
+{
+    pipboyWindowDestroyButtons();
+    blitBufferToBuffer(
+        _pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData()
+            + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y
+            + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
+        PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
+        PIPBOY_WINDOW_WIDTH,
+        gPipboyWindowBuffer
+            + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y
+            + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        PIPBOY_WINDOW_WIDTH);
+
+    gPipboyCurrentLine = 0;
+    pipboyDrawText(
+        "WILDERNESS GRID  @ YOU  T TOWN  # VISITED  + CLEARED  ! EVENT  D DUNGEON",
+        PIPBOY_TEXT_NO_INDENT,
+        _colorTable[992]);
+
+    const UnifiedFallout1WorldMapState& world = unifiedFallout1WorldMapGetStateConst();
+    int partyCellX = world.worldX / kUnifiedFallout1WorldCellSize;
+    int partyCellY = world.worldY / kUnifiedFallout1WorldCellSize;
+
+    char line[64];
+    for (int cellY = 0; cellY < kUnifiedFallout1WildernessRows; cellY++) {
+        int offset = snprintf(line, sizeof(line), "%02d ", cellY);
+        for (int cellX = 0; cellX < kUnifiedFallout1WildernessColumns; cellX++) {
+            line[offset++] = pipboyWildernessCellGlyph(
+                cellX,
+                cellY,
+                partyCellX,
+                partyCellY);
+        }
+        line[offset] = '\0';
+        pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
+    }
+
+    const UnifiedFallout1WildernessCellState* current =
+        unifiedFallout1WildernessGetCellConst(partyCellX, partyCellY);
+    if (current != nullptr) {
+        snprintf(
+            line,
+            sizeof(line),
+            "CELL %02d,%02d  MAP %d  CHAIN %d/%d",
+            partyCellX,
+            partyCellY,
+            current->templateMapIdx,
+            current->chainDepth,
+            current->chainLength);
+        pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
+    }
+
+    const UnifiedFallout1WildernessState& wilderness =
+        unifiedFallout1WildernessGetStateConst();
+    int logLines = wilderness.logCount < 4 ? wilderness.logCount : 4;
+    for (int index = 0; index < logLines; index++) {
+        int logIndex = wilderness.logHead - 1 - index;
+        if (logIndex < 0) {
+            logIndex += kUnifiedFallout1WildernessLogCapacity;
+        }
+
+        const UnifiedFallout1WildernessLogEntry& entry = wilderness.log[logIndex];
+        snprintf(
+            line,
+            sizeof(line),
+            "%s %02d,%02d MAP %d STEP %d",
+            pipboyWildernessLogTypeName(entry.eventType),
+            entry.cellX,
+            entry.cellY,
+            entry.templateMapIdx,
+            entry.detail);
+        pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
+    }
+
+    windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
+    windowRefresh(gPipboyWindow);
+}
+
+static void pipboyWindowHandleWildernessMap(int a1)
+{
+    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        pipboyWindowHandleAutomaps(a1);
+        return;
+    }
+
+    (void)a1;
+    pipboyWindowRenderWildernessMap();
+}
+
 static void pipboyWindowHandleAutomaps(int a1)
 {
     if (a1 == 1024) {
