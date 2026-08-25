@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
