@@ -44,7 +44,7 @@ inline bool localCoopIsSimplePickup(Object* object)
 inline Object* localCoopFindSimplePickup(LocalCoopPlayer& player)
 {
     Object* actor = player.actor;
-    if (actor == nullptr) {
+    if (actor == nullptr || !tileIsValid(actor->tile)) {
         return nullptr;
     }
 
