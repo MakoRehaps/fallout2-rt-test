@@ -109,6 +109,12 @@ static CritterProto gDudeProto = {
     0,
 };
 
+static constexpr int kLocalCoopPlayerProtoFirstPid = 0x0100FFF1;
+static constexpr int kLocalCoopPlayerProtoCount = 3;
+static CritterProto gLocalCoopPlayerProtos[kLocalCoopPlayerProtoCount] {};
+static bool gLocalCoopPlayerProtoConfigured[kLocalCoopPlayerProtoCount] {};
+
+
 // 0x51C534
 static char* _proto_path_base = _aProto_0;
 
@@ -358,6 +364,14 @@ char* protoGetName(int pid)
     if (pid == 0x1000000) {
         return critterGetName(gDude);
     }
+    if (protoIsLocalCoopPlayerPid(pid)) {
+        static char names[kLocalCoopPlayerProtoCount][16] = {
+            "Co-op Player 2",
+            "Co-op Player 3",
+            "Co-op Player 4",
+        };
+        return names[pid - kLocalCoopPlayerProtoFirstPid];
+    }
 
     return protoGetMessage(pid, PROTOTYPE_MESSAGE_NAME);
 }
@@ -365,6 +379,10 @@ char* protoGetName(int pid)
 // 0x49EB1C
 char* protoGetDescription(int pid)
 {
+    if (protoIsLocalCoopPlayerPid(pid)) {
+        static char description[] = "A player-controlled member of the co-op party.";
+        return description;
+    }
     return protoGetMessage(pid, PROTOTYPE_MESSAGE_DESCRIPTION);
 }
 
@@ -2124,6 +2142,37 @@ void _proto_remove_all()
 
 // proto_ptr
 // 0x4A2108
+bool protoIsLocalCoopPlayerPid(int pid)
+{
+    return pid >= kLocalCoopPlayerProtoFirstPid
+        && pid < kLocalCoopPlayerProtoFirstPid + kLocalCoopPlayerProtoCount;
+}
+
+int protoConfigureLocalCoopPlayer(int slot, const int* primaryStats, int gender)
+{
+    if (slot < 1
+        || slot > kLocalCoopPlayerProtoCount
+        || primaryStats == nullptr
+        || gender < GENDER_MALE
+        || gender >= GENDER_COUNT) {
+        return -1;
+    }
+
+    int index = slot - 1;
+    CritterProto& coopProto = gLocalCoopPlayerProtos[index];
+    coopProto = gDudeProto;
+    coopProto.pid = kLocalCoopPlayerProtoFirstPid + index;
+    coopProto.sid = -1;
+    memset(coopProto.data.bonusStats, 0, sizeof(coopProto.data.bonusStats));
+
+    for (int stat = STAT_STRENGTH; stat <= STAT_LUCK; stat++) {
+        coopProto.data.baseStats[stat] = primaryStats[stat];
+    }
+    coopProto.data.baseStats[STAT_GENDER] = gender;
+    gLocalCoopPlayerProtoConfigured[index] = true;
+    return coopProto.pid;
+}
+
 int protoGetProto(int pid, Proto** protoPtr)
 {
     *protoPtr = nullptr;
@@ -2134,6 +2183,15 @@ int protoGetProto(int pid, Proto** protoPtr)
 
     if (pid == 0x1000000) {
         *protoPtr = (Proto*)&gDudeProto;
+        return 0;
+    }
+
+    if (protoIsLocalCoopPlayerPid(pid)) {
+        int index = pid - kLocalCoopPlayerProtoFirstPid;
+        if (!gLocalCoopPlayerProtoConfigured[index]) {
+            return -1;
+        }
+        *protoPtr = reinterpret_cast<Proto*>(&gLocalCoopPlayerProtos[index]);
         return 0;
     }
 
