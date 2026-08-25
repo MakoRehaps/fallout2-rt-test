@@ -881,10 +881,6 @@ inline bool localCoopMoveRespectsSharedScreen(Object* actor, int destination)
         return true;
     }
 
-    if (localCoopDangerBlocksMapExit() && isExitGridAt(destination, actor->elevation)) {
-        return false;
-    }
-
     if (!tileIsValid(gCenterTile)) {
         return true;
     }
