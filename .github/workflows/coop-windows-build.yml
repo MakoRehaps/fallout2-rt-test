@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: coop-windows-${{ github.ref }}
@@ -24,6 +24,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply PhoBoi adaptive remote play
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          python tools/patch_phoboi_remote_play.py
+          if (git diff --quiet -- src/local_coop_mobile.cc) {
+            Write-Host "PhoBoi remote play source already current."
+          } else {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/local_coop_mobile.cc
+            git commit -m "Add adaptive PhoBoi 720p remote play [phoboi-remote-play-v2]"
+            git push origin HEAD:fix/no-debug-no-data-copy
+          }
 
       - name: Configure
         shell: pwsh
