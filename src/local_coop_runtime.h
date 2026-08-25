@@ -121,8 +121,6 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
         return false;
     }
 
-    // Realtime input should be able to interrupt a queued movement path. Do not
-    // wait for a Diablo-style right-click/analog run to finish before firing.
     if (animationIsBusy(actor)) {
         reg_anim_clear(actor);
     }
@@ -159,8 +157,6 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     localCoopRealtimeAiEngageHostile(target, actor);
     gLocalCoopRealtimeCombatActive = true;
 
-    // AP is not a visible realtime resource. Stock attack helpers can touch its
-    // HUD, so immediately restore the normal non-combat presentation for P1.
     if (actor == gDude && gInterfaceBarWindow != -1) {
         interfaceRenderActionPoints(-1, -1);
     }
@@ -206,23 +202,31 @@ inline void localCoopProcessCombatInput()
     Uint32 now = SDL_GetTicks();
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
-        if (!player.connected
-            || !player.humanOwned
-            || player.controller == nullptr
+        bool hasController = player.connected && player.controller != nullptr;
+        if (!player.humanOwned
             || player.actor == nullptr
             || player.uiMode != LocalCoopUiMode::World
-            || (player.actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
+            || (player.actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+            || (!hasController && player.slot != 0)) {
             continue;
         }
 
         LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
         runtime.aimTarget = localCoopFocusFindEnemy(player);
 
-        int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
-        bool primaryDown = rightTrigger > 12000;
-        bool secondaryDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
-        bool reloadDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
-        bool swapDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+        bool primaryDown = false;
+        bool secondaryDown = false;
+        bool reloadDown = false;
+        bool swapDown = false;
+
+        if (hasController) {
+            int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+            primaryDown = rightTrigger > 12000;
+            secondaryDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
+            reloadDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
+            swapDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+        }
+
         if (player.slot == 0) {
             swapDown = swapDown || gPressedPhysicalKeys[SDL_SCANCODE_TAB];
         }
@@ -371,7 +375,6 @@ inline void localCoopRuntimeTick()
         gLocalCoopRealtimeCombatActive = false;
     }
 
-    // Never leave the AP strip lit as a pseudo turn meter in the realtime game.
     if (gDude != nullptr && gInterfaceBarWindow != -1) {
         interfaceRenderActionPoints(-1, -1);
     }
