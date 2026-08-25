@@ -362,6 +362,70 @@ inline void localCoopAimBeadDrawCross(SDL_Renderer* renderer, int x, int y)
     SDL_RenderDrawLine(renderer, x, y - 5, x, y + 5);
 }
 
+inline void localCoopRenderHealthBars(SDL_Renderer* renderer, int maxX, int maxY)
+{
+    constexpr int kHealthBarWidth = 40;
+    constexpr int kHealthBarHeight = 5;
+    constexpr int kHealthBarHeadGap = 7;
+
+    Object* object = objectFindFirst();
+    while (object != nullptr) {
+        if (PID_TYPE(object->pid) == OBJ_TYPE_CRITTER
+            && object->elevation == gElevation
+            && (object->flags & OBJECT_HIDDEN) == 0
+            && (object->data.critter.combat.results & DAM_DEAD) == 0) {
+            int maximumHp = std::max(1, critterGetStat(object, STAT_MAXIMUM_HIT_POINTS));
+            int currentHp = std::max(0, std::min(object->data.critter.hp, maximumHp));
+
+            Rect objectRect;
+            objectGetRect(object, &objectRect);
+
+            int x = (objectRect.left + objectRect.right - kHealthBarWidth) / 2;
+            int y = objectRect.top - kHealthBarHeadGap - kHealthBarHeight;
+            x = std::max(1, std::min(maxX - kHealthBarWidth - 1, x));
+            y = std::max(1, std::min(maxY - kHealthBarHeight - 1, y));
+
+            SDL_Rect border = {
+                x - 1,
+                y - 1,
+                kHealthBarWidth + 2,
+                kHealthBarHeight + 2,
+            };
+            SDL_Rect background = {
+                x,
+                y,
+                kHealthBarWidth,
+                kHealthBarHeight,
+            };
+            SDL_Rect health = {
+                x,
+                y,
+                kHealthBarWidth * currentHp / maximumHp,
+                kHealthBarHeight,
+            };
+
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 220);
+            SDL_RenderFillRect(renderer, &border);
+            SDL_SetRenderDrawColor(renderer, 35, 35, 35, 220);
+            SDL_RenderFillRect(renderer, &background);
+
+            int healthPercent = currentHp * 100 / maximumHp;
+            if (healthPercent > 50) {
+                SDL_SetRenderDrawColor(renderer, 55, 220, 75, 240);
+            } else if (healthPercent > 25) {
+                SDL_SetRenderDrawColor(renderer, 235, 190, 45, 240);
+            } else {
+                SDL_SetRenderDrawColor(renderer, 235, 55, 55, 240);
+            }
+            if (health.w > 0) {
+                SDL_RenderFillRect(renderer, &health);
+            }
+        }
+
+        object = objectFindNext();
+    }
+}
+
 // Called from svga.cc after Fallout's RGB world texture has already been copied
 // to SDL's renderer. This is deliberately outside the 8-bit palette/GNW window
 // system: holding the right stick can no longer blank the screen black/white.
@@ -383,6 +447,11 @@ inline void localCoopAimBeadRenderOverlay()
 
     int maxX = std::max(0, screenGetWidth() - 1);
     int maxY = std::max(0, screenGetVisibleHeight() - 1);
+
+    // Every living critter on the current elevation gets a compact bar anchored
+    // to its rendered sprite rectangle, so players, companions, neutral NPCs,
+    // and enemies all use the same readable world-space health display.
+    localCoopRenderHealthBars(gSdlRenderer, maxX, maxY);
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
         if (!player.connected
