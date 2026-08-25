@@ -25,6 +25,7 @@
 #include "item.h"
 #include "light.h"
 #include "loadsave.h"
+#include "map_entry_utils.h"
 #include "local_coop_ai_realtime.h"
 #include "memory.h"
 #include "object.h"
@@ -71,8 +72,9 @@ static void _square_reset();
 static int _square_load(File* stream, int a2);
 static int mapHeaderWrite(MapHeader* ptr, File* stream);
 static int mapHeaderRead(MapHeader* ptr, File* stream);
-static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction);
-static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction);
+static void mapPlacePartyAtRoadEntry(
+    UnifiedWorldSystemRoadDirection direction,
+    int sourceMap);
 
 // 0x50B058
 static char byte_50B058[] = "";
@@ -1214,101 +1216,41 @@ static int _map_age_dead_critters()
     return rc;
 }
 
-static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
+static void mapPlacePartyAtRoadEntry(
+    UnifiedWorldSystemRoadDirection direction,
+    int sourceMap)
 {
-    if (gDude == nullptr || !tileIsValid(gDude->tile)) {
-        return -1;
-    }
-
-    const int anchorTile = gDude->tile;
-    const int anchorX = anchorTile % 200;
-    const int anchorY = anchorTile / 200;
-
-    Object** critters = nullptr;
-    int critterCount =
-        objectListCreate(-1, gDude->elevation, OBJ_TYPE_CRITTER, &critters);
-    int bestTile = -1;
-    int bestScore = -1000000000;
-
-    // Original maps define their own playable/scroll-blocked island around the
-    // stock start point. Search only a local radius inside that island. The old
-    // absolute x=32/x=167 scan could choose valid hexes outside the authored
-    // scroll blockers even though no player was meant to stand there.
-    for (int ring = 0; ring <= 18; ring++) {
-        int rotations = ring == 0 ? 1 : ROTATION_COUNT;
-        for (int rotation = 0; rotation < rotations; rotation++) {
-            int tile = ring == 0
-                ? anchorTile
-                : tileGetTileInDirection(anchorTile, rotation, ring);
-            if (!tileIsValid(tile)
-                || isExitGridAt(tile, gDude->elevation)
-                || _obj_scroll_blocking_at(tile, gDude->elevation) == 0
-                || _obj_blocking_at(gDude, tile, gDude->elevation) != nullptr) {
-                continue;
-            }
-
-            int nearestThreat = 30;
-            for (int index = 0; index < critterCount; index++) {
-                Object* critter = critters[index];
-                if (critter == nullptr
-                    || critter == gDude
-                    || localCoopActorIsHumanOwned(critter)
-                    || objectIsPartyMember(critter)
-                    || (critter->flags & OBJECT_HIDDEN) != 0
-                    || (critter->data.critter.combat.results
-                           & (DAM_DEAD | DAM_KNOCKED_OUT))
-                        != 0) {
-                    continue;
-                }
-                nearestThreat = std::min(
-                    nearestThreat,
-                    tileDistanceBetween(tile, critter->tile));
-            }
-
-            int x = tile % 200;
-            int y = tile / 200;
-            int roadProgress = 0;
-            switch (direction) {
-            case UnifiedWorldSystemRoadDirection::North:
-                roadProgress = y - anchorY;
-                break;
-            case UnifiedWorldSystemRoadDirection::East:
-                roadProgress = anchorX - x;
-                break;
-            case UnifiedWorldSystemRoadDirection::South:
-                roadProgress = anchorY - y;
-                break;
-            case UnifiedWorldSystemRoadDirection::West:
-                roadProgress = x - anchorX;
-                break;
-            }
-
-            int score = nearestThreat * 100 + roadProgress * 8 - ring * 2;
-            if (score > bestScore) {
-                bestScore = score;
-                bestTile = tile;
-            }
-        }
-    }
-
-    if (critters != nullptr) {
-        objectListFree(critters);
-    }
-    return bestTile;
-}
-static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction)
-{
-    int tile = mapFindSafeRoadEntryTile(direction);
-    if (tile == -1 || gDude == nullptr) {
-        debugPrint("[COOP ROAD] no safe edge entry; keeping map default tile=%d\n",
-            gDude != nullptr ? gDude->tile : -1);
+    if (gDude == nullptr) {
         return;
     }
 
+    int authoredStartTile = gMapHeader.enteringTile;
     int oldTile = gDude->tile;
+    const char* method = "none";
+    int tile = mapEntryResolveSafeEntrance(
+        gDude,
+        direction,
+        sourceMap,
+        authoredStartTile,
+        gDude->elevation,
+        &method);
+    if (tile == -1) {
+        debugPrint(
+            "[COOP ROAD] no safe authored entry sourceMap=%d map=%d headerTile=%d currentTile=%d\\n",
+            sourceMap,
+            gMapHeader.field_34,
+            authoredStartTile,
+            oldTile);
+        return;
+    }
+
     reg_anim_clear(gDude);
-    if (objectSetLocation(gDude, tile, gDude->elevation, nullptr) == -1) {
-        debugPrint("[COOP ROAD] safe edge placement failed tile=%d\n", tile);
+    if (tile != oldTile
+        && objectSetLocation(gDude, tile, gDude->elevation, nullptr) == -1) {
+        debugPrint(
+            "[COOP ROAD] authored entry placement failed method=%s tile=%d\\n",
+            method,
+            tile);
         return;
     }
 
@@ -1329,19 +1271,22 @@ static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction)
     }
     objectSetRotation(gDude, facing, nullptr);
 
-    // Put recruited companions and every reserved co-op slot beside the safe
-    // entry before encounter AI receives its first realtime tick.
     _partyMemberSyncPosition();
     localCoopKeepReservedActorsWithParty();
     tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW);
 
     debugPrint(
-        "[COOP ROAD] safe entry direction=%d oldTile=%d tile=%d x=%d y=%d\n",
+        "[COOP ROAD] authored entry method=%s sourceMap=%d map=%d direction=%d oldTile=%d headerTile=%d tile=%d x=%d y=%d open=%d\\n",
+        method,
+        sourceMap,
+        gMapHeader.field_34,
         static_cast<int>(direction),
         oldTile,
+        authoredStartTile,
         tile,
         tile % 200,
-        tile / 200);
+        tile / 200,
+        mapEntryHexOpenNeighborCount(gDude, tile, gDude->elevation));
 }
 
 // 0x48358C
@@ -1419,6 +1364,7 @@ int mapHandleTransition()
         animationStop();
 
         UnifiedGameId game = unifiedCampaignGetActiveGame();
+        int sourceMap = gMapHeader.field_34;
         int exitTile = localCoopConsumeMapExitTile();
         if (exitTile < 0 && gDude != nullptr) {
             exitTile = gDude->tile;
@@ -1500,8 +1446,8 @@ int mapHandleTransition()
                     static_cast<UnifiedWorldSystemRoadDirection>(
                         unifiedWorldSystemGetStateConst()
                             .travel.lastRoadDirection[gameIndex]);
-                mapPlacePartyAtRoadEntry(effectiveDirection);
-                localCoopRealtimeAiBeginMapEntryGrace(3000);
+                mapPlacePartyAtRoadEntry(effectiveDirection, sourceMap);
+                localCoopRealtimeAiBeginMapEntryGrace(10000);
                 localCoopRealtimeAiActivateLoadedEncounterFactions();
                 localCoopRealtimeAiRestorePursuers();
                 gRoadTransitionFailureMap = -1;
