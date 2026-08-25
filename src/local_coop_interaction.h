@@ -15,6 +15,7 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_focus.h"
 #include "local_coop_loot_ui.h"
+#include "local_coop_runtime.h"
 #include "map.h"
 #include "mouse.h"
 #include "object.h"
@@ -88,46 +89,14 @@ inline bool localCoopAttackPlayerOneTarget(Object* target)
     }
 
     LocalCoopPlayer& player = gLocalCoopPlayers[0];
-    Object* actor = player.actor;
-    if (actor == nullptr
-        || actor != gDude
-        || !player.humanOwned
-        || player.uiMode != LocalCoopUiMode::World
-        || target == actor
-        || localCoopActorIsHumanOwned(target)
-        || FID_TYPE(target->fid) != OBJ_TYPE_CRITTER
-        || (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
-        || target->data.critter.combat.team == actor->data.critter.combat.team) {
+    if (player.actor == nullptr || player.actor != gDude) {
         return false;
     }
 
-    if (animationIsBusy(actor)) {
-        reg_anim_clear(actor);
-    }
-
-    Object* weapon = localCoopGetActiveItem(player);
-    int hitMode = localCoopGetPrimaryHitMode(player);
-    int savedActionPoints = actor->data.critter.combat.ap;
-
-    actor->data.critter.combat.ap = 9999;
-    int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
-    if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
-        weaponAttemptReload(actor, weapon);
-        badShot = _combat_check_bad_shot(actor, target, hitMode, false);
-    }
-
-    bool attacked = false;
-    if (badShot == COMBAT_BAD_SHOT_OK
-        && _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0) {
-        localCoopRealtimeAiEngageHostile(target, actor);
-        attacked = true;
-    }
-
-    actor->data.critter.combat.ap = savedActionPoints;
-    if (gInterfaceBarWindow != -1) {
-        interfaceRenderActionPoints(-1, -1);
-    }
-    return attacked;
+    // Controller A and mouse left-click now use the exact same backend as RT.
+    // There is no second mouse/interaction combat implementation and no call to
+    // the legacy _combat() turn scheduler.
+    return localCoopPerformAttackAgainst(player, target, false);
 }
 
 inline bool localCoopPlayerOneInteract()
