@@ -4,6 +4,7 @@
 namespace fallout {
 
 void localCoopMobileTick();
+bool localCoopMobileHandleKey(int keyCode);
 void localCoopMobileShutdown();
 
 } // namespace fallout
