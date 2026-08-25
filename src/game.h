@@ -3,6 +3,7 @@
 
 #ifdef LOCAL_COOP_LOADSAVE_META
 #include "unified_campaign.h"
+#include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_state.h"
 #endif
 
@@ -45,13 +46,18 @@ inline void localCoopLoadSaveGameReset()
         if (!unifiedFallout1WorldMapApplyPending()) {
             unifiedFallout1WorldMapResetCurrent();
         }
+        if (!unifiedFallout1WildernessApplyPending()) {
+            unifiedFallout1WildernessResetCurrent(kUnifiedFallout1WildernessDefaultSeed);
+        }
 
         // Stock gameReset calls wmWorldMap_reset after this wrapper. The F1
-        // lifecycle adapter consumes this one-shot flag so the just-restored
-        // sidecar survives that reset. Ordinary new-game resets do not set it.
+        // lifecycle adapter consumes these one-shot flags so the just-restored
+        // sidecar survives that reset. Ordinary new-game resets do not set them.
         unifiedFallout1WorldMapPreserveNextReset();
+        unifiedFallout1WildernessPreserveNextReset();
     } else {
         unifiedFallout1WorldMapClearPending();
+        unifiedFallout1WildernessClearPending();
     }
 
     gameReset();
@@ -67,6 +73,7 @@ inline bool localCoopLoadSaveShouldAbortForContentReload()
     // leave a payload staged from the old content profile; opening the slot again
     // after rebootstrap will stage it from the same COOPMETA.SAV file.
     unifiedFallout1WorldMapClearPending();
+    unifiedFallout1WildernessClearPending();
 
     // If this load was requested while playing, leave the gameplay loop through
     // its normal teardown path. The main-menu initializer then performs the
