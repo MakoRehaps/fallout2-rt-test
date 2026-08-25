@@ -18,7 +18,9 @@
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
 #include "object.h"
+#include "perk.h"
 #include "proto_types.h"
+#include "trait.h"
 #include "tile.h"
 #include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
@@ -32,6 +34,10 @@ struct LocalCoopRuntimeSlot {
     Uint32 nextPrimaryAttackTick = 0;
     Uint32 nextSecondaryAttackTick = 0;
     Uint32 nextReloadTick = 0;
+    Uint32 nextApRegenTick = 0;
+    int actionPointsHundredths = -1;
+    int actionPointsActorId = -1;
+    int apRegenDelayTicks = 0;
     bool primaryWasDown = false;
     bool reloadWasDown = false;
     bool secondaryWasDown = false;
@@ -72,6 +78,89 @@ inline Uint32 localCoopGetAttackCooldown(Object* actor, int hitMode)
     return static_cast<Uint32>(cooldown);
 }
 
+inline int localCoopActionPointMaximumHundredths(Object* actor)
+{
+    if (actor == nullptr) {
+        return 0;
+    }
+
+    return std::max(100, critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS) * 100);
+}
+
+inline int localCoopPlayerApRegenAmountHundredths(Object* actor)
+{
+    if (actor == nullptr) {
+        return 0;
+    }
+
+    // Port of ap_regen.fos: (360 + 69 * (AG + 2 * Action Boy
+    // - 3 * Bruiser)) / 2 every 500 ms. Fallout companions do not own the
+    // player's selected traits, so Bruiser is applied only to gDude.
+    int agility = critterGetStat(actor, STAT_AGILITY);
+    int actionBoy = perkGetRank(actor, PERK_ACTION_BOY);
+    int bruiser = actor == gDude && traitIsSelected(TRAIT_BRUISER) ? 1 : 0;
+    return std::max(1, (360 + 69 * (agility + 2 * actionBoy - 3 * bruiser)) / 2);
+}
+
+inline void localCoopUpdatePlayerActionPoints(LocalCoopPlayer& player, Uint32 now)
+{
+    Object* actor = player.actor;
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+    if (actor == nullptr) {
+        runtime.actionPointsHundredths = -1;
+        runtime.actionPointsActorId = -1;
+        runtime.nextApRegenTick = 0;
+        runtime.apRegenDelayTicks = 0;
+        return;
+    }
+
+    int maximum = localCoopActionPointMaximumHundredths(actor);
+    if (runtime.actionPointsActorId != actor->id || runtime.actionPointsHundredths < 0) {
+        runtime.actionPointsActorId = actor->id;
+        runtime.actionPointsHundredths = maximum;
+        runtime.nextApRegenTick = now + 500;
+        runtime.apRegenDelayTicks = 0;
+        return;
+    }
+
+    runtime.actionPointsHundredths = std::min(runtime.actionPointsHundredths, maximum);
+    int processedTicks = 0;
+    while (localCoopTickReached(now, runtime.nextApRegenTick) && processedTicks < 20) {
+        if (runtime.apRegenDelayTicks > 0) {
+            runtime.apRegenDelayTicks--;
+        } else if (runtime.actionPointsHundredths < maximum) {
+            runtime.actionPointsHundredths = std::min(maximum,
+                runtime.actionPointsHundredths + localCoopPlayerApRegenAmountHundredths(actor));
+        }
+        runtime.nextApRegenTick += 500;
+        processedTicks++;
+    }
+
+    // Do not award an unbounded offline/modal catch-up burst.
+    if (processedTicks == 20 && localCoopTickReached(now, runtime.nextApRegenTick)) {
+        runtime.nextApRegenTick = now + 500;
+    }
+}
+
+inline int localCoopActionPointCostHundredths(Object* actor, int hitMode)
+{
+    int cost = weaponGetActionPointCost(actor, hitMode, false);
+    return std::max(1, cost) * 100;
+}
+
+inline bool localCoopHasActionPoints(LocalCoopPlayer& player, int costHundredths, Uint32 now)
+{
+    localCoopUpdatePlayerActionPoints(player, now);
+    return gLocalCoopRuntimeSlots[player.slot].actionPointsHundredths >= costHundredths;
+}
+
+inline void localCoopSpendActionPoints(LocalCoopPlayer& player, int costHundredths)
+{
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+    runtime.actionPointsHundredths = std::max(0, runtime.actionPointsHundredths - costHundredths);
+    runtime.apRegenDelayTicks = std::max(runtime.apRegenDelayTicks, 1);
+}
+
 inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
 {
     Object* actor = player.actor;
@@ -84,6 +173,18 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
         return false;
     }
 
+    int hand = localCoopGetActiveHand(player);
+    int reloadHitMode = hand == HAND_LEFT ? HIT_MODE_LEFT_WEAPON_RELOAD : HIT_MODE_RIGHT_WEAPON_RELOAD;
+    int reloadCost = localCoopActionPointCostHundredths(actor, reloadHitMode);
+    Uint32 now = SDL_GetTicks();
+    if (!localCoopHasActionPoints(player, reloadCost, now)) {
+        debugPrint("[COOP RELOAD] slot=%d blocked-ap current=%d cost=%d\n",
+            player.slot,
+            gLocalCoopRuntimeSlots[player.slot].actionPointsHundredths,
+            reloadCost);
+        return false;
+    }
+
     Object* sharedOwner = localCoopGetSharedInventoryOwner();
     if (sharedOwner == nullptr) {
         return false;
@@ -91,7 +192,14 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
 
     if (actor == sharedOwner) {
         int rc = weaponAttemptReload(actor, weapon);
-        debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d\n", player.slot, weapon->pid, rc);
+        if (rc != -1) {
+            localCoopSpendActionPoints(player, reloadCost);
+        }
+        debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d ap=%d\n",
+            player.slot,
+            weapon->pid,
+            rc,
+            gLocalCoopRuntimeSlots[player.slot].actionPointsHundredths);
         return rc != -1;
     }
 
@@ -119,8 +227,15 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
 
     int reloadRc = weaponAttemptReload(actor, weapon);
     bool reloaded = reloadRc != -1;
+    if (reloaded) {
+        localCoopSpendActionPoints(player, reloadCost);
+    }
     localCoopSweepSharedInventory();
-    debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d\n", player.slot, weapon->pid, reloadRc);
+    debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d ap=%d\n",
+        player.slot,
+        weapon->pid,
+        reloadRc,
+        gLocalCoopRuntimeSlots[player.slot].actionPointsHundredths);
     return reloaded;
 }
 
@@ -202,6 +317,17 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
     int hand = localCoopGetActiveHand(player);
     Object* activeItem = localCoopGetActiveItem(player);
     int hitMode = localCoopGetHitMode(player, secondary);
+    int attackCost = localCoopActionPointCostHundredths(actor, hitMode);
+    Uint32 now = SDL_GetTicks();
+    if (!localCoopHasActionPoints(player, attackCost, now)) {
+        debugPrint("[COOP ATTACK] slot=%d blocked-ap current=%d cost=%d hitMode=%d\n",
+            player.slot,
+            runtime.actionPointsHundredths,
+            attackCost,
+            hitMode);
+        return false;
+    }
+
     int attackAnimation = critterGetAnimationForHitMode(actor, hitMode);
     int weaponAnimationCode = activeItem != nullptr && itemGetType(activeItem) == ITEM_TYPE_WEAPON
         ? weaponGetAnimationCode(activeItem)
@@ -263,11 +389,14 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
         return false;
     }
 
-    debugPrint("[COOP ATTACK] sequence-ok slot=%d hand=%d itemPid=%d hitMode=%d\n",
+    localCoopSpendActionPoints(player, attackCost);
+    debugPrint("[COOP ATTACK] sequence-ok slot=%d hand=%d itemPid=%d hitMode=%d ap=%d cost=%d\n",
         player.slot,
         hand,
         activeItem != nullptr ? activeItem->pid : -1,
-        hitMode);
+        hitMode,
+        runtime.actionPointsHundredths,
+        attackCost);
 
     localCoopClearQueuedAttack(runtime);
     localCoopRealtimeAiEngageHostile(target, actor);
@@ -403,6 +532,7 @@ inline void localCoopProcessCombatInput()
         }
 
         LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+        localCoopUpdatePlayerActionPoints(player, now);
         runtime.aimTarget = localCoopFocusFindEnemy(player);
 
         bool primaryDown = false;
@@ -516,6 +646,10 @@ inline void localCoopSetRealtimeCombatActive(bool active)
             runtime.nextPrimaryAttackTick = 0;
             runtime.nextSecondaryAttackTick = 0;
             runtime.nextReloadTick = 0;
+            runtime.nextApRegenTick = 0;
+            runtime.actionPointsHundredths = -1;
+            runtime.actionPointsActorId = -1;
+            runtime.apRegenDelayTicks = 0;
             localCoopClearQueuedAttack(runtime);
             gLocalCoopFocusSlots[index].combatTarget = nullptr;
             gLocalCoopFocusSlots[index].interactionTarget = nullptr;
