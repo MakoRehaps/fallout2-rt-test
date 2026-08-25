@@ -304,7 +304,9 @@ async function send(){
  try{const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});await fetch('/input',{method:'POST',body,keepalive:true})}catch(e){}
  sending=false;
 }
-setInterval(send,16);addEventListener('pagehide',()=>{slot<0||navigator.sendBeacon('/release',new URLSearchParams({slot,token}))});
+setInterval(send,16);// PHOBOI_NO_PAGEHIDE_RELEASE_V1
+// Do not release the claimed player slot on pagehide: browsers may fire pagehide
+// during fullscreen/orientation transitions. The server timeout owns stale sessions.
 </script></body></html>)PHOBOI";
 }
 
