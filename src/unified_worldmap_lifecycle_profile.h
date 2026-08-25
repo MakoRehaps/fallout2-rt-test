@@ -2,8 +2,10 @@
 #define UNIFIED_WORLDMAP_LIFECYCLE_PROFILE_H
 
 #include "db.h"
+#include "random.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_encounter_bridge.h"
+#include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_state.h"
 #include "unified_worldmap_audio_profile.h"
 
@@ -25,10 +27,14 @@ inline int unifiedWmWorldMapInit()
     // data model: its terrain, encounter and town tables are hard-coded. Start
     // the F1 profile with its original Vault 13 state and leave F2 tables alone.
     unifiedFallout1WorldMapClearPending();
+    unifiedFallout1WildernessClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
+    unifiedFallout1WildernessConsumePreserveReset();
     unifiedFallout1MapMusicResetOverrides();
     unifiedFallout1EncounterBridgeReset();
     unifiedFallout1WorldMapResetCurrent();
+    unifiedFallout1WildernessResetCurrent(
+        static_cast<uint32_t>(randomBetween(1, 0x7FFFFFFF)));
     return 0;
 }
 
@@ -42,7 +48,9 @@ inline void unifiedWmWorldMapExit()
     // The F1 compatibility backend currently owns only inline/static state and
     // therefore has no F2 worldmap parser allocations to release.
     unifiedFallout1WorldMapClearPending();
+    unifiedFallout1WildernessClearPending();
     unifiedFallout1WorldMapConsumePreserveReset();
+    unifiedFallout1WildernessConsumePreserveReset();
     unifiedFallout1MapMusicResetOverrides();
     unifiedFallout1EncounterBridgeReset();
 }
@@ -58,14 +66,20 @@ inline int unifiedWmWorldMapReset()
     unifiedFallout1MapMusicResetOverrides();
     unifiedFallout1EncounterBridgeReset();
 
-    if (unifiedFallout1WorldMapConsumePreserveReset()) {
-        return 0;
-    }
+    bool preserveWorldMap = unifiedFallout1WorldMapConsumePreserveReset();
+    bool preserveWilderness = unifiedFallout1WildernessConsumePreserveReset();
 
     // Ordinary gameReset means a new F1 game/runtime state. A load-game reset
-    // sets the one-shot preserve flag before entering stock gameReset.
-    unifiedFallout1WorldMapClearPending();
-    unifiedFallout1WorldMapResetCurrent();
+    // sets one-shot preserve flags before entering stock gameReset.
+    if (!preserveWorldMap) {
+        unifiedFallout1WorldMapClearPending();
+        unifiedFallout1WorldMapResetCurrent();
+    }
+    if (!preserveWilderness) {
+        unifiedFallout1WildernessClearPending();
+        unifiedFallout1WildernessResetCurrent(
+            static_cast<uint32_t>(randomBetween(1, 0x7FFFFFFF)));
+    }
     return 0;
 }
 
