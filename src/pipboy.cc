@@ -1494,16 +1494,16 @@ static char pipboyWildernessCellGlyph(int cellX, int cellY, int partyCellX, int 
     return ' ';
 }
 
+static constexpr int kPipboyWildernessWorldMapArtId = 135;
+static constexpr int kPipboyWildernessMapLeft = 260;
+static constexpr int kPipboyWildernessMapTop = 62;
+static constexpr int kPipboyWildernessMapWidth = 350;
+static constexpr int kPipboyWildernessMapHeight = 248;
+
 static bool pipboyWindowRenderWildernessArt()
 {
-    inline constexpr int kWorldMapArtId = 135;
-    inline constexpr int kMapLeft = 260;
-    inline constexpr int kMapTop = 62;
-    inline constexpr int kMapWidth = 350;
-    inline constexpr int kMapHeight = 248;
-
     UnifiedOriginFrmImage worldMapImage;
-    if (!worldMapImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kWorldMapArtId)) {
+    if (!worldMapImage.lock(UnifiedGameId::Fallout1, OBJ_TYPE_INTERFACE, kPipboyWildernessWorldMapArtId)) {
         return false;
     }
 
@@ -1514,30 +1514,30 @@ static bool pipboyWindowRenderWildernessArt()
     }
 
     unsigned char* destination =
-        gPipboyWindowBuffer + kMapTop * PIPBOY_WINDOW_WIDTH + kMapLeft;
+        gPipboyWindowBuffer + kPipboyWildernessMapTop * PIPBOY_WINDOW_WIDTH + kPipboyWildernessMapLeft;
     blitBufferToBufferStretch(
         worldMapImage.getData(),
         imageWidth,
         imageHeight,
         imageWidth,
         destination,
-        kMapWidth,
-        kMapHeight,
+        kPipboyWildernessMapWidth,
+        kPipboyWildernessMapHeight,
         PIPBOY_WINDOW_WIDTH);
 
     windowDrawText(
         gPipboyWindow,
         "WILDERNESS WORLD MAP",
-        kMapWidth,
-        kMapLeft,
+        kPipboyWildernessMapWidth,
+        kPipboyWildernessMapLeft,
         PIPBOY_WINDOW_CONTENT_VIEW_Y,
         _colorTable[992]);
     windowDrawRect(
         gPipboyWindow,
-        kMapLeft - 1,
-        kMapTop - 1,
-        kMapLeft + kMapWidth,
-        kMapTop + kMapHeight,
+        kPipboyWildernessMapLeft - 1,
+        kPipboyWildernessMapTop - 1,
+        kPipboyWildernessMapLeft + kPipboyWildernessMapWidth,
+        kPipboyWildernessMapTop + kPipboyWildernessMapHeight,
         _colorTable[992]);
 
     const UnifiedFallout1WildernessState& wilderness =
@@ -1550,16 +1550,16 @@ static bool pipboyWindowRenderWildernessArt()
                 continue;
             }
 
-            int left = kMapLeft + cellX * kUnifiedFallout1EncounterCellSize
-                * kMapWidth / imageWidth;
-            int top = kMapTop + cellY * kUnifiedFallout1EncounterCellSize
-                * kMapHeight / imageHeight;
-            int right = kMapLeft + (cellX + 1) * kUnifiedFallout1EncounterCellSize
-                * kMapWidth / imageWidth;
-            int bottom = kMapTop + (cellY + 1) * kUnifiedFallout1EncounterCellSize
-                * kMapHeight / imageHeight;
-            right = std::min(right, kMapLeft + kMapWidth - 1);
-            bottom = std::min(bottom, kMapTop + kMapHeight - 1);
+            int left = kPipboyWildernessMapLeft + cellX * kUnifiedFallout1EncounterCellSize
+                * kPipboyWildernessMapWidth / imageWidth;
+            int top = kPipboyWildernessMapTop + cellY * kUnifiedFallout1EncounterCellSize
+                * kPipboyWildernessMapHeight / imageHeight;
+            int right = kPipboyWildernessMapLeft + (cellX + 1) * kUnifiedFallout1EncounterCellSize
+                * kPipboyWildernessMapWidth / imageWidth;
+            int bottom = kPipboyWildernessMapTop + (cellY + 1) * kUnifiedFallout1EncounterCellSize
+                * kPipboyWildernessMapHeight / imageHeight;
+            right = std::min(right, kPipboyWildernessMapLeft + kPipboyWildernessMapWidth - 1);
+            bottom = std::min(bottom, kPipboyWildernessMapTop + kPipboyWildernessMapHeight - 1);
 
             windowDrawRect(
                 gPipboyWindow,
@@ -1599,8 +1599,8 @@ static bool pipboyWindowRenderWildernessArt()
             continue;
         }
 
-        int markerX = kMapLeft + unifiedFallout1TownWorldX(town) * kMapWidth / imageWidth;
-        int markerY = kMapTop + unifiedFallout1TownWorldY(town) * kMapHeight / imageHeight;
+        int markerX = kPipboyWildernessMapLeft + unifiedFallout1TownWorldX(town) * kPipboyWildernessMapWidth / imageWidth;
+        int markerY = kPipboyWildernessMapTop + unifiedFallout1TownWorldY(town) * kPipboyWildernessMapHeight / imageHeight;
         windowDrawRect(
             gPipboyWindow,
             markerX - 2,
@@ -1612,8 +1612,8 @@ static bool pipboyWindowRenderWildernessArt()
 
     const UnifiedFallout1WorldMapState& world =
         unifiedFallout1WorldMapGetStateConst();
-    int partyX = kMapLeft + world.worldX * kMapWidth / imageWidth;
-    int partyY = kMapTop + world.worldY * kMapHeight / imageHeight;
+    int partyX = kPipboyWildernessMapLeft + world.worldX * kPipboyWildernessMapWidth / imageWidth;
+    int partyY = kPipboyWildernessMapTop + world.worldY * kPipboyWildernessMapHeight / imageHeight;
     windowDrawLine(
         gPipboyWindow,
         partyX - 5,
@@ -1632,9 +1632,9 @@ static bool pipboyWindowRenderWildernessArt()
     windowDrawText(
         gPipboyWindow,
         "BOX VISITED   + PARTY/EVENT   SQUARE TOWN",
-        kMapWidth,
-        kMapLeft,
-        kMapTop + kMapHeight + 3,
+        kPipboyWildernessMapWidth,
+        kPipboyWildernessMapLeft,
+        kPipboyWildernessMapTop + kPipboyWildernessMapHeight + 3,
         _colorTable[992]);
     return true;
 }
@@ -1682,7 +1682,7 @@ static void pipboyWindowRenderWildernessMap()
         }
     } else {
         gPipboyCurrentLine =
-            (kMapHeight + kMapTop - PIPBOY_WINDOW_CONTENT_VIEW_Y + 24)
+            (kPipboyWildernessMapHeight + kPipboyWildernessMapTop - PIPBOY_WINDOW_CONTENT_VIEW_Y + 24)
             / fontGetLineHeight();
     }
 
