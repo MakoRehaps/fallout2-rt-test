@@ -261,6 +261,31 @@ inline void localCoopAnalogSteerPlayer(LocalCoopPlayer& player)
     state.steeringRotation = rotation;
 }
 
+inline bool localCoopControllerHasGameplayInput(const LocalCoopPlayer& player)
+{
+    if (!player.connected || player.controller == nullptr) {
+        return false;
+    }
+
+    const LocalCoopAnalogState& state = gLocalCoopAnalogStates[player.slot];
+    if (state.moveMagnitude > 0.0f || state.aimMagnitude > 0.0f
+        || SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 12000
+        || SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000) {
+        return true;
+    }
+
+    for (int button = 0; button < SDL_CONTROLLER_BUTTON_MAX; button++) {
+        if (SDL_GameControllerGetButton(
+                player.controller,
+                static_cast<SDL_GameControllerButton>(button))
+            != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 inline void localCoopAnalogAimPreRuntimeTick()
 {
     if (!gLocalCoopInitialized) {
@@ -280,6 +305,9 @@ inline void localCoopAnalogAimPreRuntimeTick()
             && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
         localCoopUpdateAnalogAxes(player);
         if (player.slot == 0) {
+            if (hasController && localCoopControllerHasGameplayInput(player)) {
+                player.controllerInputActive = true;
+            }
             localCoopApplyPlayerOneKeyboardMovement(player);
         }
         localCoopAnalogSteerPlayer(player);
