@@ -133,6 +133,17 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         configFree(&resolutionConfig);
     }
 
+    // A 640x480-style viewport cannot frame four actors across the 18-hex
+    // shared-screen leash. Render at least a widescreen 1280x720 world and let
+    // SDL scale that logical framebuffer to the desktop. Larger user-selected
+    // resolutions remain untouched.
+    if (width < 1280) {
+        width = 1280;
+    }
+    if (height < 720) {
+        height = 720;
+    }
+
     if (_GNW95_init_window(width, height, fullscreen, scale) == -1) {
         return -1;
     }
