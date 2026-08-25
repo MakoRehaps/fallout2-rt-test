@@ -1554,6 +1554,24 @@ static int interfaceBarRefreshMainAction()
     InterfaceItemState* itemState = &(gInterfaceItemStates[gInterfaceCurrentHand]);
     int actionPoints = -1;
 
+    // The original engine seeds both hand items with (Object*)-1. A hand swap
+    // can refresh the action button before interfaceUpdateItems replaces that
+    // sentinel (notably while realtime co-op skill actions are completing).
+    // Normalize it to a valid unarmed state before any item dereference.
+    if (itemState->item == reinterpret_cast<Object*>(-1)) {
+        itemState->item = nullptr;
+        itemState->isDisabled = 0;
+        itemState->isWeapon = 1;
+        itemState->primaryHitMode = gInterfaceCurrentHand == HAND_LEFT
+            ? unarmedGetPunchHitMode(false)
+            : unarmedGetKickHitMode(false);
+        itemState->secondaryHitMode = gInterfaceCurrentHand == HAND_LEFT
+            ? unarmedGetPunchHitMode(true)
+            : unarmedGetKickHitMode(true);
+        itemState->action = INTERFACE_ITEM_ACTION_PRIMARY;
+        itemState->itemFid = -1;
+    }
+
     if (itemState->isDisabled == 0) {
         memcpy(_itemButtonUp, _itemButtonNormalFrmImage.getData(), sizeof(_itemButtonUp));
         memcpy(_itemButtonDown, _itemButtonPressedFrmImage.getData(), sizeof(_itemButtonDown));
