@@ -1216,9 +1216,13 @@ static int _map_age_dead_critters()
 
 static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
 {
-    if (gDude == nullptr) {
+    if (gDude == nullptr || !tileIsValid(gDude->tile)) {
         return -1;
     }
+
+    const int anchorTile = gDude->tile;
+    const int anchorX = anchorTile % 200;
+    const int anchorY = anchorTile / 200;
 
     Object** critters = nullptr;
     int critterCount =
@@ -1226,36 +1230,19 @@ static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
     int bestTile = -1;
     int bestScore = -1000000000;
 
-    // Stay ahead of transferred pursuers (which enter 3-14 tiles deep), while
-    // remaining close enough to the edge to make bidirectional road travel
-    // visually clear. Cap threat-distance scoring at 30 tiles so an empty map
-    // chooses a central, walkable-looking entry instead of an extreme corner.
-    for (int inset = 16; inset <= 48; inset++) {
-        for (int axis = 12; axis < 188; axis++) {
-            int x = axis;
-            int y = axis;
-            switch (direction) {
-            case UnifiedWorldSystemRoadDirection::North:
-                x = axis;
-                y = 199 - inset;
-                break;
-            case UnifiedWorldSystemRoadDirection::East:
-                x = inset;
-                y = axis;
-                break;
-            case UnifiedWorldSystemRoadDirection::South:
-                x = axis;
-                y = inset;
-                break;
-            case UnifiedWorldSystemRoadDirection::West:
-                x = 199 - inset;
-                y = axis;
-                break;
-            }
-
-            int tile = y * 200 + x;
+    // Original maps define their own playable/scroll-blocked island around the
+    // stock start point. Search only a local radius inside that island. The old
+    // absolute x=32/x=167 scan could choose valid hexes outside the authored
+    // scroll blockers even though no player was meant to stand there.
+    for (int ring = 0; ring <= 18; ring++) {
+        int rotations = ring == 0 ? 1 : ROTATION_COUNT;
+        for (int rotation = 0; rotation < rotations; rotation++) {
+            int tile = ring == 0
+                ? anchorTile
+                : tileGetTileInDirection(anchorTile, rotation, ring);
             if (!tileIsValid(tile)
                 || isExitGridAt(tile, gDude->elevation)
+                || _obj_scroll_blocking_at(tile, gDude->elevation) == 0
                 || _obj_blocking_at(gDude, tile, gDude->elevation) != nullptr) {
                 continue;
             }
@@ -1278,9 +1265,25 @@ static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
                     tileDistanceBetween(tile, critter->tile));
             }
 
-            int score = nearestThreat * 100
-                - std::abs(axis - 100) * 3
-                - std::abs(inset - 32) * 2;
+            int x = tile % 200;
+            int y = tile / 200;
+            int roadProgress = 0;
+            switch (direction) {
+            case UnifiedWorldSystemRoadDirection::North:
+                roadProgress = y - anchorY;
+                break;
+            case UnifiedWorldSystemRoadDirection::East:
+                roadProgress = anchorX - x;
+                break;
+            case UnifiedWorldSystemRoadDirection::South:
+                roadProgress = anchorY - y;
+                break;
+            case UnifiedWorldSystemRoadDirection::West:
+                roadProgress = x - anchorX;
+                break;
+            }
+
+            int score = nearestThreat * 100 + roadProgress * 8 - ring * 2;
             if (score > bestScore) {
                 bestScore = score;
                 bestTile = tile;
@@ -1293,7 +1296,6 @@ static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
     }
     return bestTile;
 }
-
 static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction)
 {
     int tile = mapFindSafeRoadEntryTile(direction);
@@ -1363,6 +1365,21 @@ int mapSetTransition(MapTransition* transition)
     memcpy(&gMapTransition, transition, sizeof(gMapTransition));
 
     if (gMapTransition.map == 0) {
+        gMapTransition.map = -2;
+    }
+
+    // Encounter/caravan map scripts often contain a stock destination town.
+    // While the map belongs to an active physical chain, every outward map
+    // transition must remain a road step instead of teleporting to that town.
+    const UnifiedWorldSystemActiveChain& activeChain =
+        unifiedWorldSystemGetStateConst().activeChain;
+    UnifiedGameId activeGame = unifiedCampaignGetActiveGame();
+    if (gMapTransition.map > 0
+        && activeChain.valid
+        && activeChain.gameId
+            == static_cast<int32_t>(static_cast<uint32_t>(activeGame))
+        && activeChain.currentMapIdx == gMapHeader.field_34
+        && unifiedWorldSystemPoolContains(activeGame, gMapHeader.field_34)) {
         gMapTransition.map = -2;
     }
 
