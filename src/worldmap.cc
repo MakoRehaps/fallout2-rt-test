@@ -778,6 +778,13 @@ static int wmTownMapButtonId[ENTRANCE_LIST_CAPACITY];
 static WmGenData wmGenData;
 
 
+void unifiedWorldSystemClearFallout2EncounterContext()
+{
+    wmGenData.encounterMapId = -1;
+    wmGenData.encounterTableId = -1;
+    wmGenData.encounterEntryId = -1;
+}
+
 void unifiedWorldSystemRestoreFallout2EncounterContext(
     int mapIdx,
     int encounterTableId,
