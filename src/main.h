@@ -321,8 +321,17 @@ inline int unifiedCampaignGameInitWithOptions(const char* windowTitle,
         argc,
         argv);
 
-    if (rc == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
-        gameTimeSetTime(kUnifiedFallout1InitialGameTime);
+    if (rc == 0) {
+        // Install the realtime combat dispatchers before a map script or hostile
+        // can request combat. Waiting for the first input frame leaves a startup
+        // window where stock combat AI can seize a legacy turn and loop attacks.
+        localCoopInit();
+        localCoopRealtimeAiInstall();
+        localCoopRuntimeEnsureTicker();
+
+        if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+            gameTimeSetTime(kUnifiedFallout1InitialGameTime);
+        }
     }
 
     return rc;
@@ -373,6 +382,9 @@ inline bool unifiedCampaignRebootstrapRequestedContent()
     }
 
     unifiedCampaignSetBeforeGameResetHook(localCoopResetTransientStateForLoad);
+    localCoopInit();
+    localCoopRealtimeAiInstall();
+    localCoopRuntimeEnsureTicker();
     if (requestedGame == UnifiedGameId::Fallout1) {
         gameTimeSetTime(kUnifiedFallout1InitialGameTime);
     }
