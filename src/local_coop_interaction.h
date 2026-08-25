@@ -243,7 +243,8 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
         return false;
     }
 
-    Object* actor = gLocalCoopPlayers[0].actor;
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    Object* actor = player.actor;
     if (target == actor
         || localCoopActorIsHumanOwned(target)
         || FID_TYPE(target->fid) != OBJ_TYPE_CRITTER
@@ -252,14 +253,13 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
     }
 
     if (animationIsBusy(actor)) {
-        return true;
+        reg_anim_clear(actor);
     }
 
-    Object* weapon = critterGetItem2(actor);
-    int hitMode = weapon != nullptr ? HIT_MODE_RIGHT_WEAPON_PRIMARY : HIT_MODE_PUNCH;
+    Object* weapon = localCoopGetActiveItem(player);
+    int hitMode = localCoopGetPrimaryHitMode(player);
+    int savedActionPoints = actor->data.critter.combat.ap;
 
-    // Mouse combat is the same live-world action as controller combat. No
-    // `isInCombat()` gate and no transition into the turn loop.
     actor->data.critter.combat.ap = 9999;
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
@@ -272,7 +272,10 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
         localCoopRealtimeAiEngageHostile(target, actor);
     }
 
-    actor->data.critter.combat.ap = 9999;
+    actor->data.critter.combat.ap = savedActionPoints;
+    if (gInterfaceBarWindow != -1) {
+        interfaceRenderActionPoints(-1, -1);
+    }
     return true;
 }
 
@@ -404,8 +407,6 @@ inline void localCoopInteractionTick()
 
         bool interactDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
 
-        // Danger does not disable pickup or interaction. Only map exits are
-        // locked, so P2-P4 can still collect items while enemies are active.
         if (slot > 0 && player.uiMode == LocalCoopUiMode::World) {
             Object* pickup = localCoopFindSimplePickup(player);
             if (pickup != nullptr) {
