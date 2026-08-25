@@ -2,12 +2,14 @@
 #define DB_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 #ifdef LOCAL_COOP_LOADSAVE_META
 #include <string.h>
 
 #include <string>
 
+#include "local_coop_character_state.h"
 #include "unified_campaign.h"
 #include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_globals.h"
@@ -106,6 +108,7 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
     unifiedCampaignClearPendingSaveHeader();
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WildernessClearPending();
+    localCoopCharacterStateClearPending();
 
     std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
     File* meta = fileOpen(metaPath.c_str(), "rb");
@@ -117,26 +120,38 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
     bool readOk = fileRead(&header, sizeof(header), 1, meta) == 1;
     bool stagedHeader = readOk && unifiedCampaignStageSaveHeader(header);
 
-    if (stagedHeader
-        && header.activeGame == static_cast<uint32_t>(UnifiedGameId::Fallout1)) {
-        // Version 1 COOPMETA files ended immediately after the campaign header.
-        // A missing chunk is therefore a valid old save, not a load failure.
+    if (stagedHeader) {
         UnifiedCampaignMetaChunkHeader chunkHeader {};
-        if (fileRead(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1
-            && unifiedFallout1WorldMapChunkIsSupported(chunkHeader)) {
-            UnifiedFallout1WorldMapState state {};
-            if (fileRead(&state, sizeof(state), 1, meta) == 1) {
-                unifiedFallout1WorldMapStage(state);
+        while (fileRead(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1) {
+            bool consumed = false;
 
-                // Wilderness persistence was added after the original FWM1
-                // chunk. EOF here remains valid for older co-op saves.
-                UnifiedCampaignMetaChunkHeader wildernessHeader {};
-                if (fileRead(&wildernessHeader, sizeof(wildernessHeader), 1, meta) == 1
-                    && unifiedFallout1WildernessChunkIsSupported(wildernessHeader)) {
-                    UnifiedFallout1WildernessState wilderness {};
-                    if (fileRead(&wilderness, sizeof(wilderness), 1, meta) == 1) {
-                        unifiedFallout1WildernessStage(wilderness);
-                    }
+            if (header.activeGame == static_cast<uint32_t>(UnifiedGameId::Fallout1)
+                && unifiedFallout1WorldMapChunkIsSupported(chunkHeader)) {
+                UnifiedFallout1WorldMapState state {};
+                if (fileRead(&state, sizeof(state), 1, meta) == 1) {
+                    unifiedFallout1WorldMapStage(state);
+                    consumed = true;
+                }
+            } else if (
+                header.activeGame == static_cast<uint32_t>(UnifiedGameId::Fallout1)
+                && unifiedFallout1WildernessChunkIsSupported(chunkHeader)) {
+                UnifiedFallout1WildernessState wilderness {};
+                if (fileRead(&wilderness, sizeof(wilderness), 1, meta) == 1) {
+                    unifiedFallout1WildernessStage(wilderness);
+                    consumed = true;
+                }
+            } else if (localCoopCharacterStateChunkIsSupported(chunkHeader)) {
+                LocalCoopCharacterState characters {};
+                if (fileRead(&characters, sizeof(characters), 1, meta) == 1) {
+                    localCoopCharacterStateStage(characters);
+                    consumed = true;
+                }
+            }
+
+            if (!consumed) {
+                if (chunkHeader.payloadSize > 16 * 1024 * 1024
+                    || fileSeek(meta, static_cast<long>(chunkHeader.payloadSize), SEEK_CUR) != 0) {
+                    break;
                 }
             }
         }
@@ -178,6 +193,14 @@ inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
                 fileWrite(&wilderness, sizeof(wilderness), 1, meta);
             }
         }
+    }
+
+    UnifiedCampaignMetaChunkHeader charactersHeader =
+        localCoopCharacterStateMakeChunkHeader();
+    const LocalCoopCharacterState& characters =
+        localCoopCharacterStateGetConst();
+    if (fileWrite(&charactersHeader, sizeof(charactersHeader), 1, meta) == 1) {
+        fileWrite(&characters, sizeof(characters), 1, meta);
     }
 
     fileClose(meta);
