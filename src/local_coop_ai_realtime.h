@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include "actions.h"
 #include "animation.h"
 #include "combat.h"
 #include "combat_ai.h"
@@ -234,9 +235,6 @@ inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
         localCoopRealtimeAiEngageHostile(hostile, humanTarget);
     }
 
-    // An unresolved legacy combat request is ignored instead of creating a
-    // phantom danger flag. Only an actual registered hostile is allowed to lock
-    // map exits in the realtime game.
     return 0;
 }
 
