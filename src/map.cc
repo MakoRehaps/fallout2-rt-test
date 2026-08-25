@@ -1444,6 +1444,11 @@ int mapHandleTransition()
             gMapTransition.rotation = 0;
             int loadRc = mapLoadById(nextMap);
             if (loadRc == 0) {
+                // The road layer already captured the authoritative game and
+                // destination before load. Run procedural generation here too
+                // so a transient profile-state mismatch inside mapLoad cannot
+                // silently skip Fallout 1 mountain templates.
+                unifiedWildernessGenerateLoadedMapForGame(game, nextMap);
                 UnifiedWorldSystemRoadDirection effectiveDirection =
                     static_cast<UnifiedWorldSystemRoadDirection>(
                         unifiedWorldSystemGetStateConst()
@@ -1707,6 +1712,18 @@ int _map_save_in_game(bool a1)
         _strmfe(gMapHeader.name, name, "SAV");
         _MapDirEraseFile_("MAPS\\", gMapHeader.name);
         strcpy(gMapHeader.name, name);
+
+        // Random encounter maps are intentionally not persisted, but a real
+        // transition must still release their objects, scripts and loaded
+        // prototypes. Without this cleanup each road step leaks the previous
+        // encounter into the legacy movable heap.
+        if (a1) {
+            gMapHeader.name[0] = '\0';
+            _obj_remove_all();
+            _proto_remove_all();
+            _square_reset();
+            gameTimeScheduleUpdateEvent();
+        }
     } else {
         debugPrint("\n Saving \".SAV\" map.");
 
