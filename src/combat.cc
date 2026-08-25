@@ -3558,6 +3558,62 @@ int _combat_attack(Object* attacker, Object* defender, int hitMode, int hitLocat
     aiInfoSetLastTarget(attacker, defender);
     debugPrint("running attack...\n");
 
+    // Realtime co-op deliberately executes Fallout attacks outside the legacy
+    // turn-based combat mode. In stock combat reg_anim_end marks the sequence as
+    // a combat animation, and _combat_anim_finished later consumes ammo and
+    // applies _main_ctd damage. Outside combat that flag is never set, so the
+    // animation plays but neither side loses hit points. Finalize the computed
+    // attack immediately; the already-registered hit/death animations continue
+    // to provide the visual response without entering the legacy turn loop.
+    if (!isInCombat() && _combat_cleanup_enabled) {
+        _combat_cleanup_enabled = false;
+
+        int attackerId = _main_ctd.attacker != nullptr ? _main_ctd.attacker->id : -1;
+        int defenderId = _main_ctd.defender != nullptr ? _main_ctd.defender->id : -1;
+        int defenderDamage = _main_ctd.defenderDamage;
+        int attackerDamage = _main_ctd.attackerDamage;
+        int defenderFlags = _main_ctd.defenderFlags;
+        int attackerFlags = _main_ctd.attackerFlags;
+
+        Object* resolvedWeapon = critterGetWeaponForHitMode(
+            _main_ctd.attacker,
+            _main_ctd.hitMode);
+        if (resolvedWeapon != nullptr && ammoGetCapacity(resolvedWeapon) > 0) {
+            int ammoQuantity = ammoGetQuantity(resolvedWeapon);
+            ammoSetQuantity(
+                resolvedWeapon,
+                std::max(0, ammoQuantity - _main_ctd.ammoQuantity));
+
+            if (_main_ctd.attacker == gDude) {
+                _intface_update_ammo_lights();
+            }
+        }
+
+        if (_combat_call_display) {
+            _combat_display(&_main_ctd);
+            _combat_call_display = false;
+        }
+
+        _apply_damage(&_main_ctd, true);
+
+        debugPrint(
+            "[COOP REALTIME DAMAGE] attackerId=%d defenderId=%d defenderDamage=%d attackerDamage=%d defenderFlags=%08X attackerFlags=%08X\n",
+            attackerId,
+            defenderId,
+            defenderDamage,
+            attackerDamage,
+            defenderFlags,
+            attackerFlags);
+
+        Object* resolvedAttacker = _main_ctd.attacker;
+        attackInit(
+            &_main_ctd,
+            resolvedAttacker,
+            nullptr,
+            HIT_MODE_PUNCH,
+            HIT_LOCATION_TORSO);
+    }
+
     return 0;
 }
 
