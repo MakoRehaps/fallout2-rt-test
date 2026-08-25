@@ -188,7 +188,6 @@ inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferr
     state.preferredTargetId = preferredTarget != nullptr ? preferredTarget->id : -1;
 
     gLocalCoopRealtimeWorldCombatActive = true;
-    localCoopDangerBegin();
     localCoopDangerSetLiveHostiles(static_cast<int>(gLocalCoopRealtimeAiActors.size()));
 }
 
@@ -396,7 +395,6 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
                 actionCostHundredths,
                 state.currentActionPointsHundredths,
                 state.nextActionTick);
-            localCoopDangerTouch();
         } else {
             state.nextActionTick = now + 250;
             debugPrint("[COOP REALTIME AI] actorId=%d attack-sequence-failed rc=%d\n",
@@ -428,7 +426,6 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
             state.currentActionPointsHundredths - kMoveCostHundredths);
     }
     state.nextActionTick = now + (moveRc == -1 ? 300 : 450);
-    localCoopDangerTouch();
 }
 
 inline bool localCoopRealtimeAiThreatStillEngaged(Object* actor)
@@ -484,12 +481,11 @@ inline void localCoopRealtimeAiTick()
     }
 
     localCoopDangerSetLiveHostiles(liveWorldActors);
-    if (liveWorldActors == 0) {
-        gLocalCoopRealtimeWorldCombatActive = false;
-        localCoopDangerEnd();
-    } else {
-        gLocalCoopRealtimeWorldCombatActive = true;
-    }
+    gLocalCoopRealtimeWorldCombatActive = liveWorldActors > 0;
+
+    // Expire the post-damage flag on wall-clock time. AI registration, movement
+    // and attacks that miss or deal zero damage do not refresh this cooldown.
+    (void)localCoopDangerBlocksMapExit();
 
     gLocalCoopRealtimeAiInsideTick = false;
 }
