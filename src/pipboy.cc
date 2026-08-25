@@ -1459,42 +1459,6 @@ static const char* pipboyWildernessLogTypeName(uint8_t eventType)
     }
 }
 
-static char pipboyWildernessCellGlyph(int cellX, int cellY, int partyCellX, int partyCellY)
-{
-    if (cellX == partyCellX && cellY == partyCellY) {
-        return '@';
-    }
-
-    if (unifiedFallout1TownAtWorldPos(
-            cellX * kUnifiedFallout1WorldCellSize + kUnifiedFallout1WorldCellSize / 2,
-            cellY * kUnifiedFallout1WorldCellSize + kUnifiedFallout1WorldCellSize / 2)
-        != -1) {
-        return 'T';
-    }
-
-    const UnifiedFallout1WildernessCellState* cell =
-        unifiedFallout1WildernessGetCellConst(cellX, cellY);
-    if (cell == nullptr) {
-        return ' ';
-    }
-    if ((cell->flags & UNIFIED_WILDERNESS_TEMPORARY_DUNGEON) != 0) {
-        return 'D';
-    }
-    if ((cell->flags & UNIFIED_WILDERNESS_ACTIVE_EVENT) != 0) {
-        return '!';
-    }
-    if ((cell->flags & UNIFIED_WILDERNESS_CLEARED) != 0) {
-        return '+';
-    }
-    if ((cell->flags & UNIFIED_WILDERNESS_VISITED) != 0) {
-        return '#';
-    }
-    if ((cell->flags & UNIFIED_WILDERNESS_DISCOVERED) != 0) {
-        return '.';
-    }
-    return ' ';
-}
-
 static constexpr int kPipboyWildernessWorldMapArtId = 135;
 static constexpr int kPipboyWildernessMapLeft = 260;
 static constexpr int kPipboyWildernessMapTop = 62;
@@ -1655,37 +1619,27 @@ static void pipboyWindowRenderWildernessMap()
             + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_WIDTH);
 
-    bool renderedArt = pipboyWindowRenderWildernessArt();
+    if (!pipboyWindowRenderWildernessArt()) {
+        gPipboyCurrentLine = 0;
+        pipboyDrawText(
+            "WORLD MAP DATA UNAVAILABLE",
+            PIPBOY_TEXT_ALIGNMENT_CENTER,
+            _colorTable[992]);
+        windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
+        windowRefresh(gPipboyWindow);
+        return;
+    }
+
     const UnifiedFallout1WorldMapState& world =
         unifiedFallout1WorldMapGetStateConst();
     int partyCellX = world.worldX / kUnifiedFallout1WorldCellSize;
     int partyCellY = world.worldY / kUnifiedFallout1WorldCellSize;
 
     char line[64];
-    if (!renderedArt) {
-        gPipboyCurrentLine = 0;
-        pipboyDrawText(
-            "WILDERNESS GRID  @ YOU  T TOWN  # VISITED  + CLEARED  ! EVENT  D DUNGEON",
-            PIPBOY_TEXT_NO_INDENT,
-            _colorTable[992]);
-
-        for (int cellY = 0; cellY < kUnifiedFallout1WildernessRows; cellY++) {
-            int offset = snprintf(line, sizeof(line), "%02d ", cellY);
-            for (int cellX = 0; cellX < kUnifiedFallout1WildernessColumns; cellX++) {
-                line[offset++] = pipboyWildernessCellGlyph(
-                    cellX,
-                    cellY,
-                    partyCellX,
-                    partyCellY);
-            }
-            line[offset] = '\0';
-            pipboyDrawText(line, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
-        }
-    } else {
-        gPipboyCurrentLine =
-            (kPipboyWildernessMapHeight + kPipboyWildernessMapTop - PIPBOY_WINDOW_CONTENT_VIEW_Y + 24)
-            / fontGetLineHeight();
-    }
+    gPipboyCurrentLine =
+        (kPipboyWildernessMapHeight + kPipboyWildernessMapTop
+            - PIPBOY_WINDOW_CONTENT_VIEW_Y + 24)
+        / fontGetLineHeight();
 
     const UnifiedFallout1WildernessCellState* current =
         unifiedFallout1WildernessGetCellConst(partyCellX, partyCellY);
