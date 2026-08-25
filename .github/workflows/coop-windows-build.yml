@@ -27,20 +27,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply PhoBoi adaptive remote play, labels, and session fix
+      - name: Apply PhoBoi remote play, labels, session, and pagehide fixes
         if: github.event_name == 'push'
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
           python tools/patch_phoboi_labels.py
           python tools/patch_phoboi_session_token.py
+          python tools/patch_phoboi_pagehide_release.py
           if (git diff --quiet -- src/local_coop_mobile.cc) {
             Write-Host "PhoBoi source already current."
           } else {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src/local_coop_mobile.cc
-            git commit -m "Fix PhoBoi session auth for unsigned tokens [phoboi-token-v1]"
+            git commit -m "Keep PhoBoi sessions across pagehide/fullscreen [phoboi-pagehide-v1]"
             git push origin HEAD:fix/no-debug-no-data-copy
           }
 
