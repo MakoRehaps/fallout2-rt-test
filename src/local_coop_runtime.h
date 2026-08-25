@@ -357,8 +357,17 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
             hitMode);
 
         if (localCoopReloadFromSharedPool(player)) {
-            // Reload can change item state; resync before retrying the same shot.
+            // Reload can change item state and spends its own AP. Require the
+            // attack cost again so reload+shot can never overdraw the AP pool.
             localCoopSyncActiveHandVisual(player.slot);
+            if (!localCoopHasActionPoints(player, attackCost, SDL_GetTicks())) {
+                debugPrint("[COOP ATTACK] slot=%d reloaded-but-blocked-ap current=%d cost=%d\n",
+                    player.slot,
+                    runtime.actionPointsHundredths,
+                    attackCost);
+                actor->data.critter.combat.ap = savedActionPoints;
+                return false;
+            }
             badShot = _combat_check_bad_shot(actor, target, hitMode, false);
         }
     }
