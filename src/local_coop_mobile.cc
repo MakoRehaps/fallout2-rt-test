@@ -157,6 +157,34 @@ int mobileValue(const std::string& values, const char* key, int fallback)
     return fallback;
 }
 
+
+// PHOBOI_UNSIGNED_SESSION_TOKEN_V1
+uint32_t mobileUnsignedValue(const std::string& values, const char* key, uint32_t fallback)
+{
+    std::string prefix = std::string(key) + "=";
+    size_t start = 0;
+    while (start < values.size()) {
+        size_t end = values.find('&', start);
+        if (end == std::string::npos) {
+            end = values.size();
+        }
+
+        if (values.compare(start, prefix.size(), prefix) == 0) {
+            std::string text = values.substr(start + prefix.size(), end - start - prefix.size());
+            char* tail = nullptr;
+            unsigned long long parsed = std::strtoull(text.c_str(), &tail, 10);
+            if (tail == text.c_str() || *tail != '\0' || parsed > 0xFFFFFFFFull) {
+                return fallback;
+            }
+            return static_cast<uint32_t>(parsed);
+        }
+
+        start = end + 1;
+    }
+
+    return fallback;
+}
+
 uint32_t mobileNextToken()
 {
     static std::atomic<uint32_t> seed { 0x50484F42u };
@@ -838,7 +866,7 @@ void mobileHandleClient(MobileSocket client)
     MobileSlotState& state = gMobileSlots[slot];
 
     if (method == "GET" && route == "/ws") {
-        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        uint32_t token = mobileUnsignedValue(values, "token", 0);
         if (!state.claimed.load() || token == 0 || token != state.token.load()) {
             mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
             return;
@@ -848,7 +876,7 @@ void mobileHandleClient(MobileSocket client)
     }
 
     if (method == "GET" && route == "/stream") {
-        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        uint32_t token = mobileUnsignedValue(values, "token", 0);
         if (!state.claimed.load() || token == 0 || token != state.token.load()) {
             mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
             return;
@@ -882,7 +910,7 @@ void mobileHandleClient(MobileSocket client)
         return;
     }
 
-    uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+    uint32_t token = mobileUnsignedValue(values, "token", 0);
     if (!state.claimed.load() || token == 0 || token != state.token.load()) {
         mobileSendResponse(client, "403 Forbidden", "application/json", "{\"ok\":false,\"error\":\"Session expired\"}");
         return;
