@@ -834,6 +834,48 @@ int lsgSaveGame(int mode)
     return rc;
 }
 
+// Uses the final visible slot as a dedicated rotating autosave. This keeps the
+// save loadable from the stock Load Game screen while never invoking a picker.
+int lsgAutosaveGame()
+{
+    ScopedGameMode gm(GameMode::kSaveGame);
+
+    if (gDude == nullptr || gIsoWindow == -1) {
+        return -1;
+    }
+
+    int previousSlot = _slot_cursor;
+    bool previousQuickDone = _quick_done;
+    int previousCursor = gameMouseGetCursor();
+
+    _ls_error_code = 0;
+    _patches = settings.system.master_patches_path.c_str();
+    _slot_cursor = 9;
+
+    memset(&_LSData[_slot_cursor], 0, sizeof(_LSData[_slot_cursor]));
+    strncpy(_LSData[_slot_cursor].description, "AUTOSAVE", LOAD_SAVE_DESCRIPTION_LENGTH - 1);
+
+    _snapshot = nullptr;
+    _snapshotBuf = nullptr;
+
+    int result = -1;
+    if (_QuickSnapShot() == 1 && lsgPerformSaveGame() != -1) {
+        result = 1;
+    }
+
+    if (_snapshot != nullptr) {
+        internal_free(_snapshot);
+        _snapshot = nullptr;
+        _snapshotBuf = nullptr;
+    }
+
+    _slot_cursor = previousSlot;
+    _quick_done = previousQuickDone;
+    gameMouseSetCursor(previousCursor);
+
+    return result;
+}
+
 // 0x47C5B4
 static int _QuickSnapShot()
 {
