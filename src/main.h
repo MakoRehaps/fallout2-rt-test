@@ -40,6 +40,11 @@ inline int gUnifiedCampaignStartupFont = 0;
 inline int gUnifiedCampaignStartupA4 = 0;
 inline std::string gUnifiedCampaignStartupWindowTitle = "FALLOUT II";
 
+// The combined game has one realtime world state. This flag is only a P1
+// weapon-ready/aim presentation state for mouse play; it is deliberately NOT
+// Fallout's gCombatState and never starts the legacy turn scheduler.
+inline bool gLocalCoopPlayerOneWeaponReady = false;
+
 inline SDL_GameController* localCoopResolveAssignedController(int slot)
 {
     if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
@@ -68,6 +73,7 @@ inline void localCoopResetTransientStateForLoad()
     inputEventQueueReset();
     localCoopSetRealtimeCombatActive(false);
     localCoopRealtimeAiReset();
+    gLocalCoopPlayerOneWeaponReady = false;
 
     gLocalCoopRuntimeSlots = {};
     gLocalCoopFocusSlots = {};
@@ -103,6 +109,85 @@ inline void localCoopResetTickerRegistrationAfterEngineExit()
     gLocalCoopLiveLootState.tickerInstalled = false;
 }
 
+inline bool localCoopPlayerOneHybridWorldActive()
+{
+    if (!gLocalCoopInitialized) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    return player.humanOwned
+        && player.actor != nullptr
+        && player.actor == gDude
+        && player.uiMode == LocalCoopUiMode::World
+        && (player.actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) == 0;
+}
+
+inline void localCoopSyncPlayerOneWeaponReadyCursor()
+{
+    if (!localCoopPlayerOneHybridWorldActive()) {
+        return;
+    }
+
+    int mode = gameMouseGetMode();
+    if (gLocalCoopPlayerOneWeaponReady) {
+        if (mode == GAME_MOUSE_MODE_MOVE) {
+            gameMouseSetCursor(MOUSE_CURSOR_CROSSHAIR);
+            gameMouseSetMode(GAME_MOUSE_MODE_CROSSHAIR);
+        }
+    } else if (mode == GAME_MOUSE_MODE_CROSSHAIR) {
+        gameMouseSetMode(GAME_MOUSE_MODE_MOVE);
+    }
+}
+
+// Fallout's main HUD weapon/action button produces event -20. In the stock
+// game this eventually calls _intface_use_item(), which calls _combat(nullptr)
+// for weapons and starts the turn scheduler. Consume that event here instead.
+// The button is now only a realtime ready/holster toggle (or reload action).
+inline bool localCoopHandlePlayerOneHybridHudAction(int keyCode)
+{
+    if (keyCode != -20 || !localCoopPlayerOneHybridWorldActive()) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    int hand = localCoopGetActiveHand(player);
+    Object* item = localCoopGetActiveItem(player);
+
+    int leftAction = INTERFACE_ITEM_ACTION_DEFAULT;
+    int rightAction = INTERFACE_ITEM_ACTION_DEFAULT;
+    interfaceGetItemActions(&leftAction, &rightAction);
+    int action = hand == HAND_LEFT ? leftAction : rightAction;
+
+    // Preserve the HUD's reload selection, but make reload realtime: no AP or
+    // turn-mode gate and no transition into _combat().
+    if (action == INTERFACE_ITEM_ACTION_RELOAD) {
+        bool reloaded = localCoopReloadFromSharedPool(player);
+        debugPrint("[COOP HYBRID] hud reload hand=%d itemPid=%d result=%d\n",
+            hand,
+            item != nullptr ? item->pid : -1,
+            reloaded ? 1 : 0);
+        if (gInterfaceBarWindow != -1) {
+            interfaceUpdateItems(false, leftAction, rightAction);
+        }
+        return true;
+    }
+
+    // Non-weapon usable items retain the stock HUD action path. Empty hands are
+    // combat-capable (punch/kick), so nullptr intentionally toggles ready state.
+    if (item != nullptr && itemGetType(item) != ITEM_TYPE_WEAPON) {
+        return false;
+    }
+
+    gLocalCoopPlayerOneWeaponReady = !gLocalCoopPlayerOneWeaponReady;
+    debugPrint("[COOP HYBRID] weapon-ready=%d hand=%d itemPid=%d\n",
+        gLocalCoopPlayerOneWeaponReady ? 1 : 0,
+        hand,
+        item != nullptr ? item->pid : -1);
+    localCoopSyncPlayerOneWeaponReadyCursor();
+    return true;
+}
+
 inline int localCoopMainInputGetInput()
 {
     gLocalCoopControllerLookup = localCoopResolveAssignedController;
@@ -127,6 +212,7 @@ inline int localCoopMainInputGetInput()
     localCoopInteractionTick();
     localCoopLiveLootTick();
     localCoopGenericUiControllerTick();
+    localCoopSyncPlayerOneWeaponReadyCursor();
 
     // Legacy proto/script/message tables are still reinitialized when a save or
     // campaign transition changes their origin. Both physical data sets remain
@@ -137,6 +223,12 @@ inline int localCoopMainInputGetInput()
     }
 
     int keyCode = inputGetInput();
+
+    // The HUD action button is no longer allowed to enter Fallout's combat
+    // scheduler. Consume its -20 event before gameHandleKey/_intface_use_item.
+    if (localCoopHandlePlayerOneHybridHudAction(keyCode)) {
+        return -1;
+    }
 
     // P1 is hybrid-input. Keyboard remains available, but the world view now
     // treats WASD as held realtime locomotion instead of passing those letters
