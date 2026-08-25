@@ -8,6 +8,7 @@ namespace fallout {
 typedef enum PipboyOpenIntent {
     PIPBOY_OPEN_INTENT_UNSPECIFIED = 0,
     PIPBOY_OPEN_INTENT_REST = 1,
+    PIPBOY_OPEN_INTENT_WORLD_MAP = 2,
 } PipboyOpenIntent;
 
 int pipboyOpen(int intent);
