@@ -280,10 +280,23 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
         return false;
     }
 
-    Object* actor = gLocalCoopPlayers[0].actor;
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    Object* actor = player.actor;
     Object* target = localCoopMouseFindTargetAtCursor();
     if (target == nullptr) {
         return true;
+    }
+
+    // Space selects one unambiguous left-click meaning. Aim never talks, loots,
+    // or uses scenery; Interact never fires at a living hostile.
+    if (player.actionMode == LocalCoopActionMode::Aim) {
+        if (FID_TYPE(target->fid) != OBJ_TYPE_CRITTER
+            || (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+            || localCoopActorIsHumanOwned(target)
+            || target->data.critter.combat.team == actor->data.critter.combat.team) {
+            return true;
+        }
+        return localCoopAttackPlayerOneTarget(target);
     }
 
     switch (FID_TYPE(target->fid)) {
@@ -292,12 +305,9 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
             return localCoopLiveLootRequest(actor, target);
         }
 
-        if (localCoopActorIsHumanOwned(target)) {
+        if (localCoopActorIsHumanOwned(target)
+            || target->data.critter.combat.team != actor->data.critter.combat.team) {
             return true;
-        }
-
-        if (target->data.critter.combat.team != actor->data.critter.combat.team) {
-            return localCoopAttackPlayerOneTarget(target);
         }
 
         if (_action_can_talk_to(actor, target) == 0) {
