@@ -5,6 +5,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "animation.h"
@@ -57,6 +59,7 @@ struct LocalCoopPlayer {
     bool joinRightWasDown = false;
     bool joinConfirmWasDown = false;
     bool joinCancelWasDown = false;
+    bool joinGenderWasDown = false;
     bool wantsRun = false;
     int archetype = 0;
     int gender = GENDER_MALE;
@@ -71,6 +74,8 @@ struct LocalCoopPlayer {
 
 inline std::array<LocalCoopPlayer, kLocalCoopMaxPlayers> gLocalCoopPlayers;
 inline bool gLocalCoopInitialized = false;
+
+inline int localCoopFindSpawnTile(Object* anchor, int distance);
 
 inline void localCoopClearActorBindings()
 {
@@ -189,12 +194,28 @@ inline void localCoopOpenController(int deviceIndex)
     player.joystickId = SDL_JoystickInstanceID(joystick);
     player.connected = true;
     snprintf(player.controllerGuid, sizeof(player.controllerGuid), "%s", guid);
+
+    if (player.slotLocked && player.actor != nullptr) {
+        int spawnTile = localCoopFindSpawnTile(gDude, 3);
+        if (spawnTile != -1) {
+            objectSetLocation(player.actor, spawnTile, gDude->elevation, nullptr);
+        }
+        player.actor->flags &= ~(OBJECT_HIDDEN | OBJECT_NO_BLOCK);
+        player.humanOwned = true;
+        debugPrint("[COOP JOIN] slot=%d reconnected\n", slot);
+    }
 }
 
 inline void localCoopClearController(LocalCoopPlayer& player)
 {
     if (player.controller != nullptr) {
         SDL_GameControllerClose(player.controller);
+    }
+
+    if (player.slotLocked && player.slot > 0 && player.actor != nullptr) {
+        reg_anim_clear(player.actor);
+        player.actor->flags |= OBJECT_HIDDEN | OBJECT_NO_BLOCK;
+        debugPrint("[COOP JOIN] slot=%d disconnected; ghost reserved\n", player.slot);
     }
 
     if (player.joinWindow != -1) {
@@ -397,6 +418,40 @@ inline bool localCoopCreatePlayerActor(int slot)
     return true;
 }
 
+inline void localCoopKeepReservedActorsWithParty()
+{
+    if (gDude == nullptr || !tileIsValid(gDude->tile)) {
+        return;
+    }
+
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        Object* actor = player.actor;
+        if (!player.slotLocked || actor == nullptr) {
+            continue;
+        }
+
+        bool needsWarp = !tileIsValid(actor->tile)
+            || actor->elevation != gDude->elevation
+            || tileDistanceBetween(actor->tile, gDude->tile) > kLocalCoopCameraTetherTiles;
+        if (needsWarp) {
+            int spawnTile = localCoopFindSpawnTile(gDude, 3);
+            if (spawnTile != -1) {
+                reg_anim_clear(actor);
+                objectSetLocation(actor, spawnTile, gDude->elevation, nullptr);
+            }
+        }
+
+        if (player.connected && player.controller != nullptr) {
+            actor->flags &= ~(OBJECT_HIDDEN | OBJECT_NO_BLOCK);
+            player.humanOwned = true;
+        } else {
+            actor->flags |= OBJECT_HIDDEN | OBJECT_NO_BLOCK;
+            player.humanOwned = true;
+        }
+    }
+}
+
 inline void localCoopDrawJoinMenu(LocalCoopPlayer& player)
 {
     if (player.joinWindow == -1) {
@@ -527,7 +582,7 @@ inline void localCoopProcessJoinMenus()
                     (player.archetype + 1) % kLocalCoopArchetypeCount;
                 dirty = true;
             }
-            if (genderDown && !player.joinConfirmWasDown) {
+            if (genderDown && !player.joinGenderWasDown) {
                 player.gender =
                     player.gender == GENDER_MALE ? GENDER_FEMALE : GENDER_MALE;
                 dirty = true;
@@ -546,8 +601,9 @@ inline void localCoopProcessJoinMenus()
         player.joinStartWasDown = startDown;
         player.joinLeftWasDown = leftDown;
         player.joinRightWasDown = rightDown;
-        player.joinConfirmWasDown = confirmDown || genderDown;
+        player.joinConfirmWasDown = confirmDown;
         player.joinCancelWasDown = cancelDown;
+        player.joinGenderWasDown = genderDown;
     }
 }
 
