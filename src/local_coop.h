@@ -17,6 +17,7 @@
 #include "interface.h"
 #include "inventory.h"
 #include "item.h"
+#include "local_coop_character_state.h"
 #include "local_coop_danger.h"
 #include "object.h"
 #include "party_member.h"
@@ -74,6 +75,7 @@ struct LocalCoopPlayer {
 
 inline std::array<LocalCoopPlayer, kLocalCoopMaxPlayers> gLocalCoopPlayers;
 inline bool gLocalCoopInitialized = false;
+inline uint32_t gLocalCoopAppliedCharacterStateRevision = 0xFFFFFFFF;
 
 inline int localCoopFindSpawnTile(Object* anchor, int distance);
 
@@ -202,6 +204,10 @@ inline void localCoopOpenController(int deviceIndex)
         }
         player.actor->flags &= ~(OBJECT_HIDDEN | OBJECT_NO_BLOCK);
         player.humanOwned = true;
+
+        LocalCoopCharacterSlotState& saved =
+            localCoopCharacterStateGet().slots[slot];
+        snprintf(saved.controllerGuid, sizeof(saved.controllerGuid), "%s", guid);
         debugPrint("[COOP JOIN] slot=%d reconnected\n", slot);
     }
 }
@@ -409,6 +415,18 @@ inline bool localCoopCreatePlayerActor(int slot)
     player.humanOwned = true;
     player.slotLocked = true;
     player.archetype = archetype;
+
+    LocalCoopCharacterSlotState& saved =
+        localCoopCharacterStateGet().slots[slot];
+    saved.locked = 1;
+    saved.archetype = static_cast<uint8_t>(archetype);
+    saved.gender = static_cast<uint8_t>(player.gender);
+    snprintf(
+        saved.controllerGuid,
+        sizeof(saved.controllerGuid),
+        "%s",
+        player.controllerGuid);
+
     debugPrint(
         "[COOP JOIN] slot=%d locked archetype=%s pid=%d tile=%d\n",
         slot,
@@ -416,6 +434,55 @@ inline bool localCoopCreatePlayerActor(int slot)
         pid,
         spawnTile);
     return true;
+}
+
+inline void localCoopRestoreCharactersFromSave()
+{
+    localCoopCharacterStateEnsureInitialized();
+    if (gLocalCoopAppliedCharacterStateRevision
+        == gLocalCoopCharacterStateRevision) {
+        return;
+    }
+
+    gLocalCoopAppliedCharacterStateRevision =
+        gLocalCoopCharacterStateRevision;
+    const LocalCoopCharacterState& saved =
+        localCoopCharacterStateGetConst();
+
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (player.actor != nullptr) {
+            reg_anim_clear(player.actor);
+            player.actor->flags &= ~(OBJECT_NO_REMOVE | OBJECT_NO_SAVE);
+            objectDestroy(player.actor, nullptr);
+            player.actor = nullptr;
+        }
+
+        const LocalCoopCharacterSlotState& savedSlot = saved.slots[slot];
+        player.slotLocked = savedSlot.locked != 0;
+        player.humanOwned = false;
+        player.archetype = std::max(
+            0,
+            std::min(
+                static_cast<int>(savedSlot.archetype),
+                kLocalCoopArchetypeCount - 1));
+        player.gender = savedSlot.gender == GENDER_FEMALE
+            ? GENDER_FEMALE
+            : GENDER_MALE;
+        snprintf(
+            player.controllerGuid,
+            sizeof(player.controllerGuid),
+            "%s",
+            savedSlot.controllerGuid);
+
+        if (!player.slotLocked || !localCoopCreatePlayerActor(slot)) {
+            continue;
+        }
+
+        if (!player.connected || player.controller == nullptr) {
+            player.actor->flags |= OBJECT_HIDDEN | OBJECT_NO_BLOCK;
+        }
+    }
 }
 
 inline void localCoopKeepReservedActorsWithParty()
