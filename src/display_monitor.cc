@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <fstream>
+#include <string>
 
 #include "art.h"
 #include "color.h"
@@ -229,14 +230,20 @@ void displayMonitorExit()
 }
 
 // 0x43186C
-void displayMonitorAddMessage(char* str)
+void displayMonitorAddMessage(const char* string)
 {
-    if (!gDisplayMonitorInitialized) {
+    if (!gDisplayMonitorInitialized || string == nullptr) {
         return;
     }
 
     // SFALL
-    consoleFileAddMessage(str);
+    consoleFileAddMessage(string);
+
+    // The stock line wrapper temporarily replaces spaces with NUL terminators.
+    // Always work on a private writable copy so callers can safely pass string
+    // literals and other immutable message storage.
+    std::string mutableString(string);
+    char* str = mutableString.data();
 
     int oldFont = fontGetCurrent();
     fontSetCurrent(DISPLAY_MONITOR_FONT);
