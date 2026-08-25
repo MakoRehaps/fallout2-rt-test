@@ -654,7 +654,33 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
         break;
     case KEY_UPPERCASE_P:
     case KEY_LOWERCASE_P:
-        // pipboy
+        // PhoBoi is an exclusive modal. A queued controller/phone event must
+        // never open it on top of Inventory, Loot, Barter, Dialogue, or any
+        // other active menu.
+        {
+            constexpr int kPhoBoiBlockingModes =
+                GameMode::kWorldmap
+                | GameMode::kDialog
+                | GameMode::kOptions
+                | GameMode::kSaveGame
+                | GameMode::kLoadGame
+                | GameMode::kPreferences
+                | GameMode::kHelp
+                | GameMode::kEditor
+                | GameMode::kPipboy
+                | GameMode::kInventory
+                | GameMode::kAutomap
+                | GameMode::kSkilldex
+                | GameMode::kUseOn
+                | GameMode::kLoot
+                | GameMode::kBarter
+                | GameMode::kHero
+                | GameMode::kDialogReview
+                | GameMode::kCounter;
+            if ((GameMode::getCurrentGameMode() & kPhoBoiBlockingModes) != 0) {
+                break;
+            }
+        }
         if (interfaceBarEnabled()) {
             if (isInCombatMode) {
                 soundPlayFile("iisxxxx1");
@@ -1603,8 +1629,6 @@ int gameShowDeathDialog(const char* message)
 
     int rc = showDialogBox(message, nullptr, 0, 169, 117, _colorTable[32328], nullptr, _colorTable[32328], DIALOG_BOX_LARGE);
 
-    _game_user_wants_to_quit = oldUserWantsToQuit;
-
     gameMouseSetCursor(oldCursor);
 
     if (cursorWasHidden) {
@@ -1619,6 +1643,17 @@ int gameShowDeathDialog(const char* message)
         isoEnable();
     }
 
+    // Bethesda-style death recovery: after acknowledging death, restore the
+    // most recently saved/loadable slot. Keep the old death flow only when no
+    // valid save exists or loading fails.
+    if (lsgLoadLastGame() == 1) {
+        _game_user_wants_to_quit = 0;
+        debugPrint("[AUTO RELOAD] death recovery loaded last save\n");
+        return 1;
+    }
+
+    _game_user_wants_to_quit = oldUserWantsToQuit;
+    debugPrint("[AUTO RELOAD] no valid last save; preserving death flow\n");
     return rc;
 }
 

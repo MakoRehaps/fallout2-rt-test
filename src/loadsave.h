@@ -18,6 +18,7 @@ void _InitLoadSave();
 void _ResetLoadSave();
 int lsgSaveGame(int mode);
 int lsgAutosaveGame();
+int lsgLoadLastGame();
 int lsgLoadGame(int mode);
 bool _isLoadingGame();
 void lsgInit();

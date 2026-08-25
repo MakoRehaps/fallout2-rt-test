@@ -530,8 +530,29 @@ inline void localCoopProcessPostgameWorldSwitch()
 
 inline void localCoopProcessModalMenuInput()
 {
-    bool modalActive = GameMode::isInGameMode(GameMode::kPipboy)
-        || GameMode::isInGameMode(GameMode::kSkilldex);
+    // The co-op ticker continues to run inside stock modal loops. Treat every
+    // non-world UI as exclusive so PhoBoi/Skilldex input can never stack a
+    // second screen over Inventory, Loot, Barter, Dialogue, Character, etc.
+    constexpr int kBlockingMenuModes =
+        GameMode::kWorldmap
+        | GameMode::kDialog
+        | GameMode::kOptions
+        | GameMode::kSaveGame
+        | GameMode::kLoadGame
+        | GameMode::kPreferences
+        | GameMode::kHelp
+        | GameMode::kEditor
+        | GameMode::kPipboy
+        | GameMode::kInventory
+        | GameMode::kAutomap
+        | GameMode::kSkilldex
+        | GameMode::kUseOn
+        | GameMode::kLoot
+        | GameMode::kBarter
+        | GameMode::kHero
+        | GameMode::kDialogReview
+        | GameMode::kCounter;
+    bool modalActive = (GameMode::getCurrentGameMode() & kBlockingMenuModes) != 0;
 
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         LocalCoopPlayer& player = gLocalCoopPlayers[slot];

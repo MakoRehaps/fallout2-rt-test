@@ -271,6 +271,7 @@ static LoadGameHandler* _master_load_list[LOAD_SAVE_HANDLER_COUNT] = {
 
 // 0x5194C4
 static bool _loadingGame = false;
+static int gLastLoadableSlot = -1;
 
 // lsgame.msg
 //
@@ -874,6 +875,55 @@ int lsgAutosaveGame()
     gameMouseSetCursor(previousCursor);
 
     return result;
+}
+
+int lsgLoadLastGame()
+{
+    ScopedGameMode gm(GameMode::kLoadGame);
+    _ls_error_code = 0;
+    _patches = settings.system.master_patches_path.c_str();
+
+    int slot = gLastLoadableSlot;
+    if (_GetSlotList() == -1) {
+        return -1;
+    }
+
+    if (slot < 0 || slot >= 10 || _LSstatus[slot] != SLOT_STATE_OCCUPIED) {
+        slot = -1;
+        long long newestStamp = -1;
+        for (int index = 0; index < 10; index++) {
+            if (_LSstatus[index] != SLOT_STATE_OCCUPIED) {
+                continue;
+            }
+
+            const LoadSaveSlotData& data = _LSData[index];
+            long long stamp = data.fileYear;
+            stamp = stamp * 13 + data.fileMonth;
+            stamp = stamp * 32 + data.fileDay;
+            stamp = stamp * 1440 + data.fileTime;
+            if (slot == -1 || stamp > newestStamp) {
+                newestStamp = stamp;
+                slot = index;
+            }
+        }
+    }
+
+    if (slot == -1) {
+        return -1;
+    }
+
+    int previousSlot = _slot_cursor;
+    _slot_cursor = slot;
+    debugPrint("[AUTO RELOAD] loading slot=%d name=%s\n",
+        slot + 1,
+        _LSData[slot].description);
+    if (lsgLoadGameInSlot(slot) == -1) {
+        _slot_cursor = previousSlot;
+        return -1;
+    }
+
+    gLastLoadableSlot = slot;
+    return 1;
 }
 
 // 0x47C5B4
@@ -1729,6 +1779,7 @@ static int lsgPerformSaveGame()
     }
 
     backgroundSoundResume();
+    gLastLoadableSlot = _slot_cursor;
 
     return 0;
 }
@@ -1823,6 +1874,7 @@ static int lsgLoadGameInSlot(int slot)
         debugPrint("\nError: Couldn't find LoadSave Message!");
     }
 
+    gLastLoadableSlot = slot;
     _loadingGame = false;
 
     // SFALL: Start global scripts.
