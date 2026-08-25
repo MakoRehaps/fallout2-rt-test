@@ -1,0 +1,42 @@
+name: Patch PhoBoi timeout
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+
+      - name: Extend mobile slot reservation timeout
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/local_coop_mobile.cc')
+          s = p.read_text(encoding='utf-8')
+          s2 = s.replace('constexpr uint64_t kMobileTimeoutMs = 10000;', 'constexpr uint64_t kMobileTimeoutMs = 60000;', 1)
+          s2 = s2.replace('Keep the player\'s reservation for ten seconds, but neutralize the\n            // virtual pad almost immediately.', 'Keep the player\'s reservation for sixty seconds, but neutralize the\n            // virtual pad almost immediately. This lets save/load and other blocking\n            // modal work finish without kicking a remote player.', 1)
+          if s2 == s:
+              raise SystemExit('expected PhoBoi timeout text not found; refusing broad patch')
+          p.write_text(s2, encoding='utf-8')
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-phoboi-timeout.yml
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_mobile.cc .github/workflows/patch-phoboi-timeout.yml
+          git commit -m "Keep PhoBoi mobile players connected through save stalls"
+          git push origin HEAD:fix/no-debug-no-data-copy
