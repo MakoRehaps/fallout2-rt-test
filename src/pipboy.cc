@@ -1737,6 +1737,8 @@ static const char* pipboyUnifiedWorldLogTypeName(uint8_t type)
         return "EXPIRED";
     case UnifiedWorldSystemLogType::MapVisited:
         return "VISITED";
+    case UnifiedWorldSystemLogType::EncounterRegenerated:
+        return "REGEN";
     default:
         return "WORLD";
     }
