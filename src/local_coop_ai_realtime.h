@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <vector>
 
 #include "actions.h"
 #include "animation.h"
@@ -35,7 +36,20 @@ inline Uint32 gLocalCoopRealtimeCombatClockTick = 0;
 inline bool gLocalCoopRealtimeAiInsideTick = false;
 inline bool gLocalCoopRealtimeWorldCombatActive = false;
 
+struct LocalCoopRealtimePursuer {
+    int pid = -1;
+    int hitPoints = 1;
+    int combatResults = 0;
+    int team = 0;
+    int rotation = 0;
+    int rightWeaponPid = -1;
+    int rightWeaponAmmo = 0;
+};
+
+inline std::vector<LocalCoopRealtimePursuer> gLocalCoopRealtimePursuers;
+
 inline constexpr int kLocalCoopRealtimeTeamWakeDistance = 18;
+inline constexpr int kLocalCoopRealtimeMaximumPursuers = 24;
 inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;
 
 inline Uint32 localCoopRealtimeAiCooldownForSlice(int actionPoints)
@@ -490,6 +504,109 @@ inline void localCoopRealtimeAiTick()
     gLocalCoopRealtimeAiInsideTick = false;
 }
 
+inline void localCoopRealtimeAiCapturePursuers()
+{
+    gLocalCoopRealtimePursuers.clear();
+
+    for (const auto& entry : gLocalCoopRealtimeAiActors) {
+        if (static_cast<int>(gLocalCoopRealtimePursuers.size())
+            >= kLocalCoopRealtimeMaximumPursuers) {
+            break;
+        }
+
+        Object* actor = objectFindById(entry.first);
+        if (actor == nullptr || !localCoopRealtimeAiThreatStillEngaged(actor)) {
+            continue;
+        }
+
+        LocalCoopRealtimePursuer pursuer;
+        pursuer.pid = actor->pid;
+        pursuer.hitPoints = std::max(1, actor->data.critter.hp);
+        pursuer.combatResults = actor->data.critter.combat.results
+            & ~(DAM_DEAD | DAM_KNOCKED_OUT);
+        pursuer.team = actor->data.critter.combat.team;
+        pursuer.rotation = actor->rotation;
+
+        Object* weapon = critterGetItem2(actor);
+        if (weapon != nullptr && itemGetType(weapon) == ITEM_TYPE_WEAPON) {
+            pursuer.rightWeaponPid = weapon->pid;
+            pursuer.rightWeaponAmmo = ammoGetQuantity(weapon);
+        }
+
+        gLocalCoopRealtimePursuers.push_back(pursuer);
+
+        // Remove the pursuer before the current map is saved. It now belongs to
+        // the road pursuit and must not also remain behind as a duplicate.
+        reg_anim_clear(actor);
+        objectDestroy(actor, nullptr);
+    }
+
+    debugPrint("[COOP PURSUIT] captured=%d\n",
+        static_cast<int>(gLocalCoopRealtimePursuers.size()));
+    gLocalCoopRealtimeAiActors.clear();
+    gLocalCoopRealtimeWorldCombatActive = false;
+    localCoopDangerSetLiveHostiles(0);
+}
+
+inline void localCoopRealtimeAiRestorePursuers()
+{
+    if (gDude == nullptr || gLocalCoopRealtimePursuers.empty()) {
+        return;
+    }
+
+    int restored = 0;
+    for (const LocalCoopRealtimePursuer& pursuer : gLocalCoopRealtimePursuers) {
+        Object* actor = nullptr;
+        if (pursuer.pid == -1
+            || objectCreateWithPid(&actor, pursuer.pid) == -1
+            || actor == nullptr) {
+            continue;
+        }
+
+        actor->flags &= ~OBJECT_HIDDEN;
+        actor->data.critter.combat.results = pursuer.combatResults;
+        actor->data.critter.combat.team = pursuer.team;
+        actor->rotation = pursuer.rotation;
+        critterUpdateDerivedStats(actor);
+        actor->data.critter.hp = std::min(
+            pursuer.hitPoints,
+            critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS));
+        actor->data.critter.combat.ap =
+            critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS);
+
+        int spawnTile = localCoopFindSpawnTile(gDude, 12);
+        if (spawnTile == -1
+            || objectSetLocation(actor, spawnTile, gDude->elevation, nullptr) == -1) {
+            objectDestroy(actor, nullptr);
+            continue;
+        }
+
+        if (pursuer.rightWeaponPid != -1) {
+            Object* weapon = nullptr;
+            if (objectCreateWithPid(&weapon, pursuer.rightWeaponPid) == 0
+                && weapon != nullptr) {
+                if (ammoGetCapacity(weapon) > 0) {
+                    ammoSetQuantity(weapon, std::max(0, pursuer.rightWeaponAmmo));
+                }
+                if (itemAdd(actor, weapon, 1) == 0) {
+                    _invenWieldFunc(actor, weapon, HAND_RIGHT, false);
+                } else {
+                    objectDestroy(weapon, nullptr);
+                }
+            }
+        }
+
+        localCoopRealtimeAiRegisterWorldActor(actor, gDude);
+        restored++;
+    }
+
+    debugPrint("[COOP PURSUIT] restored=%d requested=%d map=%d\n",
+        restored,
+        static_cast<int>(gLocalCoopRealtimePursuers.size()),
+        gMapHeader.field_34);
+    gLocalCoopRealtimePursuers.clear();
+}
+
 inline bool localCoopRealtimeAiHasRegisteredActors()
 {
     return !gLocalCoopRealtimeAiActors.empty();
@@ -504,6 +621,7 @@ inline void localCoopRealtimeAiInstall()
 inline void localCoopRealtimeAiReset()
 {
     gLocalCoopRealtimeAiActors.clear();
+    gLocalCoopRealtimePursuers.clear();
     gLocalCoopRealtimeCombatClockTick = SDL_GetTicks();
     gLocalCoopRealtimeAiInsideTick = false;
     gLocalCoopRealtimeWorldCombatActive = false;
