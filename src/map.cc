@@ -71,6 +71,8 @@ static void _square_reset();
 static int _square_load(File* stream, int a2);
 static int mapHeaderWrite(MapHeader* ptr, File* stream);
 static int mapHeaderRead(MapHeader* ptr, File* stream);
+static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction);
+static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction);
 
 // 0x50B058
 static char byte_50B058[] = "";
@@ -1212,6 +1214,134 @@ static int _map_age_dead_critters()
     return rc;
 }
 
+static int mapFindSafeRoadEntryTile(UnifiedWorldSystemRoadDirection direction)
+{
+    if (gDude == nullptr) {
+        return -1;
+    }
+
+    Object** critters = nullptr;
+    int critterCount =
+        objectListCreate(-1, gDude->elevation, OBJ_TYPE_CRITTER, &critters);
+    int bestTile = -1;
+    int bestScore = -1000000000;
+
+    // Stay ahead of transferred pursuers (which enter 3-14 tiles deep), while
+    // remaining close enough to the edge to make bidirectional road travel
+    // visually clear. Cap threat-distance scoring at 30 tiles so an empty map
+    // chooses a central, walkable-looking entry instead of an extreme corner.
+    for (int inset = 16; inset <= 48; inset++) {
+        for (int axis = 12; axis < 188; axis++) {
+            int x = axis;
+            int y = axis;
+            switch (direction) {
+            case UnifiedWorldSystemRoadDirection::North:
+                x = axis;
+                y = 199 - inset;
+                break;
+            case UnifiedWorldSystemRoadDirection::East:
+                x = inset;
+                y = axis;
+                break;
+            case UnifiedWorldSystemRoadDirection::South:
+                x = axis;
+                y = inset;
+                break;
+            case UnifiedWorldSystemRoadDirection::West:
+                x = 199 - inset;
+                y = axis;
+                break;
+            }
+
+            int tile = y * 200 + x;
+            if (!tileIsValid(tile)
+                || isExitGridAt(tile, gDude->elevation)
+                || _obj_blocking_at(gDude, tile, gDude->elevation) != nullptr) {
+                continue;
+            }
+
+            int nearestThreat = 30;
+            for (int index = 0; index < critterCount; index++) {
+                Object* critter = critters[index];
+                if (critter == nullptr
+                    || critter == gDude
+                    || localCoopActorIsHumanOwned(critter)
+                    || objectIsPartyMember(critter)
+                    || (critter->flags & OBJECT_HIDDEN) != 0
+                    || (critter->data.critter.combat.results
+                           & (DAM_DEAD | DAM_KNOCKED_OUT))
+                        != 0) {
+                    continue;
+                }
+                nearestThreat = std::min(
+                    nearestThreat,
+                    tileDistanceBetween(tile, critter->tile));
+            }
+
+            int score = nearestThreat * 100
+                - std::abs(axis - 100) * 3
+                - std::abs(inset - 32) * 2;
+            if (score > bestScore) {
+                bestScore = score;
+                bestTile = tile;
+            }
+        }
+    }
+
+    if (critters != nullptr) {
+        objectListFree(critters);
+    }
+    return bestTile;
+}
+
+static void mapPlacePartyAtRoadEntry(UnifiedWorldSystemRoadDirection direction)
+{
+    int tile = mapFindSafeRoadEntryTile(direction);
+    if (tile == -1 || gDude == nullptr) {
+        debugPrint("[COOP ROAD] no safe edge entry; keeping map default tile=%d\n",
+            gDude != nullptr ? gDude->tile : -1);
+        return;
+    }
+
+    int oldTile = gDude->tile;
+    reg_anim_clear(gDude);
+    if (objectSetLocation(gDude, tile, gDude->elevation, nullptr) == -1) {
+        debugPrint("[COOP ROAD] safe edge placement failed tile=%d\n", tile);
+        return;
+    }
+
+    int facing = ROTATION_E;
+    switch (direction) {
+    case UnifiedWorldSystemRoadDirection::North:
+        facing = ROTATION_NW;
+        break;
+    case UnifiedWorldSystemRoadDirection::East:
+        facing = ROTATION_E;
+        break;
+    case UnifiedWorldSystemRoadDirection::South:
+        facing = ROTATION_SE;
+        break;
+    case UnifiedWorldSystemRoadDirection::West:
+        facing = ROTATION_W;
+        break;
+    }
+    objectSetRotation(gDude, facing, nullptr);
+
+    // Put recruited companions and every reserved co-op slot beside the safe
+    // entry before encounter AI receives its first realtime tick.
+    _partyMemberSyncPosition();
+    localCoopKeepReservedActorsWithParty();
+    tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW);
+
+    debugPrint(
+        "[COOP ROAD] safe entry direction=%d oldTile=%d tile=%d x=%d y=%d\n",
+        static_cast<int>(direction),
+        oldTile,
+        tile,
+        tile % 200,
+        tile / 200);
+}
+
 // 0x48358C
 int _map_target_load_area()
 {
@@ -1348,11 +1478,20 @@ int mapHandleTransition()
             gMapTransition.tile = -1;
             gMapTransition.rotation = 0;
             int loadRc = mapLoadById(nextMap);
-            localCoopRealtimeAiRestorePursuers();
             if (loadRc == 0) {
+                UnifiedWorldSystemRoadDirection effectiveDirection =
+                    static_cast<UnifiedWorldSystemRoadDirection>(
+                        unifiedWorldSystemGetStateConst()
+                            .travel.lastRoadDirection[gameIndex]);
+                mapPlacePartyAtRoadEntry(effectiveDirection);
+                localCoopRealtimeAiBeginMapEntryGrace(3000);
+                localCoopRealtimeAiRestorePursuers();
                 gRoadTransitionFailureMap = -1;
                 gRoadTransitionFailureTimestamp = 0;
             } else {
+                // A failed load leaves pursuers on the source map rather than
+                // materializing them at a destination the party never entered.
+                localCoopRealtimeAiRestorePursuers();
                 unifiedWorldSystemGetState() = worldSystemBefore;
                 if (game == UnifiedGameId::Fallout1) {
                     unifiedFallout1WorldMapSetState(fallout1WorldBefore);
