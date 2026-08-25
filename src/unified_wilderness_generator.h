@@ -1,6 +1,7 @@
 #ifndef UNIFIED_WILDERNESS_GENERATOR_H
 #define UNIFIED_WILDERNESS_GENERATOR_H
 
+#include <algorithm>
 #include <vector>
 
 #include "debug.h"
@@ -36,12 +37,12 @@ inline bool unifiedWildernessObjectIsRemovableMountainBlocker(Object* object)
     return unifiedVehicleTypeForObject(object) == UnifiedVehicleType::None;
 }
 
-inline uint32_t unifiedWildernessCurrentSeed(int mapIdx)
+inline uint32_t unifiedWildernessCurrentSeed(UnifiedGameId game, int mapIdx)
 {
     const UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetStateConst().travel;
-    int gi = unifiedWorldSystemGameIndex(unifiedCampaignGetActiveGame());
+    int gi = unifiedWorldSystemGameIndex(game);
     const UnifiedWorldSystemCellState* cell = unifiedWorldSystemGetCell(
-        unifiedCampaignGetActiveGame(), travel.currentCellX[gi], travel.currentCellY[gi]);
+        game, travel.currentCellX[gi], travel.currentCellY[gi]);
     return cell != nullptr ? cell->seed : unifiedWorldSystemMixSeed(static_cast<uint32_t>(mapIdx));
 }
 
@@ -187,7 +188,7 @@ inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int ma
         if (unifiedWildernessObjectIsRemovableMountainBlocker(object)) remove.push_back(object);
     for (Object* object : remove) objectDestroy(object, nullptr);
 
-    uint32_t seed = unifiedWildernessCurrentSeed(mapIdx);
+    uint32_t seed = unifiedWildernessCurrentSeed(game, mapIdx);
     int rebuiltElevations = 0;
     int floorVariants = 0;
     for (int elevation = 0; elevation < ELEVATION_COUNT; elevation++) {
