@@ -204,6 +204,7 @@ static void pipboyWindowFree();
 static void _pip_init_();
 static void pipboyDrawNumber(int value, int digits, int x, int y);
 static void pipboyDrawDate();
+static void phoboiDrawBrand();
 static void pipboyDrawText(const char* text, int a2, int a3);
 static void pipboyDrawBackButton(int a1);
 static int _save_pipboy(File* stream);
@@ -405,7 +406,7 @@ static int gPipboyPrevTab;
 static FrmImage _pipboyFrmImages[PIPBOY_FRM_COUNT];
 
 // 0x497004
-int pipboyOpen(int intent)
+int phoboiOpen(int intent)
 {
     if (!wmMapPipboyActive()) {
         // You aren't wearing the pipboy!
@@ -526,6 +527,12 @@ int pipboyOpen(int intent)
     return 0;
 }
 
+// Compatibility entry point retained for stock engine and script callers.
+int pipboyOpen(int intent)
+{
+    return phoboiOpen(intent);
+}
+
 // 0x497228
 static int pipboyWindowInit(int intent)
 {
@@ -602,6 +609,7 @@ static int pipboyWindowInit(int intent)
 
     pipboyDrawNumber(gameTimeGetHour(), 4, PIPBOY_WINDOW_TIME_X, PIPBOY_WINDOW_TIME_Y);
     pipboyDrawDate();
+    phoboiDrawBrand();
 
     int alarmButton = buttonCreate(gPipboyWindow,
         124,
@@ -828,6 +836,23 @@ static void pipboyDrawDate()
 }
 
 // 0x497A40
+static void phoboiDrawBrand()
+{
+    constexpr const char* kPhoBoiBrand = "NOKIA BLACKBERRY PHOBOI";
+    constexpr int kBrandAreaX = PIPBOY_WINDOW_CONTENT_VIEW_X;
+    constexpr int kBrandAreaWidth = PIPBOY_WINDOW_CONTENT_VIEW_WIDTH;
+    constexpr int kBrandY = 20;
+
+    int textWidth = fontGetStringWidth(kPhoBoiBrand);
+    int x = kBrandAreaX + std::max(0, (kBrandAreaWidth - textWidth) / 2);
+    fontDrawText(
+        gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * kBrandY + x,
+        kPhoBoiBrand,
+        kBrandAreaWidth,
+        PIPBOY_WINDOW_WIDTH,
+        _colorTable[992]);
+}
+
 static void pipboyDrawText(const char* text, int flags, int color)
 {
     if ((flags & PIPBOY_TEXT_STYLE_UNDERLINE) != 0) {
@@ -2631,6 +2656,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
 
     pipboyDrawNumber(gameTimeGetHour(), 4, PIPBOY_WINDOW_TIME_X, PIPBOY_WINDOW_TIME_Y);
     pipboyDrawDate();
+    phoboiDrawBrand();
     windowRefresh(gPipboyWindow);
 
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
