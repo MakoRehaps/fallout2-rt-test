@@ -593,8 +593,11 @@ void localCoopMobileTick()
         std::ostringstream message;
         message << "PhoBoi phone controllers: http://" << mobileHostAddress()
                 << ":" << kMobilePort << "  PIN " << gMobilePin;
-        displayMonitorAddMessage(message.str().c_str());
-        debugPrint("[PHOBOI MOBILE] %s\n", message.str().c_str());
+        std::string messageText = message.str();
+        char mutableMessage[256] {};
+        snprintf(mutableMessage, sizeof(mutableMessage), "%s", messageText.c_str());
+        displayMonitorAddMessage(mutableMessage);
+        debugPrint("[PHOBOI MOBILE] %s\n", mutableMessage);
     }
 }
 
