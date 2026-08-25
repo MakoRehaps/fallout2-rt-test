@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "animation.h"
+#include "art.h"
+#include "debug.h"
 #include "game.h"
 #include "interface.h"
 #include "inventory.h"
@@ -321,21 +323,65 @@ inline int localCoopGetActiveHand(LocalCoopPlayer& player)
     return player.activeHand;
 }
 
+inline bool localCoopSyncActiveHandVisual(int slot)
+{
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    Object* actor = player.actor;
+    if (actor == nullptr) {
+        return false;
+    }
+
+    int hand = player.activeHand;
+    if (hand != HAND_LEFT && hand != HAND_RIGHT) {
+        hand = HAND_RIGHT;
+        player.activeHand = hand;
+    }
+
+    Object* item = hand == HAND_LEFT ? critterGetItem1(actor) : critterGetItem2(actor);
+    int weaponAnimationCode = 0;
+    if (item != nullptr && itemGetType(item) == ITEM_TYPE_WEAPON) {
+        weaponAnimationCode = weaponGetAnimationCode(item);
+    }
+
+    int fid = buildFid(FID_TYPE(actor->fid), actor->fid & 0xFFF, ANIM_STAND, weaponAnimationCode, actor->rotation + 1);
+    if (!artExists(fid)) {
+        debugPrint("[COOP HAND] visual FID missing slot=%d hand=%d itemPid=%d fid=%08X\n",
+            slot,
+            hand,
+            item != nullptr ? item->pid : -1,
+            fid);
+        return false;
+    }
+
+    // Controller combat is realtime. Do not leave a queued Fallout hand-swap
+    // animation between the logical equipped hand and the critter FID.
+    reg_anim_clear(actor);
+    _dude_stand(actor, actor->rotation, fid);
+    return true;
+}
+
 inline bool localCoopSetActiveHand(int slot, int hand, bool animated = false)
 {
     if (slot < 0 || slot >= kLocalCoopMaxPlayers || (hand != HAND_LEFT && hand != HAND_RIGHT)) {
         return false;
     }
 
+    (void)animated;
+
     LocalCoopPlayer& player = gLocalCoopPlayers[slot];
     if (slot == 0 && player.actor == gDude && gInterfaceBarWindow != -1) {
         int current = interfaceGetCurrentHand();
-        if (current != hand && interfaceBarSwapHands(animated) != 0) {
+        if (current != hand && interfaceBarSwapHands(false) != 0) {
             return false;
         }
     }
 
     player.activeHand = hand;
+    localCoopSyncActiveHandVisual(slot);
     return true;
 }
 
@@ -555,35 +601,79 @@ inline Object* localCoopGetEquippedRightHand(int slot)
 
 inline bool localCoopEquipSharedItem(int slot, Object* item, int hand)
 {
-    if (slot < 0 || slot >= kLocalCoopMaxPlayers || item == nullptr) {
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers || item == nullptr || (hand != HAND_LEFT && hand != HAND_RIGHT)) {
         return false;
     }
 
-    Object* actor = gLocalCoopPlayers[slot].actor;
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    Object* actor = player.actor;
     Object* sharedOwner = localCoopGetSharedInventoryOwner();
     if (actor == nullptr || sharedOwner == nullptr) {
         return false;
     }
 
-    if (actor != sharedOwner && item->owner != actor) {
-        if (itemMoveForce(sharedOwner, actor, item, 1) != 0) {
-            return false;
-        }
-    }
+    int previousActiveHand = localCoopGetActiveHand(player);
+    Object* previousHandItem = hand == HAND_LEFT ? critterGetItem1(actor) : critterGetItem2(actor);
+    bool borrowed = actor != sharedOwner && item->owner != actor;
 
-    if (_inven_wield(actor, item, hand) != 0) {
+    // Fallout's wield routine decides whether to apply the weapon FID from the
+    // current interface hand. Select the requested hand first so the logical
+    // slot, HUD hand, and critter weapon animation cannot diverge.
+    if (!localCoopSetActiveHand(slot, hand, false)) {
+        debugPrint("[COOP EQUIP] active-hand change failed slot=%d hand=%d pid=%d\n", slot, hand, item->pid);
         return false;
     }
+
+    if (borrowed && itemMoveForce(sharedOwner, actor, item, 1) != 0) {
+        localCoopSetActiveHand(slot, previousActiveHand, false);
+        debugPrint("[COOP EQUIP] shared move failed slot=%d hand=%d pid=%d\n", slot, hand, item->pid);
+        return false;
+    }
+
+    // The co-op inventory is live/non-pausing, so equip immediately instead of
+    // relying on a reserved animation sequence that can collide with steering.
+    int wieldRc = _invenWieldFunc(actor, item, hand, false);
+    if (wieldRc != 0) {
+        if (borrowed && item->owner == actor) {
+            itemMoveForce(actor, sharedOwner, item, 1);
+        }
+        localCoopSetActiveHand(slot, previousActiveHand, false);
+        debugPrint("[COOP EQUIP] wield failed slot=%d hand=%d pid=%d rc=%d actorFid=%08X\n",
+            slot,
+            hand,
+            item->pid,
+            wieldRc,
+            actor->fid);
+        return false;
+    }
+
+    if (previousHandItem != nullptr && previousHandItem != item && actor != sharedOwner && previousHandItem->owner == actor) {
+        previousHandItem->flags &= ~OBJECT_IN_ANY_HAND;
+        itemMoveForce(actor, sharedOwner, previousHandItem, 1);
+    }
+
+    localCoopSyncActiveHandVisual(slot);
 
     if (actor == gDude && gInterfaceBarWindow != -1) {
         interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
     }
+
+    Object* left = critterGetItem1(actor);
+    Object* right = critterGetItem2(actor);
+    debugPrint("[COOP EQUIP] success slot=%d hand=%d pid=%d flags=%08X leftPid=%d rightPid=%d actorFid=%08X\n",
+        slot,
+        hand,
+        item->pid,
+        item->flags,
+        left != nullptr ? left->pid : -1,
+        right != nullptr ? right->pid : -1,
+        actor->fid);
     return true;
 }
 
 inline bool localCoopUnequipToSharedPool(int slot, int hand)
 {
-    if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers || (hand != HAND_LEFT && hand != HAND_RIGHT)) {
         return false;
     }
 
@@ -598,7 +688,9 @@ inline bool localCoopUnequipToSharedPool(int slot, int hand)
         return true;
     }
 
-    if (_inven_unwield(actor, hand) != 0) {
+    int itemPid = item->pid;
+    if (_invenUnwieldFunc(actor, hand, 0) != 0) {
+        debugPrint("[COOP EQUIP] unwield failed slot=%d hand=%d pid=%d\n", slot, hand, itemPid);
         return false;
     }
 
@@ -607,9 +699,13 @@ inline bool localCoopUnequipToSharedPool(int slot, int hand)
         itemMoveForce(actor, sharedOwner, item, 1);
     }
 
+    localCoopSyncActiveHandVisual(slot);
+
     if (actor == gDude && gInterfaceBarWindow != -1) {
         interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
     }
+
+    debugPrint("[COOP EQUIP] unequip success slot=%d hand=%d pid=%d\n", slot, hand, itemPid);
     return true;
 }
 
