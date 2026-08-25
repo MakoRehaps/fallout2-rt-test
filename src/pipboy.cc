@@ -421,7 +421,8 @@ int pipboyOpen(int intent)
         return -1;
     }
 
-    bool worldMapIntent = intent == PIPBOY_OPEN_INTENT_WORLD_MAP;
+    bool worldMapIntent = intent == PIPBOY_OPEN_INTENT_WORLD_MAP
+        || intent == PIPBOY_OPEN_INTENT_UNSPECIFIED;
     if (worldMapIntent) {
         gPipboyPrevTab = gPipboyTab;
         gPipboyTab = 1;
@@ -461,7 +462,7 @@ int pipboyOpen(int intent)
             break;
         }
 
-        if (worldMapIntent) {
+        if (worldMapIntent || gPipboyTab == 1) {
             if (keyCode == KEY_ARROW_UP) {
                 unifiedWorldSystemMovePipboySelection(unifiedCampaignGetActiveGame(), 0, -1);
                 pipboyWindowHandleWildernessMap(1024);
@@ -1816,14 +1817,42 @@ static void pipboyWindowRenderUnifiedWorldMap()
         selectedX,
         selectedY);
     windowDrawText(gPipboyWindow, line, 340, left, 320, _colorTable[992]);
+    int roadMask = unifiedWorldSystemRoadMask(game);
+    const char* heading = "N";
+    switch (static_cast<UnifiedWorldSystemRoadDirection>(
+        travel.lastRoadDirection[gameIndex])) {
+    case UnifiedWorldSystemRoadDirection::East:
+        heading = "E";
+        break;
+    case UnifiedWorldSystemRoadDirection::South:
+        heading = "S";
+        break;
+    case UnifiedWorldSystemRoadDirection::West:
+        heading = "W";
+        break;
+    default:
+        break;
+    }
+    snprintf(
+        line,
+        sizeof(line),
+        "ROADS %c%c%c%c   HEADING %s   MAP %d/%d",
+        (roadMask & (1 << 0)) != 0 ? 'N' : '-',
+        (roadMask & (1 << 1)) != 0 ? 'E' : '-',
+        (roadMask & (1 << 2)) != 0 ? 'S' : '-',
+        (roadMask & (1 << 3)) != 0 ? 'W' : '-',
+        heading,
+        state.activeChain.valid ? state.activeChain.depth + 1 : 0,
+        state.activeChain.valid ? state.activeChain.length : 0);
+    windowDrawText(gPipboyWindow, line, 340, left, 338, _colorTable[992]);
     windowDrawText(
         gPipboyWindow,
-        "ARROWS: MOVE TARGET   ENTER: TRAVEL   ESC: CANCEL",
+        "ARROWS: MOVE GUIDE   ENTER: SET TARGET   ESC: CLOSE",
         340,
         left,
-        338,
+        354,
         _colorTable[992]);
-    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 366, _colorTable[992]);
+    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 374, _colorTable[992]);
 
     int logLines = std::min(static_cast<int>(state.logCount), 4);
     for (int index = 0; index < logLines; index++) {
@@ -1840,7 +1869,7 @@ static void pipboyWindowRenderUnifiedWorldMap()
             entry.cellX,
             entry.cellY,
             entry.mapIdx);
-        windowDrawText(gPipboyWindow, line, 340, left, 386 + index * 17, _colorTable[992]);
+        windowDrawText(gPipboyWindow, line, 340, left, 392 + index * 17, _colorTable[992]);
     }
 
     windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
