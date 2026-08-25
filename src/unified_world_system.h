@@ -24,6 +24,9 @@ inline constexpr uint32_t kUnifiedWorldSystemChunkMagic = 0x31535755; // "UWS1"
 inline constexpr uint32_t kUnifiedWorldSystemChunkVersion = 2;
 inline constexpr uint32_t kUnifiedWorldSystemDefaultSeed = 0x5753544D;
 inline constexpr uint32_t kUnifiedWorldSystemEventLifetime = 7 * 864000;
+inline constexpr uint32_t kUnifiedWorldSystemGameDayTicks = 864000;
+inline constexpr uint32_t kUnifiedWorldSystemEncounterRegenMinimumDays = 3;
+inline constexpr uint32_t kUnifiedWorldSystemEncounterRegenVariableDays = 5;
 
 enum UnifiedWorldSystemCellFlags : uint8_t {
     UNIFIED_WORLD_CELL_DISCOVERED = 0x01,
@@ -48,7 +51,8 @@ enum class UnifiedWorldSystemLogType : uint8_t {
     SpecialEncounter = 4,
     DungeonCreated = 5,
     DungeonExpired = 6,
-    MapVisited = 7,
+    MapVisited = 7;
+    EncounterRegenerated = 8,
 };
 
 struct UnifiedWorldSystemCellState {
@@ -353,6 +357,69 @@ inline void unifiedWorldSystemExpireDungeon(
         gameTime);
 }
 
+inline uint32_t unifiedWorldSystemEncounterRegenDelay(
+    const UnifiedWorldSystemCellState& cell)
+{
+    uint32_t extraDays = cell.seed % kUnifiedWorldSystemEncounterRegenVariableDays;
+    return (kUnifiedWorldSystemEncounterRegenMinimumDays + extraDays)
+        * kUnifiedWorldSystemGameDayTicks;
+}
+
+inline bool unifiedWorldSystemRegenerateCellIfReady(
+    UnifiedGameId game,
+    int cellX,
+    int cellY,
+    UnifiedWorldSystemCellState& cell,
+    uint32_t gameTime)
+{
+    if ((cell.flags & UNIFIED_WORLD_CELL_CLEARED) == 0
+        || (cell.flags & (UNIFIED_WORLD_CELL_ACTIVE_EVENT
+                             | UNIFIED_WORLD_CELL_TEMPORARY_DUNGEON))
+            != 0
+        || cell.lastVisitGameTime <= 0
+        || gameTime < static_cast<uint32_t>(cell.lastVisitGameTime)) {
+        return false;
+    }
+
+    uint32_t elapsed =
+        gameTime - static_cast<uint32_t>(cell.lastVisitGameTime);
+    uint32_t delay = unifiedWorldSystemEncounterRegenDelay(cell);
+    if (elapsed < delay) {
+        return false;
+    }
+
+    int previousMap = cell.templateMapIdx;
+    uint32_t cellSalt = static_cast<uint32_t>(
+        unifiedWorldSystemCellIndex(cellX, cellY) + 1);
+    cell.seed = unifiedWorldSystemMixSeed(
+        cell.seed
+        ^ gameTime
+        ^ (cellSalt * 0x9E3779B9)
+        ^ 0x52454745); // "REGE"
+    cell.templateMapIdx = static_cast<int16_t>(
+        unifiedWorldSystemPoolMap(game, cell.seed));
+    cell.chainLength = static_cast<uint8_t>(
+        1 + cell.seed % kUnifiedWorldSystemMaxChainMaps);
+    cell.chainDepth = 0;
+    cell.flags &= ~UNIFIED_WORLD_CELL_CLEARED;
+    cell.lastVisitGameTime = static_cast<int32_t>(gameTime);
+    for (int index = 0; index < kUnifiedWorldSystemMaxChainMaps; index++) {
+        cell.chainMaps[index] = -1;
+    }
+
+    unifiedWorldSystemAppendLog(
+        UnifiedWorldSystemLogType::EncounterRegenerated,
+        game,
+        cellX,
+        cellY,
+        cell.templateMapIdx,
+        static_cast<int>(delay / kUnifiedWorldSystemGameDayTicks),
+        gameTime);
+
+    (void)previousMap;
+    return true;
+}
+
 inline void unifiedWorldSystemPrepareCell(
     UnifiedGameId game,
     int cellX,
@@ -366,6 +433,12 @@ inline void unifiedWorldSystemPrepareCell(
     }
 
     unifiedWorldSystemExpireDungeon(game, cellX, cellY, *cell, gameTime);
+    unifiedWorldSystemRegenerateCellIfReady(
+        game,
+        cellX,
+        cellY,
+        *cell,
+        gameTime);
     if (cell->templateMapIdx == -1) {
         cell->templateMapIdx = static_cast<int16_t>(
             unifiedWorldSystemPoolContains(game, preferredMap)
@@ -841,6 +914,7 @@ inline bool unifiedWorldSystemAdvanceEncounter(
         if (cell != nullptr) {
             cell->flags |= UNIFIED_WORLD_CELL_CLEARED;
             cell->chainDepth = active.depth;
+            cell->lastVisitGameTime = static_cast<int32_t>(gameTime);
         }
         unifiedWorldSystemAppendLog(
             UnifiedWorldSystemLogType::ChainCleared,
