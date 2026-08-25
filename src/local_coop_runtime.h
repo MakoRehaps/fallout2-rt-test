@@ -8,6 +8,7 @@
 
 #include "combat.h"
 #include "critter.h"
+#include "debug.h"
 #include "game.h"
 #include "input.h"
 #include "item.h"
@@ -86,7 +87,9 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
     }
 
     if (actor == sharedOwner) {
-        return weaponAttemptReload(actor, weapon) != -1;
+        int rc = weaponAttemptReload(actor, weapon);
+        debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d\n", player.slot, weapon->pid, rc);
+        return rc != -1;
     }
 
     Inventory& inventory = sharedOwner->data.inventory;
@@ -102,15 +105,19 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
     }
 
     if (compatibleAmmo == nullptr) {
+        debugPrint("[COOP RELOAD] slot=%d pid=%d no-compatible-ammo\n", player.slot, weapon->pid);
         return false;
     }
 
     if (itemMoveForce(sharedOwner, actor, compatibleAmmo, 1) != 0) {
+        debugPrint("[COOP RELOAD] slot=%d pid=%d ammo-move-failed\n", player.slot, weapon->pid);
         return false;
     }
 
-    bool reloaded = weaponAttemptReload(actor, weapon) != -1;
+    int reloadRc = weaponAttemptReload(actor, weapon);
+    bool reloaded = reloadRc != -1;
     localCoopSweepSharedInventory();
+    debugPrint("[COOP RELOAD] slot=%d pid=%d rc=%d\n", player.slot, weapon->pid, reloadRc);
     return reloaded;
 }
 
@@ -122,28 +129,66 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     }
 
     if (animationIsBusy(actor)) {
-        reg_anim_clear(actor);
+        int clearRc = reg_anim_clear(actor);
+        if (clearRc == -2) {
+            debugPrint("[COOP ATTACK] slot=%d blocked-by-prioritized-actor-animation\n", player.slot);
+            return false;
+        }
     }
+
+    // Keep the actor's weapon code/FID synchronized with the same active hand
+    // that supplies hit mode/range/ammo to combat.
+    localCoopSyncActiveHandVisual(player.slot);
 
     LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
     Object* target = localCoopFocusFindEnemy(player);
     runtime.aimTarget = target;
     if (target == nullptr) {
+        debugPrint("[COOP ATTACK] slot=%d no-target aim=(%d,%d)\n", player.slot, player.aimX, player.aimY);
         return false;
     }
 
+    int hand = localCoopGetActiveHand(player);
+    Object* activeItem = localCoopGetActiveItem(player);
     int hitMode = localCoopGetHitMode(player, secondary);
+    int attackAnimation = critterGetAnimationForHitMode(actor, hitMode);
+    int weaponAnimationCode = activeItem != nullptr && itemGetType(activeItem) == ITEM_TYPE_WEAPON
+        ? weaponGetAnimationCode(activeItem)
+        : 0;
+
+    debugPrint("[COOP ATTACK] begin slot=%d secondary=%d actorId=%d targetId=%d hand=%d itemPid=%d hitMode=%d attackAnim=%d weaponAnim=%d actorFid=%08X distance=%d\n",
+        player.slot,
+        secondary ? 1 : 0,
+        actor->id,
+        target->id,
+        hand,
+        activeItem != nullptr ? activeItem->pid : -1,
+        hitMode,
+        attackAnimation,
+        weaponAnimationCode,
+        actor->fid,
+        objectGetDistanceBetween(actor, target));
+
     int savedActionPoints = actor->data.critter.combat.ap;
     actor->data.critter.combat.ap = 9999;
 
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO) {
+        debugPrint("[COOP ATTACK] no-ammo slot=%d itemPid=%d hitMode=%d\n",
+            player.slot,
+            activeItem != nullptr ? activeItem->pid : -1,
+            hitMode);
         localCoopReloadFromSharedPool(player);
         actor->data.critter.combat.ap = savedActionPoints;
         return false;
     }
 
     if (badShot != COMBAT_BAD_SHOT_OK) {
+        debugPrint("[COOP ATTACK] bad-shot slot=%d code=%d itemPid=%d hitMode=%d\n",
+            player.slot,
+            badShot,
+            activeItem != nullptr ? activeItem->pid : -1,
+            hitMode);
         actor->data.critter.combat.ap = savedActionPoints;
         return false;
     }
@@ -151,8 +196,22 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     int rc = _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
     actor->data.critter.combat.ap = savedActionPoints;
     if (rc != 0) {
+        debugPrint("[COOP ATTACK] sequence-failed slot=%d rc=%d hand=%d itemPid=%d hitMode=%d attackAnim=%d actorFid=%08X\n",
+            player.slot,
+            rc,
+            hand,
+            activeItem != nullptr ? activeItem->pid : -1,
+            hitMode,
+            attackAnimation,
+            actor->fid);
         return false;
     }
+
+    debugPrint("[COOP ATTACK] sequence-ok slot=%d hand=%d itemPid=%d hitMode=%d\n",
+        player.slot,
+        hand,
+        activeItem != nullptr ? activeItem->pid : -1,
+        hitMode);
 
     localCoopRealtimeAiEngageHostile(target, actor);
     gLocalCoopRealtimeCombatActive = true;
@@ -232,7 +291,7 @@ inline void localCoopProcessCombatInput()
         }
 
         if (swapDown && !runtime.swapWasDown) {
-            localCoopSwapActiveHand(player.slot, true);
+            localCoopSwapActiveHand(player.slot, false);
             runtime.aimTarget = localCoopFocusFindEnemy(player);
         }
 
@@ -326,6 +385,7 @@ inline void localCoopSetRealtimeCombatActive(bool active)
             runtime.nextSecondaryAttackTick = 0;
             runtime.nextReloadTick = 0;
             gLocalCoopFocusSlots[index].combatTarget = nullptr;
+            gLocalCoopFocusSlots[index].interactionTarget = nullptr;
         }
     }
 }
