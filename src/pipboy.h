@@ -11,6 +11,9 @@ typedef enum PipboyOpenIntent {
     PIPBOY_OPEN_INTENT_WORLD_MAP = 2,
 } PipboyOpenIntent;
 
+// The combined co-op game exposes its own handset/menu identity. The legacy
+// name remains as a compatibility entry point for engine and script callers.
+int phoboiOpen(int intent);
 int pipboyOpen(int intent);
 void pipboyInit();
 void pipboyReset();
