@@ -81,12 +81,68 @@ inline Object* localCoopFindSimplePickup(LocalCoopPlayer& player)
     return nullptr;
 }
 
+inline bool localCoopAttackPlayerOneTarget(Object* target)
+{
+    if (!gLocalCoopInitialized || target == nullptr) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    Object* actor = player.actor;
+    if (actor == nullptr
+        || actor != gDude
+        || !player.humanOwned
+        || player.uiMode != LocalCoopUiMode::World
+        || target == actor
+        || localCoopActorIsHumanOwned(target)
+        || FID_TYPE(target->fid) != OBJ_TYPE_CRITTER
+        || (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+        || target->data.critter.combat.team == actor->data.critter.combat.team) {
+        return false;
+    }
+
+    if (animationIsBusy(actor)) {
+        reg_anim_clear(actor);
+    }
+
+    Object* weapon = localCoopGetActiveItem(player);
+    int hitMode = localCoopGetPrimaryHitMode(player);
+    int savedActionPoints = actor->data.critter.combat.ap;
+
+    actor->data.critter.combat.ap = 9999;
+    int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
+    if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
+        weaponAttemptReload(actor, weapon);
+        badShot = _combat_check_bad_shot(actor, target, hitMode, false);
+    }
+
+    bool attacked = false;
+    if (badShot == COMBAT_BAD_SHOT_OK
+        && _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0) {
+        localCoopRealtimeAiEngageHostile(target, actor);
+        attacked = true;
+    }
+
+    actor->data.critter.combat.ap = savedActionPoints;
+    if (gInterfaceBarWindow != -1) {
+        interfaceRenderActionPoints(-1, -1);
+    }
+    return attacked;
+}
+
 inline bool localCoopPlayerOneInteract()
 {
     LocalCoopPlayer& player = gLocalCoopPlayers[0];
     Object* actor = player.actor;
     if (actor == nullptr || actor != gDude || player.uiMode != LocalCoopUiMode::World) {
         return false;
+    }
+
+    // A is a context action in the realtime game. A hostile under the reticle is
+    // attacked immediately; otherwise the same button keeps normal Fallout use.
+    Object* hostile = localCoopFocusFindEnemy(player);
+    if (hostile != nullptr && (player.aimX != 0 || player.aimY != 0 || gLocalCoopDangerActive)) {
+        return localCoopAttackPlayerOneTarget(hostile);
     }
 
     Object* target = localCoopFocusFindInteractable(player);
@@ -98,6 +154,10 @@ inline bool localCoopPlayerOneInteract()
     if (objectType == OBJ_TYPE_CRITTER) {
         if ((target->data.critter.combat.results & DAM_DEAD) != 0) {
             return localCoopLiveLootRequest(actor, target);
+        }
+
+        if (target->data.critter.combat.team != actor->data.critter.combat.team) {
+            return localCoopAttackPlayerOneTarget(target);
         }
 
         if (_action_can_talk_to(actor, target) == 0) {
@@ -242,41 +302,7 @@ inline bool localCoopMouseAttackPlayerOne(Object* target)
     if (!localCoopMouseCanControlPlayerOne() || target == nullptr) {
         return false;
     }
-
-    LocalCoopPlayer& player = gLocalCoopPlayers[0];
-    Object* actor = player.actor;
-    if (target == actor
-        || localCoopActorIsHumanOwned(target)
-        || FID_TYPE(target->fid) != OBJ_TYPE_CRITTER
-        || (target->data.critter.combat.results & DAM_DEAD) != 0) {
-        return false;
-    }
-
-    if (animationIsBusy(actor)) {
-        reg_anim_clear(actor);
-    }
-
-    Object* weapon = localCoopGetActiveItem(player);
-    int hitMode = localCoopGetPrimaryHitMode(player);
-    int savedActionPoints = actor->data.critter.combat.ap;
-
-    actor->data.critter.combat.ap = 9999;
-    int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
-    if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
-        weaponAttemptReload(actor, weapon);
-        badShot = _combat_check_bad_shot(actor, target, hitMode, false);
-    }
-
-    if (badShot == COMBAT_BAD_SHOT_OK
-        && _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED) == 0) {
-        localCoopRealtimeAiEngageHostile(target, actor);
-    }
-
-    actor->data.critter.combat.ap = savedActionPoints;
-    if (gInterfaceBarWindow != -1) {
-        interfaceRenderActionPoints(-1, -1);
-    }
-    return true;
+    return localCoopAttackPlayerOneTarget(target);
 }
 
 inline bool localCoopMouseInteractOrAttackPlayerOne()
@@ -302,7 +328,7 @@ inline bool localCoopMouseInteractOrAttackPlayerOne()
         }
 
         if (target->data.critter.combat.team != actor->data.critter.combat.team) {
-            return localCoopMouseAttackPlayerOne(target);
+            return localCoopAttackPlayerOneTarget(target);
         }
 
         if (_action_can_talk_to(actor, target) == 0) {
