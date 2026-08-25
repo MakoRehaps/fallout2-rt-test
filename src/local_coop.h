@@ -31,6 +31,8 @@
 
 namespace fallout {
 
+void scriptsRequestWorldMap();
+
 inline constexpr int kLocalCoopMaxPlayers = 4;
 inline constexpr int kLocalCoopControllerDeadzone = 9000;
 inline constexpr int kLocalCoopCameraTetherTiles = 18;
@@ -959,6 +961,17 @@ inline void localCoopPollControllers()
         }
 
         reg_anim_end();
+
+        if (isExitGridAt(destination, actor->elevation)) {
+            localCoopMarkMapExitTile(destination);
+            debugPrint(
+                "[COOP MAP EXIT] slot=%d actorId=%d tile=%d elevation=%d\n",
+                player.slot,
+                actor->id,
+                destination,
+                actor->elevation);
+            scriptsRequestWorldMap();
+        }
     }
 }
 
