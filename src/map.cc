@@ -1321,7 +1321,9 @@ int mapHandleTransition()
             // Alert hostiles occupy the linked road graph too. Transfer them
             // out of the old map before it is saved, then restore them beside
             // the party after the destination map finishes loading.
-            localCoopRealtimeAiCapturePursuers();
+            localCoopRealtimeAiCapturePursuers(
+                exitTile,
+                static_cast<int>(travel.lastRoadDirection[gameIndex]));
             localCoopDangerEnd();
             gMapTransition.map = nextMap;
             gMapTransition.elevation = 0;
