@@ -91,6 +91,11 @@ static const int _map_data_elev_flags[ELEVATION_COUNT] = {
 // 0x519550
 static unsigned int gIsoWindowScrollTimestamp = 0;
 
+// Prevent a broken exit script from retrying a failed physical-road load every
+// frame while the party is still standing on the same exit grid.
+static unsigned int gRoadTransitionFailureTimestamp = 0;
+static int gRoadTransitionFailureMap = -1;
+
 // 0x519554
 static bool gIsoEnabled = false;
 
@@ -1231,6 +1236,13 @@ int mapSetTransition(MapTransition* transition)
         gMapTransition.map = -2;
     }
 
+    if (gMapTransition.map == -2
+        && gRoadTransitionFailureMap == gMapHeader.field_34
+        && getTicksSince(gRoadTransitionFailureTimestamp) < 1000) {
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
+        return 0;
+    }
+
     debugPrint(
         "[COOP MAP EXIT] transition queued currentMap=%d requested=%d normalized=%d combat=%d\n",
         gMapHeader.field_34,
@@ -1267,8 +1279,14 @@ int mapHandleTransition()
         UnifiedWorldSystemRoadDirection direction =
             unifiedWorldSystemRoadDirectionFromTile(exitTile);
 
-        const UnifiedWorldSystemTravelState& before =
-            unifiedWorldSystemGetStateConst().travel;
+        // Traversal prepares the destination cell and chain before loading.
+        // Keep an exact snapshot so a missing/corrupt map cannot move the save
+        // to a cell the party never actually entered.
+        UnifiedWorldSystemState worldSystemBefore =
+            unifiedWorldSystemGetStateConst();
+        UnifiedFallout1WorldMapState fallout1WorldBefore =
+            unifiedFallout1WorldMapGetStateConst();
+        const UnifiedWorldSystemTravelState& before = worldSystemBefore.travel;
         int gameIndex = unifiedWorldSystemGameIndex(game);
         int fromX = before.currentCellX[gameIndex];
         int fromY = before.currentCellY[gameIndex];
@@ -1331,6 +1349,26 @@ int mapHandleTransition()
             gMapTransition.rotation = 0;
             int loadRc = mapLoadById(nextMap);
             localCoopRealtimeAiRestorePursuers();
+            if (loadRc == 0) {
+                gRoadTransitionFailureMap = -1;
+                gRoadTransitionFailureTimestamp = 0;
+            } else {
+                unifiedWorldSystemGetState() = worldSystemBefore;
+                if (game == UnifiedGameId::Fallout1) {
+                    unifiedFallout1WorldMapSetState(fallout1WorldBefore);
+                    unifiedFallout1SetEncounterRegionGlobal(
+                        unifiedFallout1EncounterRegionAt(
+                            fallout1WorldBefore.worldX,
+                            fallout1WorldBefore.worldY));
+                }
+                gRoadTransitionFailureMap = gMapHeader.field_34;
+                gRoadTransitionFailureTimestamp = getTicks();
+                debugPrint(
+                    "[COOP ROAD] rolled back failed destination map=%d cell=%d,%d\n",
+                    nextMap,
+                    fromX,
+                    fromY);
+            }
             debugPrint(
                 "[COOP ROAD] load map=%d rc=%d now=%d\n",
                 nextMap,
