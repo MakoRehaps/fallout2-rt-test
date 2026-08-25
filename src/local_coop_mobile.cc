@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include <zlib.h>
+
 #include "qrcodegen.hpp"
 
 #ifdef _WIN32
@@ -33,6 +35,7 @@
 #include "debug.h"
 #include "display_monitor.h"
 #include "local_coop.h"
+#include "svga.h"
 #include "kb.h"
 
 namespace fallout {
@@ -40,6 +43,10 @@ namespace {
 
 constexpr int kMobilePort = 27888;
 constexpr uint64_t kMobileTimeoutMs = 60000;
+constexpr uint64_t kMobileInputNeutralMs = 750;
+constexpr uint64_t kMobileBadLinkNeutralMs = 1400;
+constexpr int kMobileNominalPacketMs = 16;
+// PHOBOI_ADAPTIVE_REMOTE_PLAY_V2
 
 #ifdef _WIN32
 using MobileSocket = SOCKET;
@@ -55,12 +62,24 @@ struct MobileSlotState {
     std::atomic<uint32_t> token { 0 };
     std::atomic<uint64_t> lastSeen { 0 };
     std::array<std::atomic<int>, SDL_CONTROLLER_AXIS_MAX> axes;
+    std::array<int, SDL_CONTROLLER_AXIS_MAX> smoothedAxes {};
     std::atomic<uint32_t> buttons { 0 };
+    std::atomic<uint32_t> packetSequence { 0 };
+    std::atomic<uint64_t> previousArrival { 0 };
+    std::atomic<int> packetIntervalMs { kMobileNominalPacketMs };
+    std::atomic<int> jitterMs { 0 };
+    std::atomic<int> rttMs { 0 };
 
     MobileSlotState()
     {
         for (auto& axis : axes) {
             axis.store(0);
+        }
+        for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
+            smoothedAxes[axis] =
+                axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT
+                    ? SDL_JOYSTICK_AXIS_MIN
+                    : 0;
         }
         axes[SDL_CONTROLLER_AXIS_TRIGGERLEFT].store(SDL_JOYSTICK_AXIS_MIN);
         axes[SDL_CONTROLLER_AXIS_TRIGGERRIGHT].store(SDL_JOYSTICK_AXIS_MIN);
@@ -82,6 +101,10 @@ std::vector<std::thread> gMobileClientThreads;
 MobileSocket gMobileListenSocket = kInvalidMobileSocket;
 int gMobilePin = 0;
 bool gMobileNoticeShown = false;
+std::mutex gMobileStreamMutex;
+std::vector<uint8_t> gMobileStreamFrame;
+std::atomic<uint32_t> gMobileStreamSequence { 0 };
+std::atomic<uint64_t> gMobileLastStreamCapture { 0 };
 
 #ifdef _WIN32
 HANDLE gCloudflareProcess = nullptr;
@@ -160,7 +183,7 @@ const char* mobileControllerHtml()
 .panel{border:2px solid #4dbd68;padding:20px;width:min(92vw,420px);box-shadow:0 0 28px #174d29}
 h1{margin:0 0 14px;font-size:25px}.row{display:flex;gap:8px;margin-top:10px}input,select,button{font:inherit;color:#d7ffd7;background:#102218;border:1px solid #4dbd68;padding:12px}
 input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margin-top:10px;color:#ffd56a}
-#pad{display:none;position:fixed;inset:0;background:radial-gradient(circle at center,#183321,#07100b)}
+#pad{display:none;position:fixed;inset:0;background:radial-gradient(circle at center,#183321,#07100b)}#video{position:absolute;left:18vw;top:3vh;width:64vw;height:55vh;object-fit:contain;background:#000;border:1px solid #295f37;image-rendering:auto}
 .top{position:absolute;left:0;right:0;top:7px;text-align:center;font-size:13px}
 .stick{position:absolute;width:31vw;height:31vw;max-width:220px;max-height:220px;border:3px solid #4dbd68;border-radius:50%;background:#0b1c11aa}
 #ls{left:5vw;bottom:8vh}#rs{right:31vw;bottom:8vh}.nub{position:absolute;width:38%;height:38%;left:31%;top:31%;border-radius:50%;background:#68dd82}
@@ -180,7 +203,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 <div class="row"><input id="pin" inputmode="numeric" maxlength="6" placeholder="Session PIN"></div>
 <div class="row"><select id="slot"><option value="1">Player 2</option><option value="2">Player 3</option><option value="3">Player 4</option></select><button id="connect">CONNECT</button></div>
 <div class="status" id="msg"></div></div></div>
-<div id="pad"><div class="top" id="top">PHOBOI CONTROLLER</div>
+<div id="pad"><canvas id="video" width="640" height="360"></canvas><div class="top" id="top">PHOBOI CONTROLLER</div>
 <button class="small" id="lb">LB</button><button class="small" id="lt">LT</button>
 <button class="small" id="rb">RB</button><button class="small" id="rt">RT</button>
 <button class="small" id="back">PHOBOI</button><button class="small" id="start">START</button><button class="small" id="skill">SKILLDEX</button>
@@ -189,7 +212,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 <div class="dpad"><button class="du" id="du">▲</button><button class="dl" id="dl">◀</button><button class="dr" id="dr">▶</button><button class="dd" id="dd">▼</button></div>
 </div>
 <script>
-let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false;
+let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false,seq=0,rtt=0,jitter=0,lastRtt=0,stream=null;
 const $=id=>document.getElementById(id);
 $('pin').value=new URLSearchParams(location.search).get('pin')||'';
 function bindButton(id,bit,axis){
@@ -221,12 +244,30 @@ function openSocket(){
  if(slot<0)return;
  const scheme=location.protocol==='https:'?'wss':'ws';
  ws=new WebSocket(`${scheme}://${location.host}/ws?slot=${slot}&token=${token}`);
- ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — LOW LATENCY`;navigator.vibrate?.(35)};
+ ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — CONNECTED`;navigator.vibrate?.(35);openStream()};
+ ws.onmessage=ev=>{
+  const m=String(ev.data||'').split(',');if(m[0]!=='a'||m.length<3)return;
+  const sent=Number(m[2]);if(!Number.isFinite(sent))return;
+  const sample=Math.max(0,performance.now()-sent),delta=Math.abs(sample-lastRtt);lastRtt=sample;
+  rtt=rtt?Math.round(rtt*.82+sample*.18):Math.round(sample);jitter=jitter?Math.round(jitter*.8+delta*.2):Math.round(delta);
+  const grade=rtt<55&&jitter<15?'EXCELLENT':rtt<100&&jitter<30?'GOOD':rtt<220&&jitter<70?'OK':'ROUGH';
+  $('top').textContent=`PLAYER ${slot+1} — ${grade} ${rtt}ms ±${jitter}`;
+ };
  ws.onclose=()=>{$('top').textContent='RECONNECTING…';if(slot>=0)reconnectTimer=setTimeout(openSocket,700)};
+}
+async function inflateFrame(buf){
+ const u=new Uint8Array(buf);if(u.length<12)return;const dv=new DataView(buf);const w=dv.getUint16(4,true),h=dv.getUint16(6,true);const payload=buf.slice(12);
+ const ds=new DecompressionStream('deflate');const raw=await new Response(new Blob([payload]).stream().pipeThrough(ds)).arrayBuffer();
+ const rgba=new Uint8ClampedArray(raw);if(rgba.length!==w*h*4)return;const c=$('video');if(c.width!==w||c.height!==h){c.width=w;c.height=h}c.getContext('2d').putImageData(new ImageData(rgba,w,h),0,0);
+}
+function openStream(){
+ if(slot<0||!('DecompressionStream'in window))return;const scheme=location.protocol==='https:'?'wss':'ws';stream=new WebSocket(`${scheme}://${location.host}/stream?slot=${slot}&token=${token}`);stream.binaryType='arraybuffer';
+ stream.onmessage=e=>inflateFrame(e.data).catch(()=>{});stream.onclose=()=>{if(slot>=0)setTimeout(openStream,1200)};
 }
 async function send(){
  if(slot<0)return;
- const packet=[axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
+ const stamp=performance.now();
+ const packet=[++seq,stamp,Math.round(rtt),Math.round(jitter),axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
  if(ws&&ws.readyState===WebSocket.OPEN){ws.send(packet);return}
  if(sending)return;sending=true;
  try{const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});await fetch('/input',{method:'POST',body,keepalive:true})}catch(e){}
@@ -456,6 +497,53 @@ bool mobileWaitReadable(MobileSocket socket, int milliseconds)
 #endif
 }
 
+bool mobileSendWebSocketText(MobileSocket socket, const std::string& text)
+{
+    if (text.size() > 125) return false;
+    uint8_t header[2] = { 0x81, static_cast<uint8_t>(text.size()) };
+#ifdef _WIN32
+    if (send(socket, reinterpret_cast<const char*>(header), 2, 0) != 2) return false;
+    return send(socket, text.c_str(), static_cast<int>(text.size()), 0) == static_cast<int>(text.size());
+#else
+    if (send(socket, header, 2, 0) != 2) return false;
+    return send(socket, text.c_str(), text.size(), 0) == static_cast<ssize_t>(text.size());
+#endif
+}
+
+bool mobileSendWebSocketBinary(MobileSocket socket, const std::vector<uint8_t>& bytes)
+{
+    if (bytes.empty() || bytes.size() > 2097152) return false;
+    uint8_t header[10] = { 0x82, 0 };
+    size_t headerLength = 0;
+    if (bytes.size() < 126) {
+        header[1] = static_cast<uint8_t>(bytes.size()); headerLength = 2;
+    } else if (bytes.size() <= 65535) {
+        header[1] = 126; header[2] = static_cast<uint8_t>((bytes.size() >> 8) & 0xFF); header[3] = static_cast<uint8_t>(bytes.size() & 0xFF); headerLength = 4;
+    } else {
+        header[1] = 127; uint64_t n = bytes.size(); for (int i = 0; i < 8; i++) header[2 + i] = static_cast<uint8_t>((n >> ((7 - i) * 8)) & 0xFF); headerLength = 10;
+    }
+#ifdef _WIN32
+    if (send(socket, reinterpret_cast<const char*>(header), static_cast<int>(headerLength), 0) != static_cast<int>(headerLength)) return false;
+    size_t offset = 0; while (offset < bytes.size()) { int sent = send(socket, reinterpret_cast<const char*>(bytes.data() + offset), static_cast<int>(bytes.size() - offset), 0); if (sent <= 0) return false; offset += static_cast<size_t>(sent); } return true;
+#else
+    if (send(socket, header, headerLength, 0) != static_cast<ssize_t>(headerLength)) return false;
+    size_t offset = 0; while (offset < bytes.size()) { ssize_t sent = send(socket, bytes.data() + offset, bytes.size() - offset, 0); if (sent <= 0) return false; offset += static_cast<size_t>(sent); } return true;
+#endif
+}
+
+void mobileRecordArrival(MobileSlotState& state, uint64_t now)
+{
+    uint64_t previous = state.previousArrival.exchange(now);
+    if (previous == 0 || now <= previous) return;
+    int sample = static_cast<int>(std::min<uint64_t>(1000, now - previous));
+    int oldInterval = state.packetIntervalMs.load();
+    int interval = (oldInterval * 7 + sample) / 8;
+    state.packetIntervalMs.store(std::max(1, interval));
+    int deviation = std::abs(sample - interval);
+    int oldJitter = state.jitterMs.load();
+    state.jitterMs.store((oldJitter * 7 + deviation) / 8);
+}
+
 bool mobileReadWebSocketText(MobileSocket socket, std::string& text)
 {
     uint8_t header[2];
@@ -556,6 +644,10 @@ void mobileRunWebSocket(
             continue;
         }
 
+        unsigned int sequence = 0;
+        double clientStamp = 0.0;
+        int clientRtt = 0;
+        int clientJitter = 0;
         int lx;
         int ly;
         int rx;
@@ -565,7 +657,11 @@ void mobileRunWebSocket(
         unsigned int buttons;
         if (sscanf(
                 message.c_str(),
-                "%d,%d,%d,%d,%d,%d,%u",
+                "%u,%lf,%d,%d,%d,%d,%d,%d,%d,%d,%u",
+                &sequence,
+                &clientStamp,
+                &clientRtt,
+                &clientJitter,
                 &lx,
                 &ly,
                 &rx,
@@ -573,7 +669,12 @@ void mobileRunWebSocket(
                 &lt,
                 &rt,
                 &buttons)
-            == 7) {
+            == 11) {
+            uint64_t arrival = mobileNow();
+            mobileRecordArrival(state, arrival);
+            state.packetSequence.store(sequence);
+            state.rttMs.store(std::max(0, std::min(clientRtt, 5000)));
+            state.jitterMs.store(std::max(state.jitterMs.load(), std::max(0, std::min(clientJitter, 2000))));
             state.axes[SDL_CONTROLLER_AXIS_LEFTX].store(lx);
             state.axes[SDL_CONTROLLER_AXIS_LEFTY].store(ly);
             state.axes[SDL_CONTROLLER_AXIS_RIGHTX].store(rx);
@@ -581,11 +682,109 @@ void mobileRunWebSocket(
             state.axes[SDL_CONTROLLER_AXIS_TRIGGERLEFT].store(lt);
             state.axes[SDL_CONTROLLER_AXIS_TRIGGERRIGHT].store(rt);
             state.buttons.store(buttons);
-            state.lastSeen.store(mobileNow());
+            state.lastSeen.store(arrival);
+            std::ostringstream ack; ack << "a," << sequence << "," << clientStamp;
+            if (!mobileSendWebSocketText(socket, ack.str())) break;
         }
     }
 
     mobileResetInput(state);
+}
+
+void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, int slot, uint32_t token)
+{
+    std::string key = mobileHeaderValue(request, "Sec-WebSocket-Key");
+    if (key.empty()) return;
+    auto digest = mobileSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    std::string accept = mobileBase64(digest.data(), digest.size());
+    std::ostringstream response;
+    response << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " << accept << "\r\n\r\n";
+    std::string bytes = response.str();
+#ifdef _WIN32
+    send(socket, bytes.c_str(), static_cast<int>(bytes.size()), 0);
+#else
+    send(socket, bytes.c_str(), bytes.size(), 0);
+#endif
+    uint32_t sentSequence = 0;
+    while (gMobileServerRunning.load() && gMobileSlots[slot].claimed.load() && gMobileSlots[slot].token.load() == token) {
+        uint32_t available = gMobileStreamSequence.load();
+        if (available == sentSequence) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+        std::vector<uint8_t> frame;
+        { std::lock_guard<std::mutex> lock(gMobileStreamMutex); frame = gMobileStreamFrame; }
+        if (!frame.empty() && !mobileSendWebSocketBinary(socket, frame)) break;
+        sentSequence = available;
+    }
+}
+
+void mobileCaptureStreamFrame(uint64_t now)
+{
+    if (gSdlSurface == nullptr) return;
+    bool any = false;
+    int worstRtt = 0;
+    int worstJitter = 0;
+    int worstInterval = 0;
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        if (!gMobileSlots[slot].claimed.load()) continue;
+        any = true;
+        worstRtt = std::max(worstRtt, gMobileSlots[slot].rttMs.load());
+        worstJitter = std::max(worstJitter, gMobileSlots[slot].jitterMs.load());
+        worstInterval = std::max(worstInterval, gMobileSlots[slot].packetIntervalMs.load());
+    }
+    if (!any) return;
+
+    int width = 480;
+    int height = 270;
+    int fps = 12;
+    if (worstRtt <= 45 && worstJitter <= 12 && worstInterval <= 24) {
+        width = 1280; height = 720; fps = 30;
+    } else if (worstRtt <= 80 && worstJitter <= 20 && worstInterval <= 28) {
+        width = 960; height = 540; fps = 24;
+    } else if (worstRtt <= 140 && worstJitter <= 35 && worstInterval <= 40) {
+        width = 640; height = 360; fps = 20;
+    } else if (worstRtt <= 220 && worstJitter <= 60 && worstInterval <= 65) {
+        width = 480; height = 270; fps = 12;
+    } else if (worstRtt <= 350 && worstJitter <= 100 && worstInterval <= 110) {
+        width = 400; height = 225; fps = 8;
+    } else {
+        width = 320; height = 180; fps = 5;
+    }
+
+    uint64_t previous = gMobileLastStreamCapture.load();
+    if (previous != 0 && now - previous < static_cast<uint64_t>(1000 / fps)) return;
+    gMobileLastStreamCapture.store(now);
+
+    SDL_Surface* scaled = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+    if (scaled == nullptr) return;
+    SDL_Rect dst { 0, 0, width, height };
+    if (SDL_BlitScaled(gSdlSurface, nullptr, scaled, &dst) != 0) {
+        SDL_FreeSurface(scaled);
+        return;
+    }
+    size_t rawSize = static_cast<size_t>(width) * height * 4;
+    std::vector<uint8_t> raw(rawSize);
+    uint8_t* src = static_cast<uint8_t*>(scaled->pixels);
+    for (int y = 0; y < height; y++) {
+        std::memcpy(raw.data() + static_cast<size_t>(y) * width * 4,
+            src + static_cast<size_t>(y) * scaled->pitch,
+            static_cast<size_t>(width) * 4);
+    }
+    SDL_FreeSurface(scaled);
+
+    uLongf compressedSize = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<uint8_t> frame(12 + compressedSize);
+    frame[0] = 'P'; frame[1] = 'H'; frame[2] = 'O'; frame[3] = 'B';
+    frame[4] = width & 0xFF; frame[5] = (width >> 8) & 0xFF;
+    frame[6] = height & 0xFF; frame[7] = (height >> 8) & 0xFF;
+    uint32_t sequence = gMobileStreamSequence.load() + 1;
+    frame[8] = sequence & 0xFF; frame[9] = (sequence >> 8) & 0xFF;
+    frame[10] = (sequence >> 16) & 0xFF; frame[11] = (sequence >> 24) & 0xFF;
+    if (compress2(frame.data() + 12, &compressedSize, raw.data(), static_cast<uLong>(raw.size()), Z_BEST_SPEED) != Z_OK) return;
+    frame.resize(12 + compressedSize);
+    { std::lock_guard<std::mutex> lock(gMobileStreamMutex); gMobileStreamFrame.swap(frame); }
+    gMobileStreamSequence.store(sequence);
 }
 
 void mobileResetInput(MobileSlotState& state)
@@ -642,6 +841,16 @@ void mobileHandleClient(MobileSocket client)
             return;
         }
         mobileRunWebSocket(client, request, slot, token);
+        return;
+    }
+
+    if (method == "GET" && route == "/stream") {
+        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        if (!state.claimed.load() || token == 0 || token != state.token.load()) {
+            mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
+            return;
+        }
+        mobileRunStreamWebSocket(client, request, slot, token);
         return;
     }
 
@@ -1163,9 +1372,18 @@ void mobileApplyController(int slot)
         return;
     }
 
+    int rtt = state.rttMs.load();
+    int jitter = state.jitterMs.load();
+    int interval = state.packetIntervalMs.load();
+    int smoothingDivisor = (rtt > 300 || jitter > 90 || interval > 100) ? 4
+        : ((rtt > 160 || jitter > 45 || interval > 55) ? 3 : 2);
     for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
-        int value = state.axes[axis].load();
-        value = std::max(static_cast<int>(SDL_JOYSTICK_AXIS_MIN), std::min(static_cast<int>(SDL_JOYSTICK_AXIS_MAX), value));
+        int target = state.axes[axis].load();
+        target = std::max(static_cast<int>(SDL_JOYSTICK_AXIS_MIN), std::min(static_cast<int>(SDL_JOYSTICK_AXIS_MAX), target));
+        int current = state.smoothedAxes[axis];
+        int value = current + (target - current) / smoothingDivisor;
+        if (std::abs(target - current) < 512) value = target;
+        state.smoothedAxes[axis] = value;
         SDL_JoystickSetVirtualAxis(device.joystick, axis, static_cast<Sint16>(value));
     }
 
@@ -1191,10 +1409,11 @@ void localCoopMobileTick()
         MobileSlotState& state = gMobileSlots[slot];
 
         uint64_t inputAge = now - state.lastSeen.load();
-        if (state.claimed.load() && inputAge > 250) {
+        uint64_t neutralAfter = (state.rttMs.load() > 300 || state.jitterMs.load() > 90 || state.packetIntervalMs.load() > 100) ? kMobileBadLinkNeutralMs : kMobileInputNeutralMs;
+        if (state.claimed.load() && inputAge > neutralAfter) {
             // A lost packet must never leave movement, aiming, or an attack held.
-            // Keep the player's reservation for sixty seconds, but neutralize the
-            // virtual pad almost immediately. This lets save/load and other blocking
+            // Keep the player's reservation for sixty seconds. Neutralization is
+            // adaptive so high-latency links are not mistaken for disconnects. This lets save/load and other blocking
             // modal work finish without kicking a remote player.
             mobileResetInput(state);
         }
@@ -1220,6 +1439,7 @@ void localCoopMobileTick()
     }
 
     SDL_JoystickUpdate();
+    mobileCaptureStreamFrame(now);
 
     if (gMobileHostWindow != -1 && now - gMobileHostWindowLastDraw >= 250) {
         mobileDrawHostWindow();
