@@ -253,11 +253,11 @@ inline double localCoopFocusAimError(const LocalCoopPlayer& player, const Object
 inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
 {
     Object* actor = player.actor;
-    if (actor == nullptr) {
+    LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
+    if (actor == nullptr || !tileIsValid(actor->tile)) {
+        focus.combatTarget = nullptr;
         return nullptr;
     }
-
-    LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
     bool activelyAiming = player.aimX != 0 || player.aimY != 0;
 
     if (!activelyAiming && localCoopFocusIsEnemy(actor, focus.combatTarget)) {
@@ -309,11 +309,11 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
 inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
 {
     Object* actor = player.actor;
-    if (actor == nullptr) {
+    LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
+    if (actor == nullptr || !tileIsValid(actor->tile)) {
+        focus.interactionTarget = nullptr;
         return nullptr;
     }
-
-    LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[player.slot];
     int aimRotation = localCoopDirectionFromStick(player.aimX, player.aimY);
 
     if (aimRotation == -1 && localCoopFocusIsInteractable(actor, focus.interactionTarget)) {
