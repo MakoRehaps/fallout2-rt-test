@@ -185,6 +185,8 @@ h1{margin:0 0 14px;font-size:25px}.row{display:flex;gap:8px;margin-top:10px}inpu
 input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margin-top:10px;color:#ffd56a}
 #pad{display:none;position:fixed;inset:0;background:radial-gradient(circle at center,#183321,#07100b)}#video{position:absolute;left:18vw;top:3vh;width:64vw;height:55vh;object-fit:contain;background:#000;border:1px solid #295f37;image-rendering:auto}
 .top{position:absolute;left:0;right:0;top:7px;text-align:center;font-size:13px}
+.control-label{display:block;font-size:9px;line-height:1.05;color:#bfffc8;font-weight:normal;margin-top:2px;white-space:normal}
+.stick-label{position:absolute;left:50%;top:8%;transform:translateX(-50%);z-index:2;font-size:10px;line-height:1.05;text-align:center;color:#d7ffd7;background:#07100bcc;padding:3px 6px;border:1px solid #3a8d4d;border-radius:6px;pointer-events:none}
 .stick{position:absolute;width:31vw;height:31vw;max-width:220px;max-height:220px;border:3px solid #4dbd68;border-radius:50%;background:#0b1c11aa}
 #ls{left:5vw;bottom:8vh}#rs{right:31vw;bottom:8vh}.nub{position:absolute;width:38%;height:38%;left:31%;top:31%;border-radius:50%;background:#68dd82}
 .btn{position:absolute;border-radius:50%;width:14vw;height:14vw;max-width:88px;max-height:88px;padding:0;background:#173923cc}
@@ -204,12 +206,13 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 <div class="row"><select id="slot"><option value="1">Player 2</option><option value="2">Player 3</option><option value="3">Player 4</option></select><button id="connect">CONNECT</button></div>
 <div class="status" id="msg"></div></div></div>
 <div id="pad"><canvas id="video" width="640" height="360"></canvas><div class="top" id="top">PHOBOI CONTROLLER</div>
-<button class="small" id="lb">LB</button><button class="small" id="lt">LT</button>
-<button class="small" id="rb">RB</button><button class="small" id="rt">RT</button>
-<button class="small" id="back">PHOBOI</button><button class="small" id="start">START</button><button class="small" id="skill">SKILLDEX</button>
-<div class="stick" id="ls"><div class="nub"></div></div><div class="stick" id="rs"><div class="nub"></div></div>
-<button class="btn" id="ba">A</button><button class="btn" id="bb">B</button><button class="btn" id="bx">X</button><button class="btn" id="by">Y</button>
-<div class="dpad"><button class="du" id="du">▲</button><button class="dl" id="dl">◀</button><button class="dr" id="dr">▶</button><button class="dd" id="dd">▼</button></div>
+<!-- PHOBOI_FULL_CONTROL_LABELS_V1 -->
+<button class="small" id="lb">LB<span class="control-label">RUN</span></button><button class="small" id="lt">LT<span class="control-label">HEX AIM</span></button>
+<button class="small" id="rb">RB<span class="control-label">ALT ATTACK</span></button><button class="small" id="rt">RT<span class="control-label">ATTACK</span></button>
+<button class="small" id="back">PHOBOI<span class="control-label">PHONE / PIPBOY</span></button><button class="small" id="start">START<span class="control-label">MENU</span></button><button class="small" id="skill">RS CLICK<span class="control-label">SKILLDEX</span></button>
+<div class="stick" id="ls"><div class="stick-label">LEFT STICK<br>MOVE</div><div class="nub"></div></div><div class="stick" id="rs"><div class="stick-label">RIGHT STICK<br>AIM / CURSOR</div><div class="nub"></div></div>
+<button class="btn" id="ba">A<span class="control-label">USE / TALK / PICKUP</span></button><button class="btn" id="bb">B<span class="control-label">CANCEL / BACK</span></button><button class="btn" id="bx">X<span class="control-label">RELOAD</span></button><button class="btn" id="by">Y<span class="control-label">SWAP HAND</span></button>
+<div class="dpad"><button class="du" id="du">▲<span class="control-label">MENU UP</span></button><button class="dl" id="dl">◀<span class="control-label">FIRST AID</span></button><button class="dr" id="dr">▶<span class="control-label">DOCTOR</span></button><button class="dd" id="dd">▼<span class="control-label">MENU DOWN</span></button></div>
 </div>
 <script>
 let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false,seq=0,rtt=0,jitter=0,lastRtt=0,stream=null;
