@@ -55,6 +55,8 @@ inline bool gLocalCoopRuntimeTickerInstalled = false;
 inline bool gLocalCoopRuntimeInsideTick = false;
 inline bool gLocalCoopLegacyYieldQueued = false;
 inline Uint32 gLocalCoopNextLegacyYieldTick = 0;
+inline Uint32 gLocalCoopNextCameraStepTick = 0;
+inline int gLocalCoopCameraTargetTile = -1;
 
 inline bool localCoopTickReached(Uint32 now, Uint32 target)
 {
@@ -600,15 +602,21 @@ inline void localCoopProcessCombatInput()
 
 inline void localCoopUpdateSharedCamera()
 {
-    if (gDude == nullptr || !tileIsValid(gDude->tile)) {
+    if (gDude == nullptr || !tileIsValid(gDude->tile) || !tileIsValid(gCenterTile)) {
+        gLocalCoopCameraTargetTile = -1;
         return;
     }
 
     int elevation = gDude->elevation;
-    long long totalX = 0;
-    long long totalY = 0;
+    int minimumX = 0x7FFFFFFF;
+    int minimumY = 0x7FFFFFFF;
+    int maximumX = -0x7FFFFFFF;
+    int maximumY = -0x7FFFFFFF;
     int count = 0;
 
+    // Frame the extents rather than averaging positions. An average is pulled
+    // toward a three-player cluster and can strand the fourth player at an edge;
+    // a bounding-box midpoint gives every local actor equal screen margin.
     for (const LocalCoopPlayer& player : gLocalCoopPlayers) {
         Object* actor = player.actor;
         if (!player.humanOwned
@@ -619,26 +627,63 @@ inline void localCoopUpdateSharedCamera()
             continue;
         }
 
-        int x;
-        int y;
+        int x = 0;
+        int y = 0;
         if (tileToScreenXY(actor->tile, &x, &y, elevation) == 0) {
-            totalX += x;
-            totalY += y;
+            minimumX = std::min(minimumX, x);
+            minimumY = std::min(minimumY, y);
+            maximumX = std::max(maximumX, x);
+            maximumY = std::max(maximumY, y);
             count++;
         }
     }
 
     if (count == 0) {
+        gLocalCoopCameraTargetTile = -1;
         return;
     }
 
-    int centerX = static_cast<int>(totalX / count);
-    int centerY = static_cast<int>(totalY / count);
-    int centerTile = tileFromScreenXY(centerX, centerY, elevation, true);
-    if (tileIsValid(centerTile) && centerTile != gCenterTile) {
-        tileSetCenter(centerTile,
+    int targetX = minimumX + (maximumX - minimumX) / 2;
+    int targetY = minimumY + (maximumY - minimumY) / 2;
+    int targetTile = tileFromScreenXY(targetX, targetY, elevation, true);
+    if (!tileIsValid(targetTile)) {
+        return;
+    }
+    gLocalCoopCameraTargetTile = targetTile;
+
+    Uint32 now = SDL_GetTicks();
+    if (!localCoopTickReached(now, gLocalCoopNextCameraStepTick)) {
+        return;
+    }
+
+    int distance = tileDistanceBetween(gCenterTile, targetTile);
+    if (distance <= 0) {
+        gLocalCoopNextCameraStepTick = now + 33;
+        return;
+    }
+
+    // Ease instead of snapping. Far-away targets catch up faster, while the last
+    // few hexes advance one at a time to avoid visible camera judder.
+    int stepDistance = 1;
+    if (distance > 12) {
+        stepDistance = 4;
+    } else if (distance > 7) {
+        stepDistance = 3;
+    } else if (distance > 3) {
+        stepDistance = 2;
+    }
+
+    int nextCenter = targetTile;
+    if (stepDistance < distance) {
+        int rotation = tileGetRotationTo(gCenterTile, targetTile);
+        nextCenter = tileGetTileInDirection(gCenterTile, rotation, stepDistance);
+    }
+
+    if (tileIsValid(nextCenter) && nextCenter != gCenterTile) {
+        tileSetCenter(nextCenter,
             TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
     }
+    gLocalCoopNextCameraStepTick = now + 33;
 }
 
 inline void localCoopSetRealtimeCombatActive(bool active)
@@ -648,6 +693,8 @@ inline void localCoopSetRealtimeCombatActive(bool active)
     if (!active) {
         gLocalCoopLegacyYieldQueued = false;
         gLocalCoopNextLegacyYieldTick = 0;
+        gLocalCoopNextCameraStepTick = 0;
+        gLocalCoopCameraTargetTile = -1;
         localCoopRealtimeAiReset();
         for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
             LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[index];
