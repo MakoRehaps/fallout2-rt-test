@@ -51,7 +51,7 @@ enum class UnifiedWorldSystemLogType : uint8_t {
     SpecialEncounter = 4,
     DungeonCreated = 5,
     DungeonExpired = 6,
-    MapVisited = 7;
+    MapVisited = 7,
     EncounterRegenerated = 8,
 };
 
@@ -388,7 +388,6 @@ inline bool unifiedWorldSystemRegenerateCellIfReady(
         return false;
     }
 
-    int previousMap = cell.templateMapIdx;
     uint32_t cellSalt = static_cast<uint32_t>(
         unifiedWorldSystemCellIndex(cellX, cellY) + 1);
     cell.seed = unifiedWorldSystemMixSeed(
@@ -416,7 +415,6 @@ inline bool unifiedWorldSystemRegenerateCellIfReady(
         static_cast<int>(delay / kUnifiedWorldSystemGameDayTicks),
         gameTime);
 
-    (void)previousMap;
     return true;
 }
 
