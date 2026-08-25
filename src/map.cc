@@ -1502,6 +1502,7 @@ int mapHandleTransition()
                             .travel.lastRoadDirection[gameIndex]);
                 mapPlacePartyAtRoadEntry(effectiveDirection);
                 localCoopRealtimeAiBeginMapEntryGrace(3000);
+                localCoopRealtimeAiActivateLoadedEncounterFactions();
                 localCoopRealtimeAiRestorePursuers();
                 gRoadTransitionFailureMap = -1;
                 gRoadTransitionFailureTimestamp = 0;
