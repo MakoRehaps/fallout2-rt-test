@@ -400,7 +400,7 @@ inline bool localCoopCreatePlayerActor(int slot)
     actor->flags &= ~OBJECT_HIDDEN;
     actor->data.critter.combat.results = 0;
     critterUpdateDerivedStats(actor);
-    actor->data.critter.combat.hp = critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS);
+    actor->data.critter.hp = critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS);
     actor->data.critter.combat.ap = critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS);
 
     int spawnTile = localCoopFindSpawnTile(gDude, 3);
