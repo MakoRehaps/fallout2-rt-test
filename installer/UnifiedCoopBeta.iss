@@ -22,6 +22,8 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 [Files]
 Source: "..\build\Debug\fallout2-ce.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\Debug\fallout2-ce.pdb"; DestDir: "{app}"; Flags: ignoreversion
+Source: "cloudflared.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "cloudflared-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Fallout Unified Co-op Beta Debug"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"" ""[debug]mode=log"" ""[debug]show_load_info=1"""; WorkingDir: "{app}"

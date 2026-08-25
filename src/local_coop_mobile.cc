@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -19,6 +20,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -80,6 +82,15 @@ std::vector<std::thread> gMobileClientThreads;
 MobileSocket gMobileListenSocket = kInvalidMobileSocket;
 int gMobilePin = 0;
 bool gMobileNoticeShown = false;
+
+#ifdef _WIN32
+HANDLE gCloudflareProcess = nullptr;
+HANDLE gCloudflareOutput = nullptr;
+std::thread gCloudflareOutputThread;
+std::mutex gCloudflareStateMutex;
+std::string gCloudflarePublicUrl;
+std::string gCloudflareStatus = "OFF";
+#endif
 
 void mobileResetInput(MobileSlotState& state);
 
@@ -756,9 +767,27 @@ std::string mobileHostAddress()
 std::string mobilePairingUrl()
 {
     std::ostringstream url;
-    url << "http://" << mobileHostAddress() << ":" << kMobilePort
-        << "/?pin=" << gMobilePin;
+#ifdef _WIN32
+    {
+        std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+        if (!gCloudflarePublicUrl.empty()) {
+            url << gCloudflarePublicUrl << "/?pin=" << gMobilePin;
+            return url.str();
+        }
+    }
+#endif
+    url << "http://" << mobileHostAddress() << ":" << kMobilePort << "/?pin=" << gMobilePin;
     return url.str();
+}
+
+std::string mobileCloudflareStatus()
+{
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+    return gCloudflareStatus;
+#else
+    return "WINDOWS BUILD ONLY";
+#endif
 }
 
 void mobileDrawQrCode(int window, const std::string& text, int left, int top)
@@ -809,7 +838,9 @@ void mobileDrawHostWindow()
 
     snprintf(line, sizeof(line), "SESSION PIN: %06d", gMobilePin);
     windowDrawText(gMobileHostWindow, line, 340, 20, 82, _colorTable[32767]);
-    windowDrawText(gMobileHostWindow, "LOCAL WIFI OR PRIVATE VPN", 340, 20, 112, _colorTable[992]);
+    std::string tunnelStatus = mobileCloudflareStatus();
+    snprintf(line, sizeof(line), "C: COPY LINK   T: CLOUDFLARE HTTPS [%s]", tunnelStatus.c_str());
+    windowDrawText(gMobileHostWindow, line, 575, 20, 112, _colorTable[992]);
 
     for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
         const char* status = "OPEN";
@@ -827,7 +858,7 @@ void mobileDrawHostWindow()
 
     windowDrawText(gMobileHostWindow, "2 / 3 / 4: KICK PHONE SLOT", 340, 20, 278, _colorTable[992]);
     windowDrawText(gMobileHostWindow, "F11 OR ESC: CLOSE", 340, 20, 308, _colorTable[992]);
-    windowDrawText(gMobileHostWindow, "REMOTE: USE TAILSCALE ADDRESS", 340, 20, 350, _colorTable[992]);
+    windowDrawText(gMobileHostWindow, "HTTPS TUNNEL HIDES YOUR IP AND NEEDS NO VPN", 575, 20, 350, _colorTable[992]);
 
     mobileDrawQrCode(gMobileHostWindow, address, 395, 145);
     windowRefresh(gMobileHostWindow);
@@ -900,6 +931,165 @@ bool mobileStartServer()
     std::atexit(localCoopMobileShutdown);
     return true;
 }
+
+#ifdef _WIN32
+void mobileSetCloudflareStatus(const char* status)
+{
+    std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+    gCloudflareStatus = status != nullptr ? status : "ERROR";
+}
+
+bool mobileFindCloudflareUrl(const std::string& output, std::string* url)
+{
+    size_t start = output.find("https://");
+    while (start != std::string::npos) {
+        size_t end = output.find(".trycloudflare.com", start);
+        if (end != std::string::npos) {
+            end += std::strlen(".trycloudflare.com");
+            std::string candidate = output.substr(start, end - start);
+            if (candidate.size() < 256) {
+                *url = candidate;
+                return true;
+            }
+        }
+        start = output.find("https://", start + 8);
+    }
+    return false;
+}
+
+std::string mobileCloudflaredPath()
+{
+    char modulePath[MAX_PATH] {};
+    DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return "cloudflared.exe";
+    }
+    std::string path(modulePath, length);
+    size_t separator = path.find_last_of("\\/");
+    if (separator == std::string::npos) {
+        return "cloudflared.exe";
+    }
+    path.resize(separator + 1);
+    path += "cloudflared.exe";
+    return path;
+}
+
+void mobileReleaseCloudflareHandles()
+{
+    if (gCloudflareOutputThread.joinable()) {
+        gCloudflareOutputThread.join();
+    }
+    if (gCloudflareOutput != nullptr) {
+        CloseHandle(gCloudflareOutput);
+        gCloudflareOutput = nullptr;
+    }
+    if (gCloudflareProcess != nullptr) {
+        CloseHandle(gCloudflareProcess);
+        gCloudflareProcess = nullptr;
+    }
+}
+
+bool mobileStartCloudflareTunnel()
+{
+    if (gCloudflareProcess != nullptr) {
+        DWORD exitCode = STILL_ACTIVE;
+        if (GetExitCodeProcess(gCloudflareProcess, &exitCode) && exitCode == STILL_ACTIVE) {
+            return true;
+        }
+        mobileReleaseCloudflareHandles();
+    }
+
+    std::string executable = mobileCloudflaredPath();
+    if (GetFileAttributesA(executable.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        mobileSetCloudflareStatus("MISSING EXE");
+        return false;
+    }
+
+    SECURITY_ATTRIBUTES security {};
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+    HANDLE outputRead = nullptr;
+    HANDLE outputWrite = nullptr;
+    if (!CreatePipe(&outputRead, &outputWrite, &security, 0)
+        || !SetHandleInformation(outputRead, HANDLE_FLAG_INHERIT, 0)) {
+        if (outputRead != nullptr) CloseHandle(outputRead);
+        if (outputWrite != nullptr) CloseHandle(outputWrite);
+        mobileSetCloudflareStatus("PIPE ERROR");
+        return false;
+    }
+
+    STARTUPINFOA startup {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = outputWrite;
+    startup.hStdError = outputWrite;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION process {};
+    std::string commandText = "\"" + executable + "\" tunnel --no-autoupdate --url http://127.0.0.1:27888";
+    std::vector<char> command(commandText.begin(), commandText.end());
+    command.push_back('\0');
+    BOOL created = CreateProcessA(
+        executable.c_str(),
+        command.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &startup,
+        &process);
+    CloseHandle(outputWrite);
+    if (!created) {
+        CloseHandle(outputRead);
+        mobileSetCloudflareStatus("START ERROR");
+        return false;
+    }
+
+    CloseHandle(process.hThread);
+    gCloudflareProcess = process.hProcess;
+    gCloudflareOutput = outputRead;
+    mobileSetCloudflareStatus("CONNECTING");
+    gCloudflareOutputThread = std::thread([outputRead]() {
+        std::string output;
+        char buffer[2048];
+        DWORD count = 0;
+        while (ReadFile(outputRead, buffer, sizeof(buffer), &count, nullptr) && count != 0) {
+            output.append(buffer, static_cast<size_t>(count));
+            if (output.size() > 32768) {
+                output.erase(0, output.size() - 16384);
+            }
+            std::string publicUrl;
+            if (mobileFindCloudflareUrl(output, &publicUrl)) {
+                std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+                gCloudflarePublicUrl = publicUrl;
+                gCloudflareStatus = "ONLINE";
+            }
+        }
+        std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+        if (gCloudflarePublicUrl.empty()) {
+            gCloudflareStatus = "FAILED - PRESS T";
+        } else {
+            gCloudflareStatus = "STOPPED - PRESS T";
+            gCloudflarePublicUrl.clear();
+        }
+    });
+    debugPrint("[PHOBOI MOBILE] Cloudflare Quick Tunnel starting\n");
+    return true;
+}
+
+void mobileStopCloudflareTunnel()
+{
+    if (gCloudflareProcess != nullptr) {
+        TerminateProcess(gCloudflareProcess, 0);
+        WaitForSingleObject(gCloudflareProcess, 3000);
+    }
+    mobileReleaseCloudflareHandles();
+    std::lock_guard<std::mutex> lock(gCloudflareStateMutex);
+    gCloudflarePublicUrl.clear();
+    gCloudflareStatus = "OFF";
+}
+#endif
 
 bool mobileAttachController(int slot)
 {
@@ -1067,6 +1257,21 @@ bool localCoopMobileHandleKey(int keyCode)
         return true;
     }
 
+    if (keyCode == KEY_LOWERCASE_C || keyCode == KEY_UPPERCASE_C) {
+        std::string pairingUrl = mobilePairingUrl();
+        SDL_SetClipboardText(pairingUrl.c_str());
+        mobileDrawHostWindow();
+        return true;
+    }
+
+    if (keyCode == KEY_LOWERCASE_T || keyCode == KEY_UPPERCASE_T) {
+#ifdef _WIN32
+        mobileStartCloudflareTunnel();
+#endif
+        mobileDrawHostWindow();
+        return true;
+    }
+
     int slot = -1;
     if (keyCode == KEY_2) {
         slot = 1;
@@ -1090,6 +1295,10 @@ bool localCoopMobileHandleKey(int keyCode)
 void localCoopMobileShutdown()
 {
     mobileCloseHostWindow();
+
+#ifdef _WIN32
+    mobileStopCloudflareTunnel();
+#endif
 
     if (!gMobileServerStarted.load()) {
         return;
