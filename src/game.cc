@@ -664,8 +664,25 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_UNSPECIFIED);
+                pipboyOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
             }
+        }
+        break;
+    case KEY_LOWERCASE_F:
+        // First Aid hotkey. The crosshair selects the patient, preserving the
+        // stock point-and-click targeting flow.
+        if (interfaceBarEnabled()) {
+            soundPlayFile("ib1p1xx1");
+            gameMouseSetCursor(MOUSE_CURSOR_USE_CROSSHAIR);
+            gameMouseSetMode(GAME_MOUSE_MODE_USE_FIRST_AID);
+        }
+        break;
+    case KEY_UPPERCASE_F:
+        // Left Shift+F produces uppercase F and selects Doctor.
+        if (interfaceBarEnabled()) {
+            soundPlayFile("ib1p1xx1");
+            gameMouseSetCursor(MOUSE_CURSOR_USE_CROSSHAIR);
+            gameMouseSetMode(GAME_MOUSE_MODE_USE_DOCTOR);
         }
         break;
     case KEY_UPPERCASE_S:
