@@ -1,6 +1,9 @@
 name: Co-op Windows Build
 
 on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
   pull_request:
     branches:
       - main
