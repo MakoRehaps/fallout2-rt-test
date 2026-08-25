@@ -744,6 +744,7 @@ inline void localCoopRuntimeTick()
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
     localCoopProcessJoinMenus();
+    localCoopRestoreCharactersFromSave();
     localCoopKeepReservedActorsWithParty();
 
     // This should never become the player's normal state anymore. Keep the old
