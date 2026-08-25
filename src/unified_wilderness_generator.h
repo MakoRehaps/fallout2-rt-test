@@ -19,7 +19,10 @@ namespace fallout {
 
 inline bool unifiedWildernessIsOpenMountainMap(UnifiedGameId game, int mapIdx)
 {
-    return game == UnifiedGameId::Fallout1 && (mapIdx == 49 || mapIdx == 50);
+    // Disabled while mountain encounters are routed to duplicated safe maps.
+    (void)game;
+    (void)mapIdx;
+    return false;
 }
 
 inline bool unifiedWildernessObjectIsRemovableMountainBlocker(Object* object)

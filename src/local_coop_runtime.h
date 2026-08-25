@@ -46,6 +46,8 @@ struct LocalCoopRuntimeSlot {
     bool swapWasDown = false;
     bool firstAidWasDown = false;
     bool doctorWasDown = false;
+    bool pipboyWasDown = false;
+    bool skilldexWasDown = false;
     bool postgameSwitchWasDown = false;
     bool queuedAttackPending = false;
     bool queuedAttackSecondary = false;
@@ -526,6 +528,47 @@ inline void localCoopProcessPostgameWorldSwitch()
     runtime.postgameSwitchWasDown = switchDown;
 }
 
+inline void localCoopProcessModalMenuInput()
+{
+    bool modalActive = GameMode::isInGameMode(GameMode::kPipboy)
+        || GameMode::isInGameMode(GameMode::kSkilldex);
+
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[slot];
+
+        bool backDown = player.controller != nullptr
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_BACK) != 0;
+        bool startDown = player.controller != nullptr
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+        bool skilldexDown = player.controller != nullptr
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0;
+        bool pipboyDown = backDown && !startDown;
+        bool canOpen = !modalActive
+            && player.connected
+            && player.humanOwned
+            && player.controller != nullptr
+            && player.uiMode == LocalCoopUiMode::World
+            && !localCoopDangerBlocksMapExit();
+
+        if (canOpen && pipboyDown && !runtime.pipboyWasDown) {
+            gLocalCoopModalControllerSlot = slot;
+            enqueueInputEvent(KEY_LOWERCASE_P);
+            modalActive = true;
+            debugPrint("[PHOBOI INPUT] slot=%d source=controller button=back\n", slot);
+        } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {
+            gLocalCoopModalControllerSlot = slot;
+            gLocalCoopSkilldexInvokerSlot = slot;
+            enqueueInputEvent(KEY_LOWERCASE_S);
+            modalActive = true;
+            debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\n", slot);
+        }
+
+        runtime.pipboyWasDown = pipboyDown;
+        runtime.skilldexWasDown = skilldexDown;
+    }
+}
+
 inline Object* localCoopHealingTarget(LocalCoopPlayer& player)
 {
     Object* target = localCoopFocusFindInteractable(player);
@@ -827,6 +870,7 @@ inline void localCoopRuntimeTick()
     }
 
     localCoopProcessPostgameWorldSwitch();
+    localCoopProcessModalMenuInput();
     localCoopProcessCombatInput();
     localCoopRealtimeAiTick();
 

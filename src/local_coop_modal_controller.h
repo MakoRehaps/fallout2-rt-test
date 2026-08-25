@@ -11,6 +11,7 @@
 #include "input.h"
 #include "kb.h"
 #include "local_coop.h"
+#include "pipboy.h"
 #include "svga.h"
 #include "window_manager.h"
 
@@ -29,6 +30,8 @@ struct LocalCoopModalControllerState {
 
     bool upWasDown = false;
     bool downWasDown = false;
+    bool leftWasDown = false;
+    bool rightWasDown = false;
     bool confirmWasDown = false;
     bool cancelWasDown = false;
     bool leftShoulderWasDown = false;
@@ -218,14 +221,24 @@ inline void localCoopPipboyControllerTick(SDL_GameController* controller)
 
     bool upDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0;
     bool downDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
+    bool leftDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+    bool rightDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
     bool confirmDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A) != 0;
     bool cancelDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_B) != 0;
     bool leftShoulderDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
     bool rightShoulderDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
     bool alarmDown = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_Y) != 0;
 
+    if (phoboiWildernessMapActive()) {
+        if (upDown && !state.upWasDown) enqueueInputEvent(KEY_ARROW_UP);
+        if (downDown && !state.downWasDown) enqueueInputEvent(KEY_ARROW_DOWN);
+        if (leftDown && !state.leftWasDown) enqueueInputEvent(KEY_ARROW_LEFT);
+        if (rightDown && !state.rightWasDown) enqueueInputEvent(KEY_ARROW_RIGHT);
+        if (confirmDown && !state.confirmWasDown) enqueueInputEvent(KEY_RETURN);
+    }
+
     bool selectionMoved = false;
-    if (contentCount > 0 && upDown && !state.upWasDown) {
+    if (!phoboiWildernessMapActive() && contentCount > 0 && upDown && !state.upWasDown) {
         state.pipboyIndex--;
         if (state.pipboyIndex < 0) {
             state.pipboyIndex = contentCount - 1;
@@ -233,7 +246,7 @@ inline void localCoopPipboyControllerTick(SDL_GameController* controller)
         selectionMoved = true;
     }
 
-    if (contentCount > 0 && downDown && !state.downWasDown) {
+    if (!phoboiWildernessMapActive() && contentCount > 0 && downDown && !state.downWasDown) {
         state.pipboyIndex++;
         if (state.pipboyIndex >= contentCount) {
             state.pipboyIndex = 0;
@@ -245,7 +258,7 @@ inline void localCoopPipboyControllerTick(SDL_GameController* controller)
         localCoopPipboyDrawMarker(window, contentButtons[state.pipboyIndex]);
     }
 
-    if (confirmDown && !state.confirmWasDown && contentCount > 0) {
+    if (!phoboiWildernessMapActive() && confirmDown && !state.confirmWasDown && contentCount > 0) {
         int eventCode = contentButtons[state.pipboyIndex]->leftMouseUpEventCode;
         localCoopPipboyRestoreMarker();
         enqueueInputEvent(eventCode);
@@ -268,7 +281,7 @@ inline void localCoopPipboyControllerTick(SDL_GameController* controller)
         localCoopPipboyRestoreMarker();
         state.pipboyTabIndex++;
         if (state.pipboyTabIndex > 2) {
-            state.pipboyTabIndex = 0;
+            state.pipboyTabIndex = phoboiGetActiveTab();
         }
         enqueueInputEvent(500 + state.pipboyTabIndex);
         state.pipboyIndex = 0;
@@ -287,6 +300,8 @@ inline void localCoopPipboyControllerTick(SDL_GameController* controller)
 
     state.upWasDown = upDown;
     state.downWasDown = downDown;
+    state.leftWasDown = leftDown;
+    state.rightWasDown = rightDown;
     state.confirmWasDown = confirmDown;
     state.cancelWasDown = cancelDown;
     state.leftShoulderWasDown = leftShoulderDown;
@@ -299,6 +314,8 @@ inline void localCoopModalControllerResetInputEdges()
     LocalCoopModalControllerState& state = gLocalCoopModalControllerState;
     state.upWasDown = false;
     state.downWasDown = false;
+    state.leftWasDown = false;
+    state.rightWasDown = false;
     state.confirmWasDown = false;
     state.cancelWasDown = false;
     state.leftShoulderWasDown = false;
@@ -310,18 +327,30 @@ inline void localCoopModalControllerTick()
 {
     LocalCoopModalControllerState& state = gLocalCoopModalControllerState;
 
-    if (!gLocalCoopInitialized
-        || !gLocalCoopPlayers[0].connected
-        || gLocalCoopPlayers[0].controller == nullptr
-        || !gLocalCoopPlayers[0].humanOwned) {
+    SDL_GameController* controller = nullptr;
+    int preferredSlot = gLocalCoopModalControllerSlot;
+    if (preferredSlot >= 0
+        && preferredSlot < kLocalCoopMaxPlayers
+        && gLocalCoopPlayers[preferredSlot].connected
+        && gLocalCoopPlayers[preferredSlot].controller != nullptr
+        && gLocalCoopPlayers[preferredSlot].humanOwned) {
+        controller = gLocalCoopPlayers[preferredSlot].controller;
+    } else if (gLocalCoopInitialized) {
+        for (LocalCoopPlayer& player : gLocalCoopPlayers) {
+            if (player.connected && player.controller != nullptr && player.humanOwned) {
+                controller = player.controller;
+                break;
+            }
+        }
+    }
+
+    if (controller == nullptr) {
         localCoopPipboyRestoreMarker();
         localCoopModalControllerResetInputEdges();
         state.skilldexActiveLastTick = false;
         state.pipboyActiveLastTick = false;
         return;
     }
-
-    SDL_GameController* controller = gLocalCoopPlayers[0].controller;
     bool skilldexActive = GameMode::isInGameMode(GameMode::kSkilldex);
     bool pipboyActive = GameMode::isInGameMode(GameMode::kPipboy);
 
@@ -345,6 +374,11 @@ inline void localCoopModalControllerTick()
     } else if (state.pipboyActiveLastTick) {
         localCoopPipboyRestoreMarker();
         localCoopModalControllerResetInputEdges();
+    }
+
+    if (!skilldexActive && !pipboyActive
+        && (state.skilldexActiveLastTick || state.pipboyActiveLastTick)) {
+        gLocalCoopModalControllerSlot = -1;
     }
 
     state.skilldexActiveLastTick = skilldexActive;

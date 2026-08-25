@@ -135,7 +135,9 @@ inline bool gUnifiedWorldSystemStateInitialized = false;
 inline bool gUnifiedWorldSystemPendingStateValid = false;
 
 inline constexpr int kUnifiedWorldSystemFallout1OrdinaryMaps[] = {
-    0, 1, 2, 19, 20, 21, 49, 50,
+    // Mountain templates 49/50 are temporarily replaced by duplicated safe,
+    // open wilderness templates 19/20.
+    0, 1, 2, 19, 20, 21, 19, 20,
     56, 57, 58, 59, 61, 62, 63, 64,
 };
 
@@ -152,6 +154,41 @@ inline constexpr int kUnifiedWorldSystemFallout2OrdinaryMaps[] = {
 inline int unifiedWorldSystemGameIndex(UnifiedGameId game)
 {
     return game == UnifiedGameId::Fallout1 ? 0 : 1;
+}
+
+inline int unifiedWorldSystemSafeTemplateMap(UnifiedGameId game, int mapIdx)
+{
+    if (game == UnifiedGameId::Fallout1) {
+        if (mapIdx == 49) return 19;
+        if (mapIdx == 50) return 20;
+    }
+    return mapIdx;
+}
+
+inline void unifiedWorldSystemNormalizeSafeTemplates(UnifiedWorldSystemState& state)
+{
+    UnifiedWorldSystemWorldState& world = state.worlds[0];
+    for (int cellIndex = 0; cellIndex < kUnifiedWorldSystemCellCount; cellIndex++) {
+        UnifiedWorldSystemCellState& cell = world.cells[cellIndex];
+        cell.templateMapIdx = static_cast<int16_t>(
+            unifiedWorldSystemSafeTemplateMap(UnifiedGameId::Fallout1, cell.templateMapIdx));
+        cell.temporaryDungeonMapIdx = static_cast<int16_t>(
+            unifiedWorldSystemSafeTemplateMap(UnifiedGameId::Fallout1, cell.temporaryDungeonMapIdx));
+        for (int chainIndex = 0; chainIndex < kUnifiedWorldSystemMaxChainMaps; chainIndex++) {
+            cell.chainMaps[chainIndex] = static_cast<int16_t>(
+                unifiedWorldSystemSafeTemplateMap(UnifiedGameId::Fallout1, cell.chainMaps[chainIndex]));
+        }
+    }
+
+    if (state.activeChain.gameId
+        == static_cast<int32_t>(static_cast<uint32_t>(UnifiedGameId::Fallout1))) {
+        state.activeChain.currentMapIdx = unifiedWorldSystemSafeTemplateMap(
+            UnifiedGameId::Fallout1, state.activeChain.currentMapIdx);
+        for (int index = 0; index < kUnifiedWorldSystemMaxChainMaps; index++) {
+            state.activeChain.maps[index] = static_cast<int16_t>(
+                unifiedWorldSystemSafeTemplateMap(UnifiedGameId::Fallout1, state.activeChain.maps[index]));
+        }
+    }
 }
 
 inline uint32_t unifiedWorldSystemMixSeed(uint32_t value)
@@ -443,6 +480,8 @@ inline void unifiedWorldSystemPrepareCell(
                 ? preferredMap
                 : unifiedWorldSystemPoolMap(game, cell->seed));
     }
+    cell->templateMapIdx = static_cast<int16_t>(
+        unifiedWorldSystemSafeTemplateMap(game, cell->templateMapIdx));
 
     if ((cell->seed % 37) == 0
         && (cell->flags & UNIFIED_WORLD_CELL_TEMPORARY_DUNGEON) == 0) {
@@ -1054,6 +1093,7 @@ inline bool unifiedWorldSystemApplyPending()
         return false;
     }
     gUnifiedWorldSystemState = gUnifiedWorldSystemPendingState;
+    unifiedWorldSystemNormalizeSafeTemplates(gUnifiedWorldSystemState);
     gUnifiedWorldSystemStateInitialized = true;
     unifiedWorldSystemClearPending();
     return true;

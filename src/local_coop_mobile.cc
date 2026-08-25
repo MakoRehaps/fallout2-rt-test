@@ -157,7 +157,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 #ba{right:5vw;bottom:18vh}#bb{right:17vw;bottom:7vh}#bx{right:17vw;bottom:29vh}#by{right:29vw;bottom:18vh}
 .small{width:11vw;height:9vw;max-width:74px;max-height:54px;border-radius:10px}
 #lb{left:4vw;top:7vh}#lt{left:17vw;top:7vh}#rb{right:17vw;top:7vh}#rt{right:4vw;top:7vh}
-#back{left:42vw;top:12vh}#start{right:42vw;top:12vh}
+#back{left:39vw;top:12vh}#start{right:39vw;top:12vh}#skill{left:44.5vw;top:22vh;width:11vw}
 .dpad{position:absolute;left:39vw;bottom:34vh;display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(3,44px)}
 .dpad button{padding:0}.du{grid-column:2}.dl{grid-column:1;grid-row:2}.dr{grid-column:3;grid-row:2}.dd{grid-column:2;grid-row:3}
 @media (orientation:portrait){#rs{right:5vw;bottom:31vh}.dpad{left:36vw;bottom:45vh}#ba{bottom:17vh}#bx{bottom:29vh}}
@@ -172,7 +172,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{height:22px;margi
 <div id="pad"><div class="top" id="top">PHOBOI CONTROLLER</div>
 <button class="small" id="lb">LB</button><button class="small" id="lt">LT</button>
 <button class="small" id="rb">RB</button><button class="small" id="rt">RT</button>
-<button class="small" id="back">BACK</button><button class="small" id="start">START</button>
+<button class="small" id="back">PHOBOI</button><button class="small" id="start">START</button><button class="small" id="skill">SKILLDEX</button>
 <div class="stick" id="ls"><div class="nub"></div></div><div class="stick" id="rs"><div class="nub"></div></div>
 <button class="btn" id="ba">A</button><button class="btn" id="bb">B</button><button class="btn" id="bx">X</button><button class="btn" id="by">Y</button>
 <div class="dpad"><button class="du" id="du">▲</button><button class="dl" id="dl">◀</button><button class="dr" id="dr">▶</button><button class="dd" id="dd">▼</button></div>
@@ -186,7 +186,7 @@ function bindButton(id,bit,axis){
  const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit)};
  e.addEventListener('pointerdown',down);e.addEventListener('pointerup',up);e.addEventListener('pointercancel',up);e.addEventListener('pointerleave',up);
 }
-[['ba',0],['bb',1],['bx',2],['by',3],['back',4],['start',6],['lb',9],['rb',10],['du',11],['dd',12],['dl',13],['dr',14]].forEach(x=>bindButton(x[0],x[1]));
+[['ba',0],['bb',1],['bx',2],['by',3],['back',4],['start',6],['skill',8],['lb',9],['rb',10],['du',11],['dd',12],['dl',13],['dr',14]].forEach(x=>bindButton(x[0],x[1]));
 bindButton('lt',0,4);bindButton('rt',0,5);
 function bindStick(id,ax,ay){
  const e=$(id),n=e.querySelector('.nub');let active=null;

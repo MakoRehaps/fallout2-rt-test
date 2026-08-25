@@ -406,6 +406,16 @@ static int gPipboyPrevTab;
 static FrmImage _pipboyFrmImages[PIPBOY_FRM_COUNT];
 
 // 0x497004
+bool phoboiWildernessMapActive()
+{
+    return GameMode::isInGameMode(GameMode::kPipboy) && gPipboyTab == 1;
+}
+
+int phoboiGetActiveTab()
+{
+    return gPipboyTab;
+}
+
 int phoboiOpen(int intent)
 {
     if (!wmMapPipboyActive()) {
@@ -1769,6 +1779,61 @@ static const char* pipboyUnifiedWorldLogTypeName(uint8_t type)
     }
 }
 
+static bool pipboyWindowDrawOriginalWorldMapArt(
+    UnifiedGameId game,
+    int left,
+    int top,
+    int width,
+    int height)
+{
+    unsigned char* destination = gPipboyWindowBuffer
+        + top * PIPBOY_WINDOW_WIDTH
+        + left;
+
+    if (game == UnifiedGameId::Fallout1) {
+        UnifiedOriginFrmImage worldMap;
+        if (!worldMap.lock(game, OBJ_TYPE_INTERFACE, 135)) {
+            return false;
+        }
+        blitBufferToBufferStretch(
+            worldMap.getData(),
+            worldMap.getWidth(),
+            worldMap.getHeight(),
+            worldMap.getWidth(),
+            destination,
+            width,
+            height,
+            PIPBOY_WINDOW_WIDTH);
+        return true;
+    }
+
+    // Fallout 2's original map is WRLDMP00..WRLDMP19 in a 4x5 sheet.
+    // Scale one tile at a time to avoid a 2.1 MB temporary legacy-heap block.
+    const int tileWidth = width / 4;
+    const int tileHeight = height / 5;
+    for (int tile = 0; tile < 20; tile++) {
+        UnifiedOriginFrmImage worldTile;
+        if (!worldTile.lock(UnifiedGameId::Fallout2, OBJ_TYPE_INTERFACE, 339 + tile)) {
+            return false;
+        }
+
+        int column = tile % 4;
+        int row = tile / 4;
+        blitBufferToBufferStretch(
+            worldTile.getData(),
+            worldTile.getWidth(),
+            worldTile.getHeight(),
+            worldTile.getWidth(),
+            destination
+                + row * tileHeight * PIPBOY_WINDOW_WIDTH
+                + column * tileWidth,
+            tileWidth,
+            tileHeight,
+            PIPBOY_WINDOW_WIDTH);
+    }
+    return true;
+}
+
 static void pipboyWindowRenderUnifiedWorldMap()
 {
     pipboyWindowDestroyButtons();
@@ -1791,79 +1856,94 @@ static void pipboyWindowRenderUnifiedWorldMap()
     const UnifiedWorldSystemTravelState& travel = state.travel;
 
     const int left = 262;
-    const int top = 72;
-    const int cellWidth = 12;
-    const int cellHeight = 8;
+    const int top = 68;
+    const int mapWidth = 336;
+    const int mapHeight = 270;
+    const int cellWidth = mapWidth / kUnifiedWorldSystemColumns;
+    const int cellHeight = mapHeight / kUnifiedWorldSystemRows;
+
     windowDrawText(
         gPipboyWindow,
-        game == UnifiedGameId::Fallout1 ? "FALLOUT 1 WORLD GRID" : "FALLOUT 2 WORLD GRID",
-        340,
+        game == UnifiedGameId::Fallout1
+            ? "FALLOUT 1 ORIGINAL WORLD MAP"
+            : "FALLOUT 2 ORIGINAL WORLD MAP",
+        mapWidth,
         left,
-        48,
+        49,
         _colorTable[992]);
 
-    for (int cellY = 0; cellY < kUnifiedWorldSystemRows; cellY++) {
-        for (int cellX = 0; cellX < kUnifiedWorldSystemColumns; cellX++) {
-            const UnifiedWorldSystemCellState& cell =
-                world.cells[unifiedWorldSystemCellIndex(cellX, cellY)];
-            int color = (cell.flags & UNIFIED_WORLD_CELL_DISCOVERED) != 0
-                ? _colorTable[992]
-                : _colorTable[288];
-            int x = left + cellX * cellWidth;
-            int y = top + cellY * cellHeight;
-            windowDrawRect(gPipboyWindow, x, y, x + cellWidth - 2, y + cellHeight - 2, color);
+    bool artLoaded = pipboyWindowDrawOriginalWorldMapArt(
+        game,
+        left,
+        top,
+        mapWidth,
+        mapHeight);
+
+    if (artLoaded) {
+        for (int cellY = 0; cellY < kUnifiedWorldSystemRows; cellY++) {
+            for (int cellX = 0; cellX < kUnifiedWorldSystemColumns; cellX++) {
+                const UnifiedWorldSystemCellState& cell =
+                    world.cells[unifiedWorldSystemCellIndex(cellX, cellY)];
+                int x = left + cellX * cellWidth;
+                int y = top + cellY * cellHeight;
+                if ((cell.flags & UNIFIED_WORLD_CELL_DISCOVERED) == 0) {
+                    windowFill(gPipboyWindow, x, y, cellWidth, cellHeight, _colorTable[0]);
+                } else {
+                    windowDrawRect(
+                        gPipboyWindow,
+                        x,
+                        y,
+                        x + cellWidth - 1,
+                        y + cellHeight - 1,
+                        _colorTable[288]);
+                }
+            }
         }
+    } else {
+        windowFill(gPipboyWindow, left, top, mapWidth, mapHeight, _colorTable[0]);
+        windowDrawText(
+            gPipboyWindow,
+            "ORIGINAL WORLD MAP ART UNAVAILABLE",
+            mapWidth,
+            left,
+            top + mapHeight / 2,
+            _colorTable[31744]);
     }
 
     int currentX = travel.currentCellX[gameIndex];
     int currentY = travel.currentCellY[gameIndex];
     int selectedX = travel.selectedCellX[gameIndex];
     int selectedY = travel.selectedCellY[gameIndex];
+
     windowFill(
         gPipboyWindow,
-        left + currentX * cellWidth + 2,
+        left + currentX * cellWidth + 3,
         top + currentY * cellHeight + 2,
-        cellWidth - 5,
-        cellHeight - 5,
+        std::max(2, cellWidth - 6),
+        std::max(2, cellHeight - 4),
         _colorTable[992]);
     windowDrawRect(
         gPipboyWindow,
         left + selectedX * cellWidth,
         top + selectedY * cellHeight,
-        left + selectedX * cellWidth + cellWidth - 2,
-        top + selectedY * cellHeight + cellHeight - 2,
+        left + selectedX * cellWidth + cellWidth - 1,
+        top + selectedY * cellHeight + cellHeight - 1,
         _colorTable[31744]);
 
     char line[96];
-    snprintf(
-        line,
-        sizeof(line),
-        "PARTY %02d,%02d   TARGET %02d,%02d",
-        currentX,
-        currentY,
-        selectedX,
-        selectedY);
-    windowDrawText(gPipboyWindow, line, 340, left, 320, _colorTable[992]);
+    snprintf(line, sizeof(line), "PARTY %02d,%02d   TARGET %02d,%02d",
+        currentX, currentY, selectedX, selectedY);
+    windowDrawText(gPipboyWindow, line, mapWidth, left, 342, _colorTable[992]);
+
     int roadMask = unifiedWorldSystemRoadMask(game);
     const char* heading = "N";
-    switch (static_cast<UnifiedWorldSystemRoadDirection>(
-        travel.lastRoadDirection[gameIndex])) {
-    case UnifiedWorldSystemRoadDirection::East:
-        heading = "E";
-        break;
-    case UnifiedWorldSystemRoadDirection::South:
-        heading = "S";
-        break;
-    case UnifiedWorldSystemRoadDirection::West:
-        heading = "W";
-        break;
-    default:
-        break;
+    switch (static_cast<UnifiedWorldSystemRoadDirection>(travel.lastRoadDirection[gameIndex])) {
+    case UnifiedWorldSystemRoadDirection::East: heading = "E"; break;
+    case UnifiedWorldSystemRoadDirection::South: heading = "S"; break;
+    case UnifiedWorldSystemRoadDirection::West: heading = "W"; break;
+    default: break;
     }
-    snprintf(
-        line,
-        sizeof(line),
-        "ROADS %c%c%c%c   HEADING %s   MAP %d/%d",
+    snprintf(line, sizeof(line), "ROADS %c%c%c%c   HEADING %s   MAP %d/%d",
         (roadMask & (1 << 0)) != 0 ? 'N' : '-',
         (roadMask & (1 << 1)) != 0 ? 'E' : '-',
         (roadMask & (1 << 2)) != 0 ? 'S' : '-',
@@ -1871,7 +1951,8 @@ static void pipboyWindowRenderUnifiedWorldMap()
         heading,
         state.activeChain.valid ? state.activeChain.depth + 1 : 0,
         state.activeChain.valid ? state.activeChain.length : 0);
-    windowDrawText(gPipboyWindow, line, 340, left, 338, _colorTable[992]);
+    windowDrawText(gPipboyWindow, line, mapWidth, left, 358, _colorTable[992]);
+
     const UnifiedWorldSystemCellState& selectedCell =
         world.cells[unifiedWorldSystemCellIndex(selectedX, selectedY)];
     if ((selectedCell.flags & UNIFIED_WORLD_CELL_CLEARED) != 0) {
@@ -1884,45 +1965,31 @@ static void pipboyWindowRenderUnifiedWorldMap()
         uint32_t remaining = elapsed < delay ? delay - elapsed : 0;
         uint32_t days = (remaining + kUnifiedWorldSystemGameDayTicks - 1)
             / kUnifiedWorldSystemGameDayTicks;
-        snprintf(
-            line,
-            sizeof(line),
-            remaining > 0
-                ? "TARGET CLEARED   REGEN IN %u DAY%s"
-                : "TARGET CLEARED   REGEN READY",
-            days,
-            days == 1 ? "" : "S");
+        snprintf(line, sizeof(line),
+            remaining > 0 ? "TARGET CLEARED   REGEN IN %u DAY%s" : "TARGET CLEARED   REGEN READY",
+            days, days == 1 ? "" : "S");
     } else if ((selectedCell.flags & UNIFIED_WORLD_CELL_TEMPORARY_DUNGEON) != 0) {
         snprintf(line, sizeof(line), "TARGET TEMPORARY DUNGEON");
     } else {
         snprintf(line, sizeof(line), "TARGET ENCOUNTER ACTIVE");
     }
-    windowDrawText(gPipboyWindow, line, 340, left, 354, _colorTable[992]);
-    windowDrawText(
-        gPipboyWindow,
-        "ARROWS: MOVE GUIDE   ENTER: SET TARGET   ESC: CLOSE",
-        340,
-        left,
-        370,
-        _colorTable[992]);
-    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 388, _colorTable[992]);
+    windowDrawText(gPipboyWindow, line, mapWidth, left, 374, _colorTable[992]);
+    windowDrawText(gPipboyWindow,
+        "D-PAD: GUIDE   A: TARGET   LB/RB: MENUS   B: CLOSE",
+        mapWidth, left, 390, _colorTable[992]);
+    windowDrawText(gPipboyWindow, "WORLD LOG", mapWidth, left, 406, _colorTable[992]);
 
-    int logLines = std::min(static_cast<int>(state.logCount), 4);
+    int logLines = std::min(static_cast<int>(state.logCount), 2);
     for (int index = 0; index < logLines; index++) {
         int logIndex = state.logHead - 1 - index;
-        if (logIndex < 0) {
-            logIndex += kUnifiedWorldSystemLogCapacity;
-        }
+        if (logIndex < 0) logIndex += kUnifiedWorldSystemLogCapacity;
         const UnifiedWorldSystemLogEntry& entry = state.log[logIndex];
-        snprintf(
-            line,
-            sizeof(line),
-            "%s %02d,%02d MAP %d",
+        snprintf(line, sizeof(line), "%s %02d,%02d MAP %d",
             pipboyUnifiedWorldLogTypeName(entry.type),
             entry.cellX,
             entry.cellY,
             entry.mapIdx);
-        windowDrawText(gPipboyWindow, line, 340, left, 404 + index * 15, _colorTable[992]);
+        windowDrawText(gPipboyWindow, line, mapWidth, left, 422 + index * 15, _colorTable[992]);
     }
 
     windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);

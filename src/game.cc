@@ -32,6 +32,8 @@
 #include "item.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop.h"
+#include "local_coop_focus.h"
 #include "map.h"
 #include "memory.h"
 #include "mouse.h"
@@ -687,17 +689,67 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
         break;
     case KEY_UPPERCASE_S:
     case KEY_LOWERCASE_S:
-        // skilldex
+        // Skilldex. Controller/phone invocations apply the chosen skill with
+        // the invoking co-op actor to that player's current focus target.
         if (interfaceBarEnabled()) {
             soundPlayFile("ib1p1xx1");
-
             int mode = -1;
-
-            // NOTE: There is an `inc` for this value to build jump table which
-            // is not needed.
             int rc = skilldexOpen();
+            int coopSlot = gLocalCoopSkilldexInvokerSlot;
+            gLocalCoopSkilldexInvokerSlot = -1;
 
-            // Remap Skilldex result code to action.
+            if (coopSlot >= 0
+                && coopSlot < kLocalCoopMaxPlayers
+                && gLocalCoopPlayers[coopSlot].humanOwned
+                && gLocalCoopPlayers[coopSlot].actor != nullptr) {
+                int skill = -1;
+                switch (rc) {
+                case SKILLDEX_RC_SNEAK: skill = SKILL_SNEAK; break;
+                case SKILLDEX_RC_LOCKPICK: skill = SKILL_LOCKPICK; break;
+                case SKILLDEX_RC_STEAL: skill = SKILL_STEAL; break;
+                case SKILLDEX_RC_TRAPS: skill = SKILL_TRAPS; break;
+                case SKILLDEX_RC_FIRST_AID: skill = SKILL_FIRST_AID; break;
+                case SKILLDEX_RC_DOCTOR: skill = SKILL_DOCTOR; break;
+                case SKILLDEX_RC_SCIENCE: skill = SKILL_SCIENCE; break;
+                case SKILLDEX_RC_REPAIR: skill = SKILL_REPAIR; break;
+                default: break;
+                }
+
+                if (skill != -1) {
+                    LocalCoopPlayer& player = gLocalCoopPlayers[coopSlot];
+                    Object* actor = player.actor;
+                    Object* target = localCoopFocusFindInteractable(player);
+
+                    if (skill == SKILL_SNEAK) {
+                        if (actor == gDude) {
+                            _action_skill_use(SKILL_SNEAK);
+                        } else {
+                            player.sneaking = !player.sneaking;
+                        }
+                    } else {
+                        if ((skill == SKILL_FIRST_AID || skill == SKILL_DOCTOR)
+                            && (target == nullptr
+                                || PID_TYPE(target->pid) != OBJ_TYPE_CRITTER
+                                || (target->data.critter.combat.results & DAM_DEAD) != 0
+                                || localCoopFocusIsEnemy(actor, target))) {
+                            target = actor;
+                        }
+
+                        int actionRc = target != nullptr
+                            ? actionUseSkill(actor, target, skill)
+                            : -1;
+                        debugPrint("[COOP SKILLDEX] slot=%d actorId=%d targetId=%d skill=%d rc=%d\n",
+                            coopSlot,
+                            actor->id,
+                            target != nullptr ? target->id : -1,
+                            skill,
+                            actionRc);
+                    }
+                }
+                break;
+            }
+
+            // Keyboard Skilldex keeps the stock P1 point-and-click flow.
             switch (rc) {
             case SKILLDEX_RC_ERROR:
                 debugPrint("\n ** Error calling skilldex_select()! ** \n");

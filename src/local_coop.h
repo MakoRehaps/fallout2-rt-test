@@ -82,11 +82,14 @@ struct LocalCoopPlayer {
     bool hexAimHeld = false;
     int hexAimTile = -1;
     bool controllerInputActive = false;
+    bool sneaking = false;
 };
 
 inline std::array<LocalCoopPlayer, kLocalCoopMaxPlayers> gLocalCoopPlayers;
 inline bool gLocalCoopInitialized = false;
 inline uint32_t gLocalCoopAppliedCharacterStateRevision = 0xFFFFFFFF;
+inline int gLocalCoopModalControllerSlot = -1;
+inline int gLocalCoopSkilldexInvokerSlot = -1;
 
 inline int localCoopFindSpawnTile(Object* anchor, int distance);
 
@@ -969,7 +972,15 @@ inline void localCoopPollControllers()
         player.moveY = localCoopReadAxis(player.controller, SDL_CONTROLLER_AXIS_LEFTY);
         player.aimX = localCoopReadAxis(player.controller, SDL_CONTROLLER_AXIS_RIGHTX);
         player.aimY = localCoopReadAxis(player.controller, SDL_CONTROLLER_AXIS_RIGHTY);
-        player.wantsRun = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+        bool runButtonDown = SDL_GameControllerGetButton(
+            player.controller,
+            SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+        int moveMagnitude = std::max(std::abs(player.moveX), std::abs(player.moveY));
+        if (runButtonDown || moveMagnitude >= 24500) {
+            player.wantsRun = true;
+        } else if (moveMagnitude <= 18000) {
+            player.wantsRun = false;
+        }
 
         if (!localCoopPlayerCanMove(player)) {
             continue;
@@ -985,16 +996,24 @@ inline void localCoopPollControllers()
             continue;
         }
 
-        int destination = tileGetTileInDirection(actor->tile, rotation, 1);
-        if (!tileIsValid(destination)) {
-            continue;
+        // A one-hex run animation is too short to settle into its run cycle and
+        // looks like alternating walk/slide frames. Queue a short clear path
+        // for running, while walking remains precise one-hex movement.
+        int destination = actor->tile;
+        int movementSteps = player.wantsRun ? 3 : 1;
+        for (int step = 0; step < movementSteps; step++) {
+            int candidate = tileGetTileInDirection(destination, rotation, 1);
+            if (!tileIsValid(candidate)
+                || !localCoopMoveRespectsSharedScreen(actor, candidate)
+                || _obj_blocking_at(actor, candidate, actor->elevation) != nullptr) {
+                break;
+            }
+            destination = candidate;
+            if (isExitGridAt(destination, actor->elevation)) {
+                break;
+            }
         }
-
-        if (!localCoopMoveRespectsSharedScreen(actor, destination)) {
-            continue;
-        }
-
-        if (_obj_blocking_at(actor, destination, actor->elevation) != nullptr) {
+        if (destination == actor->tile) {
             continue;
         }
 
