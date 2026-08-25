@@ -841,6 +841,35 @@ inline bool unifiedWorldSystemTraverseRoad(
     }
 
     if (unifiedWorldSystemCellIndex(nextX, nextY) == -1) {
+        // Some original cave/town exit grids point toward the outside of our
+        // finite 28x30 simulation. Keep travel physical and four-directional,
+        // but turn that edge road inward instead of trapping the party.
+        switch (direction) {
+        case UnifiedWorldSystemRoadDirection::North:
+            direction = UnifiedWorldSystemRoadDirection::South;
+            nextX = travel.currentCellX[gameIndex];
+            nextY = travel.currentCellY[gameIndex] + 1;
+            break;
+        case UnifiedWorldSystemRoadDirection::East:
+            direction = UnifiedWorldSystemRoadDirection::West;
+            nextX = travel.currentCellX[gameIndex] - 1;
+            nextY = travel.currentCellY[gameIndex];
+            break;
+        case UnifiedWorldSystemRoadDirection::South:
+            direction = UnifiedWorldSystemRoadDirection::North;
+            nextX = travel.currentCellX[gameIndex];
+            nextY = travel.currentCellY[gameIndex] - 1;
+            break;
+        case UnifiedWorldSystemRoadDirection::West:
+            direction = UnifiedWorldSystemRoadDirection::East;
+            nextX = travel.currentCellX[gameIndex] + 1;
+            nextY = travel.currentCellY[gameIndex];
+            break;
+        }
+        travel.lastRoadDirection[gameIndex] = static_cast<int8_t>(direction);
+    }
+
+    if (unifiedWorldSystemCellIndex(nextX, nextY) == -1) {
         return false;
     }
 
