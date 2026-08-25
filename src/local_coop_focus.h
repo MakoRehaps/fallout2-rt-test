@@ -9,6 +9,7 @@
 #include "combat.h"
 #include "item.h"
 #include "local_coop.h"
+#include "local_coop_danger.h"
 #include "object.h"
 #include "proto_types.h"
 #include "tile.h"
@@ -37,10 +38,18 @@ inline int localCoopFocusCombatRange(const Object* actor)
     }
 
     Object* mutableActor = const_cast<Object*>(actor);
+    LocalCoopPlayer* player = localCoopGetPlayerForActor(mutableActor);
+
     int hitMode = HIT_MODE_PUNCH;
-    Object* weapon = critterGetItem2(mutableActor);
-    if (weapon != nullptr && itemGetType(weapon) == ITEM_TYPE_WEAPON) {
-        hitMode = HIT_MODE_RIGHT_WEAPON_PRIMARY;
+    Object* weapon = nullptr;
+    if (player != nullptr) {
+        weapon = localCoopGetActiveItem(*player);
+        hitMode = localCoopGetPrimaryHitMode(*player);
+    } else {
+        weapon = critterGetItem2(mutableActor);
+        if (weapon != nullptr && itemGetType(weapon) == ITEM_TYPE_WEAPON) {
+            hitMode = HIT_MODE_RIGHT_WEAPON_PRIMARY;
+        }
     }
 
     int weaponRange = weaponGetRange(mutableActor, hitMode);
@@ -184,10 +193,6 @@ inline void localCoopFocusApplyOutline(int slot, Object* target, bool hostile)
     }
 }
 
-// Return a continuous screen-space angular error between the right stick and a
-// candidate object. The old implementation reduced the stick to one of six hex
-// rotations, which made targets snap across a very wide wedge. This keeps the
-// hex world for movement while aiming behaves like a twin-stick action game.
 inline double localCoopFocusAimError(const LocalCoopPlayer& player, const Object* target)
 {
     if (player.actor == nullptr || target == nullptr || (player.aimX == 0 && player.aimY == 0)) {
@@ -235,7 +240,7 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
 
     Object* best = nullptr;
     double bestScore = 1.0e30;
-    constexpr double kAimAcquireHalfAngle = 0.72; // about 41 degrees
+    constexpr double kAimAcquireHalfAngle = 0.72;
 
     for (int index = 0; index < count; index++) {
         Object* candidate = critters[index];
@@ -285,10 +290,8 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
     Object* best = nullptr;
     double bestScore = 1.0e30;
     bool activelyAiming = player.aimX != 0 || player.aimY != 0;
-    constexpr double kInteractAcquireHalfAngle = 0.82; // about 47 degrees
+    constexpr double kInteractAcquireHalfAngle = 0.82;
 
-    // Scan critters/items/scenery directly so the non-combat bead selects the
-    // object nearest the actual right-stick ray rather than one of six sectors.
     const int types[3] = { OBJ_TYPE_CRITTER, OBJ_TYPE_ITEM, OBJ_TYPE_SCENERY };
     for (int typeIndex = 0; typeIndex < 3; typeIndex++) {
         Object** objects = nullptr;
@@ -337,8 +340,6 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
         objectListFree(objects);
     }
 
-    // Items at the actor's feet should remain easy to pick up even when the
-    // right stick is centered.
     if (!activelyAiming) {
         Object* object = objectFindFirstAtLocation(actor->elevation, actor->tile);
         while (object != nullptr) {
@@ -365,7 +366,7 @@ inline Object* localCoopFocusUpdateForPlayer(LocalCoopPlayer& player)
     if (player.uiMode == LocalCoopUiMode::World) {
         bool activelyAiming = player.aimX != 0 || player.aimY != 0;
 
-        if (isInCombat() || activelyAiming) {
+        if (gLocalCoopDangerActive || isInCombat() || activelyAiming) {
             focusTarget = localCoopFocusFindEnemy(player);
             hostile = focusTarget != nullptr;
         }
