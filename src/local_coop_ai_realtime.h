@@ -260,8 +260,14 @@ inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferr
         return;
     }
 
+    // The stock combat loop can still reach combatAi while a legacy caller is
+    // being broken back into the realtime world. Convert the NPC into a realtime
+    // actor, then consume its entire legacy turn immediately. Leaving AP here
+    // causes _combat_turn to call combatAi again and again ("extra APs"), which
+    // floods attacks and can keep the human actor permanently animation-locked.
     localCoopRealtimeAiRegisterWorldActor(actor,
         preferredTarget != nullptr ? preferredTarget : localCoopRealtimeAiFindNearestHuman(actor));
+    actor->data.critter.combat.ap = 0;
 }
 
 inline void localCoopRealtimeAiRunWorldActor(Object* actor,
