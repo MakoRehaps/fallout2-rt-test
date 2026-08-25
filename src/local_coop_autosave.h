@@ -3,6 +3,7 @@
 
 #include <SDL.h>
 
+#include "animation.h"
 #include "combat.h"
 #include "display_monitor.h"
 #include "game.h"
@@ -41,6 +42,10 @@ inline bool localCoopAutosaveWorldIsSafe()
 {
     return gDude != nullptr
         && gDude->tile >= 0
+        && (gDude->data.critter.combat.results
+               & (DAM_DEAD | DAM_KNOCKED_OUT))
+            == 0
+        && !animationIsBusy(gDude)
         && !_isLoadingGame()
         && !isInCombat()
         && !_gdialogActive()
