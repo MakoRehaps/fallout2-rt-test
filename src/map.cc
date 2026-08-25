@@ -1292,6 +1292,19 @@ int mapHandleTransition()
                 }
             }
 
+            if (loadRouteMap
+                && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+                const UnifiedWorldSystemTravelState& travel =
+                    unifiedWorldSystemGetStateConst().travel;
+                int gameIndex = unifiedWorldSystemGameIndex(UnifiedGameId::Fallout1);
+                int regionId = unifiedFallout1EncounterRegionAt(
+                    travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+                        + kUnifiedWorldSystemCellSize / 2,
+                    travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+                        + kUnifiedWorldSystemCellSize / 2);
+                unifiedFallout1SetEncounterRegionGlobal(regionId);
+            }
+
             if (loadRouteMap && nextMap >= 0) {
                 gMapTransition.map = nextMap;
                 gMapTransition.elevation = 0;
