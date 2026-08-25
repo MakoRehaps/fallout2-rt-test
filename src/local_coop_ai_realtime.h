@@ -24,6 +24,9 @@ namespace fallout {
 
 struct LocalCoopRealtimeAiActorState {
     Uint32 nextActionTick = 0;
+    Uint32 nextApRegenTick = 0;
+    int currentActionPointsHundredths = -1;
+    int apRegenDelayTicks = 0;
     int preferredTargetId = -1;
 };
 
@@ -48,6 +51,56 @@ inline Uint32 localCoopRealtimeAiInitialStagger(const Object* actor)
         return 100;
     }
     return 100 + static_cast<Uint32>((actor->id & 0x0F) * 35);
+}
+
+inline int localCoopRealtimeAiMaximumApHundredths(Object* actor)
+{
+    if (actor == nullptr) {
+        return 0;
+    }
+
+    return std::max(100, critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS) * 100);
+}
+
+inline int localCoopRealtimeAiRegenAmountHundredths(Object* actor)
+{
+    if (actor == nullptr) {
+        return 0;
+    }
+
+    // Directly normalized from cte_APRegenNPC in ap_regen.fos:
+    // 360 + 44 * Agility fixed-point AP every real second.
+    return std::max(1, 360 + 44 * critterGetStat(actor, STAT_AGILITY));
+}
+
+inline void localCoopRealtimeAiUpdateActionPoints(Object* actor,
+    LocalCoopRealtimeAiActorState& state,
+    Uint32 now)
+{
+    int maximum = localCoopRealtimeAiMaximumApHundredths(actor);
+    if (state.currentActionPointsHundredths < 0) {
+        state.currentActionPointsHundredths = maximum;
+        state.nextApRegenTick = now + 1000;
+        state.apRegenDelayTicks = 0;
+        return;
+    }
+
+    state.currentActionPointsHundredths = std::min(state.currentActionPointsHundredths, maximum);
+    int processedTicks = 0;
+    while (static_cast<Sint32>(now - state.nextApRegenTick) >= 0 && processedTicks < 10) {
+        if (state.apRegenDelayTicks > 0) {
+            state.apRegenDelayTicks--;
+        } else if (state.currentActionPointsHundredths < maximum) {
+            state.currentActionPointsHundredths = std::min(maximum,
+                state.currentActionPointsHundredths + localCoopRealtimeAiRegenAmountHundredths(actor));
+        }
+        state.nextApRegenTick += 1000;
+        processedTicks++;
+    }
+
+    if (processedTicks == 10 && static_cast<Sint32>(now - state.nextApRegenTick) >= 0) {
+        state.nextApRegenTick = now + 1000;
+    }
 }
 
 inline int localCoopRealtimeAiActionSlice(Object* actor)
@@ -126,6 +179,11 @@ inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferr
     LocalCoopRealtimeAiActorState& state = result.first->second;
     if (result.second || state.nextActionTick == 0) {
         state.nextActionTick = now + localCoopRealtimeAiInitialStagger(actor);
+    }
+    if (result.second || state.currentActionPointsHundredths < 0) {
+        state.currentActionPointsHundredths = localCoopRealtimeAiMaximumApHundredths(actor);
+        state.nextApRegenTick = now + 1000;
+        state.apRegenDelayTicks = 0;
     }
     state.preferredTargetId = preferredTarget != nullptr ? preferredTarget->id : -1;
 
@@ -279,6 +337,8 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         return;
     }
 
+    localCoopRealtimeAiUpdateActionPoints(actor, state, now);
+
     Object* target = preferredTarget;
     if (target == nullptr
         || !localCoopActorIsHumanOwned(target)
@@ -307,6 +367,14 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         actionSlice = 2;
     }
 
+    int actionCostHundredths = actionSlice * 100;
+    if (state.currentActionPointsHundredths < actionCostHundredths) {
+        // A critter with an empty AP pool waits for the timed regeneration event
+        // instead of re-entering stock AI over and over.
+        state.nextActionTick = now + 100;
+        return;
+    }
+
     int savedActionPoints = actor->data.critter.combat.ap;
     actor->data.critter.combat.ap = std::max(20, actionSlice);
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
@@ -316,14 +384,35 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     }
 
     if (badShot == COMBAT_BAD_SHOT_OK) {
-        _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
+        int attackRc = _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
         actor->data.critter.combat.ap = savedActionPoints;
-        state.nextActionTick = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
-        localCoopDangerTouch();
+        if (attackRc == 0) {
+            state.currentActionPointsHundredths = std::max(0,
+                state.currentActionPointsHundredths - actionCostHundredths);
+            state.apRegenDelayTicks = std::max(state.apRegenDelayTicks, 1);
+            state.nextActionTick = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
+            debugPrint("[COOP REALTIME AI] actorId=%d attack cost=%d ap=%d next=%u\n",
+                actor->id,
+                actionCostHundredths,
+                state.currentActionPointsHundredths,
+                state.nextActionTick);
+            localCoopDangerTouch();
+        } else {
+            state.nextActionTick = now + 250;
+            debugPrint("[COOP REALTIME AI] actorId=%d attack-sequence-failed rc=%d\n",
+                actor->id,
+                attackRc);
+        }
         return;
     }
 
     actor->data.critter.combat.ap = savedActionPoints;
+
+    constexpr int kMoveCostHundredths = 100;
+    if (state.currentActionPointsHundredths < kMoveCostHundredths) {
+        state.nextActionTick = now + 100;
+        return;
+    }
 
     int moveRc = -1;
     if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED | ANIMATION_REQUEST_INSIGNIFICANT) != -1) {
@@ -333,6 +422,10 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         } else {
             reg_anim_end();
         }
+    }
+    if (moveRc != -1) {
+        state.currentActionPointsHundredths = std::max(0,
+            state.currentActionPointsHundredths - kMoveCostHundredths);
     }
     state.nextActionTick = now + (moveRc == -1 ? 300 : 450);
     localCoopDangerTouch();
