@@ -3,6 +3,7 @@
 
 #include "combat_defs.h"
 #include "db.h"
+#include "debug.h"
 #include "interpreter.h"
 #include "local_coop_danger.h"
 #include "obj_types.h"
@@ -220,23 +221,31 @@ inline void localCoopScriptsRequestCombatLockedDispatch(CombatStartData* combat)
 
 inline void localCoopScriptsRequestTownMapDispatch()
 {
-    if (!localCoopDangerBlocksMapExit()) {
-        scripts_request_townmap();
-    }
+    debugPrint(
+        "[COOP MAP EXIT] town-map request danger=%d hostiles=%d\n",
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
+    scripts_request_townmap();
 }
 
 inline void localCoopScriptsRequestWorldMapDispatch()
 {
-    if (!localCoopDangerBlocksMapExit()) {
-        scriptsRequestWorldMap();
-    }
+    // Realtime danger is not Fallout's turn-based combat mode. Never swallow
+    // an original exit request: the exit grid generally fires only once.
+    debugPrint(
+        "[COOP MAP EXIT] world-road request danger=%d hostiles=%d\n",
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
+    scriptsRequestWorldMap();
 }
 
 inline int localCoopScriptsRequestElevatorDispatch(Object* object, int elevator)
 {
-    if (localCoopDangerBlocksMapExit()) {
-        return 0;
-    }
+    debugPrint(
+        "[COOP MAP EXIT] elevator=%d danger=%d hostiles=%d\n",
+        elevator,
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
     return scriptsRequestElevator(object, elevator);
 }
 
