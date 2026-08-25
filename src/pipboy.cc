@@ -1847,14 +1847,40 @@ static void pipboyWindowRenderUnifiedWorldMap()
         state.activeChain.valid ? state.activeChain.depth + 1 : 0,
         state.activeChain.valid ? state.activeChain.length : 0);
     windowDrawText(gPipboyWindow, line, 340, left, 338, _colorTable[992]);
+    const UnifiedWorldSystemCellState& selectedCell =
+        world.cells[unifiedWorldSystemCellIndex(selectedX, selectedY)];
+    if ((selectedCell.flags & UNIFIED_WORLD_CELL_CLEARED) != 0) {
+        uint32_t now = gameTimeGetTime();
+        uint32_t elapsed = selectedCell.lastVisitGameTime > 0
+                && now >= static_cast<uint32_t>(selectedCell.lastVisitGameTime)
+            ? now - static_cast<uint32_t>(selectedCell.lastVisitGameTime)
+            : 0;
+        uint32_t delay = unifiedWorldSystemEncounterRegenDelay(selectedCell);
+        uint32_t remaining = elapsed < delay ? delay - elapsed : 0;
+        uint32_t days = (remaining + kUnifiedWorldSystemGameDayTicks - 1)
+            / kUnifiedWorldSystemGameDayTicks;
+        snprintf(
+            line,
+            sizeof(line),
+            remaining > 0
+                ? "TARGET CLEARED   REGEN IN %u DAY%s"
+                : "TARGET CLEARED   REGEN READY",
+            days,
+            days == 1 ? "" : "S");
+    } else if ((selectedCell.flags & UNIFIED_WORLD_CELL_TEMPORARY_DUNGEON) != 0) {
+        snprintf(line, sizeof(line), "TARGET TEMPORARY DUNGEON");
+    } else {
+        snprintf(line, sizeof(line), "TARGET ENCOUNTER ACTIVE");
+    }
+    windowDrawText(gPipboyWindow, line, 340, left, 354, _colorTable[992]);
     windowDrawText(
         gPipboyWindow,
         "ARROWS: MOVE GUIDE   ENTER: SET TARGET   ESC: CLOSE",
         340,
         left,
-        354,
+        370,
         _colorTable[992]);
-    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 374, _colorTable[992]);
+    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 388, _colorTable[992]);
 
     int logLines = std::min(static_cast<int>(state.logCount), 4);
     for (int index = 0; index < logLines; index++) {
@@ -1871,7 +1897,7 @@ static void pipboyWindowRenderUnifiedWorldMap()
             entry.cellX,
             entry.cellY,
             entry.mapIdx);
-        windowDrawText(gPipboyWindow, line, 340, left, 392 + index * 17, _colorTable[992]);
+        windowDrawText(gPipboyWindow, line, 340, left, 404 + index * 15, _colorTable[992]);
     }
 
     windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
