@@ -47,6 +47,11 @@ enum class LocalCoopUiMode {
     Barter,
 };
 
+enum class LocalCoopActionMode {
+    Interact,
+    Aim,
+};
+
 struct LocalCoopPlayer {
     int slot = 0;
     SDL_GameController* controller = nullptr;
@@ -73,6 +78,10 @@ struct LocalCoopPlayer {
     int moveY = 0;
     int aimX = 0;
     int aimY = 0;
+    LocalCoopActionMode actionMode = LocalCoopActionMode::Interact;
+    bool hexAimHeld = false;
+    int hexAimTile = -1;
+    bool controllerInputActive = false;
 };
 
 inline std::array<LocalCoopPlayer, kLocalCoopMaxPlayers> gLocalCoopPlayers;
@@ -107,7 +116,9 @@ inline int localCoopFindFreeControllerSlot()
 {
     for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
         const LocalCoopPlayer& player = gLocalCoopPlayers[index];
-        if (!player.connected && !player.slotLocked) {
+        // P1 is permanently reserved for the story actor, but the first
+        // controller must still be allowed to claim that reserved slot.
+        if (!player.connected && (index == 0 || !player.slotLocked)) {
             return index;
         }
     }
@@ -238,6 +249,8 @@ inline void localCoopClearController(LocalCoopPlayer& player)
     int activeHand = player.activeHand;
     int archetype = player.archetype;
     int gender = player.gender;
+    LocalCoopActionMode actionMode = player.actionMode;
+    bool controllerInputActive = player.controllerInputActive;
     char controllerGuid[64] {};
     snprintf(controllerGuid, sizeof(controllerGuid), "%s", player.controllerGuid);
 
@@ -250,6 +263,8 @@ inline void localCoopClearController(LocalCoopPlayer& player)
     player.activeHand = activeHand;
     player.archetype = archetype;
     player.gender = gender;
+    player.actionMode = actionMode;
+    player.controllerInputActive = controllerInputActive;
     snprintf(player.controllerGuid, sizeof(player.controllerGuid), "%s", controllerGuid);
 }
 
@@ -358,6 +373,45 @@ inline constexpr int kLocalCoopArchetypeStats[kLocalCoopArchetypeCount][PRIMARY_
     { 4, 6, 5, 6, 8, 6, 5 },
     { 4, 6, 4, 5, 9, 6, 6 },
 };
+
+inline bool localCoopApplyPlayerOneArchetype(int archetype, int gender)
+{
+    if (gDude == nullptr) {
+        return false;
+    }
+
+    archetype = std::max(0, std::min(archetype, kLocalCoopArchetypeCount - 1));
+    gender = gender == GENDER_FEMALE ? GENDER_FEMALE : GENDER_MALE;
+
+    for (int stat = 0; stat < PRIMARY_STAT_COUNT; stat++) {
+        if (critterSetBaseStat(gDude, stat, kLocalCoopArchetypeStats[archetype][stat]) != 0) {
+            return false;
+        }
+    }
+    if (critterSetBaseStat(gDude, STAT_GENDER, gender) != 0) {
+        return false;
+    }
+
+    critterUpdateDerivedStats(gDude);
+    gDude->data.critter.hp = critterGetStat(gDude, STAT_MAXIMUM_HIT_POINTS);
+    gDude->data.critter.combat.ap = critterGetStat(gDude, STAT_MAXIMUM_ACTION_POINTS);
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    player.slot = 0;
+    player.actor = gDude;
+    player.humanOwned = true;
+    player.slotLocked = true;
+    player.archetype = archetype;
+    player.gender = gender;
+    player.actionMode = LocalCoopActionMode::Interact;
+    player.hexAimHeld = false;
+    player.hexAimTile = -1;
+
+    debugPrint("[COOP CREATE] P1 archetype=%s gender=%d\n",
+        kLocalCoopArchetypeNames[archetype],
+        gender);
+    return true;
+}
 
 inline int localCoopFindSpawnTile(Object* anchor, int distance)
 {
