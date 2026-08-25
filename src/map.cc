@@ -1257,23 +1257,51 @@ int mapHandleTransition()
         if (!isInCombat()) {
             animationStop();
 
+            UnifiedGameId game = unifiedCampaignGetActiveGame();
+            UnifiedWorldSystemRoadDirection direction =
+                unifiedWorldSystemRoadDirectionFromTile(
+                    gDude != nullptr ? gDude->tile : -1);
             int nextMap = -1;
-            bool loadRouteMap = unifiedWorldSystemAdvanceEncounter(
-                unifiedCampaignGetActiveGame(),
+            bool loadRoadMap = unifiedWorldSystemTraverseRoad(
+                game,
                 gMapHeader.field_34,
-                -2,
-                &nextMap,
-                gameTimeGetTime());
+                direction,
+                gameTimeGetTime(),
+                &nextMap);
 
-            if (!loadRouteMap) {
-                int worldX = 0;
-                int worldY = 0;
-                if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
-                    const UnifiedFallout1WorldMapState& state =
-                        unifiedFallout1WorldMapGetStateConst();
-                    worldX = state.worldX;
-                    worldY = state.worldY;
+            if (loadRoadMap) {
+                const UnifiedWorldSystemTravelState& travel =
+                    unifiedWorldSystemGetStateConst().travel;
+                int gameIndex = unifiedWorldSystemGameIndex(game);
+                int worldX =
+                    travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+                    + kUnifiedWorldSystemCellSize / 2;
+                int worldY =
+                    travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+                    + kUnifiedWorldSystemCellSize / 2;
+
+                if (game == UnifiedGameId::Fallout1) {
+                    UnifiedFallout1WorldMapState& fallout1World =
+                        unifiedFallout1WorldMapGetState();
+                    fallout1World.worldX = worldX;
+                    fallout1World.worldY = worldY;
+                    fallout1World.currentTown = -1;
+                    int regionId =
+                        unifiedFallout1EncounterRegionAt(worldX, worldY);
+                    unifiedFallout1SetEncounterRegionGlobal(regionId);
                 } else {
+                    wmSetPartyWorldPos(worldX, worldY);
+                }
+
+                gMapTransition.map = nextMap;
+                gMapTransition.elevation = 0;
+                gMapTransition.tile = -1;
+                gMapTransition.rotation = 0;
+                mapLoadById(nextMap);
+            }
+            memset(&gMapTransition, 0, sizeof(gMapTransition));
+        }
+    } else {
                     wmGetPartyWorldPos(&worldX, &worldY);
                 }
                 unifiedWorldSystemSetCurrentWorldPosition(
