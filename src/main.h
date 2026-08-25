@@ -276,6 +276,10 @@ inline int localCoopMainInputGetInput()
 
     int keyCode = inputGetInput();
 
+    if (localCoopMobileHandleKey(keyCode)) {
+        return -1;
+    }
+
     // Keyboard or mouse immediately reclaims P1 input from an attached
     // controller and restores the normal pointer.
     if (gLocalCoopInitialized && keyCode != -1) {
