@@ -37,6 +37,9 @@ struct LocalCoopRuntimeSlot {
     bool secondaryWasDown = false;
     bool swapWasDown = false;
     bool postgameSwitchWasDown = false;
+    bool queuedAttackPending = false;
+    bool queuedAttackSecondary = false;
+    int queuedAttackTargetId = -1;
     Object* aimTarget = nullptr;
 };
 
@@ -121,6 +124,26 @@ inline bool localCoopReloadFromSharedPool(LocalCoopPlayer& player)
     return reloaded;
 }
 
+inline void localCoopQueueAttack(LocalCoopPlayer& player, Object* target, bool secondary)
+{
+    if (target == nullptr) {
+        return;
+    }
+
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+    runtime.queuedAttackPending = true;
+    runtime.queuedAttackSecondary = secondary;
+    runtime.queuedAttackTargetId = target->id;
+    runtime.aimTarget = target;
+}
+
+inline void localCoopClearQueuedAttack(LocalCoopRuntimeSlot& runtime)
+{
+    runtime.queuedAttackPending = false;
+    runtime.queuedAttackSecondary = false;
+    runtime.queuedAttackTargetId = -1;
+}
+
 // One attack backend for every human input path: controller RT/RB, controller A
 // context attacks, and P1 mouse left-click all land here. There is no separate
 // Fallout combat-mode attack path in the co-op world.
@@ -143,10 +166,31 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
         return false;
     }
 
+    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+    runtime.aimTarget = target;
+
     if (animationIsBusy(actor)) {
+        // Movement and other insignificant animation may be interrupted so the
+        // player stays responsive. Fallout marks attack/hit/death sequences as
+        // prioritized, and reg_anim_clear correctly refuses those with -2. In
+        // realtime mode that is a temporary lock, not a failed attack: remember
+        // the request and fire it as soon as the prioritized sequence completes.
         int clearRc = reg_anim_clear(actor);
         if (clearRc == -2) {
-            debugPrint("[COOP ATTACK] slot=%d blocked-by-prioritized-actor-animation\n", player.slot);
+            localCoopQueueAttack(player, target, secondary);
+            debugPrint("[COOP ATTACK] slot=%d queued-behind-prioritized-actor-animation targetId=%d secondary=%d\n",
+                player.slot,
+                target->id,
+                secondary ? 1 : 0);
+            return false;
+        }
+
+        if (clearRc < 0 && animationIsBusy(actor)) {
+            localCoopQueueAttack(player, target, secondary);
+            debugPrint("[COOP ATTACK] slot=%d queued-behind-actor-animation targetId=%d clearRc=%d\n",
+                player.slot,
+                target->id,
+                clearRc);
             return false;
         }
     }
@@ -154,9 +198,6 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
     // Keep the actor's weapon code/FID synchronized with the same active hand
     // that supplies hit mode/range/ammo to combat.
     localCoopSyncActiveHandVisual(player.slot);
-
-    LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
-    runtime.aimTarget = target;
 
     int hand = localCoopGetActiveHand(player);
     Object* activeItem = localCoopGetActiveItem(player);
@@ -228,6 +269,7 @@ inline bool localCoopPerformAttackAgainst(LocalCoopPlayer& player, Object* targe
         activeItem != nullptr ? activeItem->pid : -1,
         hitMode);
 
+    localCoopClearQueuedAttack(runtime);
     localCoopRealtimeAiEngageHostile(target, actor);
     localCoopDangerTouch();
     gLocalCoopRealtimeCombatActive = true;
@@ -249,6 +291,62 @@ inline bool localCoopPerformAttack(LocalCoopPlayer& player, bool secondary)
     }
 
     return localCoopPerformAttackAgainst(player, target, secondary);
+}
+
+inline void localCoopProcessQueuedAttacks(Uint32 now)
+{
+    for (LocalCoopPlayer& player : gLocalCoopPlayers) {
+        LocalCoopRuntimeSlot& runtime = gLocalCoopRuntimeSlots[player.slot];
+        if (!runtime.queuedAttackPending) {
+            continue;
+        }
+
+        Object* actor = player.actor;
+        if (!player.humanOwned
+            || actor == nullptr
+            || player.uiMode != LocalCoopUiMode::World
+            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
+            localCoopClearQueuedAttack(runtime);
+            continue;
+        }
+
+        Uint32 nextAttackTick = runtime.queuedAttackSecondary
+            ? runtime.nextSecondaryAttackTick
+            : runtime.nextPrimaryAttackTick;
+        if (!localCoopTickReached(now, nextAttackTick)) {
+            continue;
+        }
+
+        Object* target = runtime.queuedAttackTargetId != -1
+            ? objectFindById(runtime.queuedAttackTargetId)
+            : nullptr;
+        if (target == nullptr || !localCoopFocusPointerIsLive(target)) {
+            localCoopClearQueuedAttack(runtime);
+            continue;
+        }
+
+        bool secondary = runtime.queuedAttackSecondary;
+        int hitMode = localCoopGetHitMode(player, secondary);
+
+        // Clear before dispatch. If a prioritized animation is still active,
+        // localCoopPerformAttackAgainst re-queues the request. Any other failure
+        // is intentionally dropped so stale bad-shot requests cannot loop forever.
+        localCoopClearQueuedAttack(runtime);
+        if (localCoopPerformAttackAgainst(player, target, secondary)) {
+            Uint32 cooldown = localCoopGetAttackCooldown(actor, hitMode);
+            if (secondary) {
+                runtime.nextSecondaryAttackTick = now + cooldown;
+            } else {
+                runtime.nextPrimaryAttackTick = now + cooldown;
+            }
+        } else if (!runtime.queuedAttackPending) {
+            if (secondary) {
+                runtime.nextSecondaryAttackTick = now + 100;
+            } else {
+                runtime.nextPrimaryAttackTick = now + 100;
+            }
+        }
+    }
 }
 
 inline void localCoopProcessPostgameWorldSwitch()
@@ -288,6 +386,11 @@ inline void localCoopProcessPostgameWorldSwitch()
 inline void localCoopProcessCombatInput()
 {
     Uint32 now = SDL_GetTicks();
+
+    // A mouse click or context attack that lands during a prioritized Fallout
+    // attack/hit sequence must not be lost. Service those queued one-shot inputs
+    // first; held RT input below then naturally observes the updated cooldown.
+    localCoopProcessQueuedAttacks(now);
 
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
         bool hasController = player.connected && player.controller != nullptr;
@@ -413,6 +516,7 @@ inline void localCoopSetRealtimeCombatActive(bool active)
             runtime.nextPrimaryAttackTick = 0;
             runtime.nextSecondaryAttackTick = 0;
             runtime.nextReloadTick = 0;
+            localCoopClearQueuedAttack(runtime);
             gLocalCoopFocusSlots[index].combatTarget = nullptr;
             gLocalCoopFocusSlots[index].interactionTarget = nullptr;
         }
