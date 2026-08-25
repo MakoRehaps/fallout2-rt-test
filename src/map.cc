@@ -1244,7 +1244,6 @@ int mapHandleTransition()
     }
 
     gameMouseObjectsHide();
-
     gameMouseSetCursor(MOUSE_CURSOR_NONE);
 
     if (gMapTransition.map == -1) {
@@ -1286,9 +1285,8 @@ int mapHandleTransition()
                     fallout1World.worldX = worldX;
                     fallout1World.worldY = worldY;
                     fallout1World.currentTown = -1;
-                    int regionId =
-                        unifiedFallout1EncounterRegionAt(worldX, worldY);
-                    unifiedFallout1SetEncounterRegionGlobal(regionId);
+                    unifiedFallout1SetEncounterRegionGlobal(
+                        unifiedFallout1EncounterRegionAt(worldX, worldY));
                 } else {
                     wmSetPartyWorldPos(worldX, worldY);
                 }
@@ -1299,64 +1297,34 @@ int mapHandleTransition()
                 gMapTransition.rotation = 0;
                 mapLoadById(nextMap);
             }
-            memset(&gMapTransition, 0, sizeof(gMapTransition));
-        }
-    } else {
-                    wmGetPartyWorldPos(&worldX, &worldY);
-                }
-                unifiedWorldSystemSetCurrentWorldPosition(
-                    unifiedCampaignGetActiveGame(),
-                    worldX,
-                    worldY);
 
-                pipboyOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
-                loadRouteMap = unifiedWorldSystemStartNextRouteCell(
-                    unifiedCampaignGetActiveGame(),
-                    gameTimeGetTime(),
-                    &nextMap);
-                if (loadRouteMap
-                    && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout2) {
-                    unifiedWorldSystemRestoreFallout2EncounterContext(nextMap, -1, -1);
-                }
-            }
-
-            if (loadRouteMap
-                && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
-                const UnifiedWorldSystemTravelState& travel =
-                    unifiedWorldSystemGetStateConst().travel;
-                int gameIndex = unifiedWorldSystemGameIndex(UnifiedGameId::Fallout1);
-                int regionId = unifiedFallout1EncounterRegionAt(
-                    travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
-                        + kUnifiedWorldSystemCellSize / 2,
-                    travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
-                        + kUnifiedWorldSystemCellSize / 2);
-                unifiedFallout1SetEncounterRegionGlobal(regionId);
-            }
-
-            if (loadRouteMap && nextMap >= 0) {
-                gMapTransition.map = nextMap;
-                gMapTransition.elevation = 0;
-                gMapTransition.tile = -1;
-                gMapTransition.rotation = 0;
-                mapLoadById(nextMap);
-            }
             memset(&gMapTransition, 0, sizeof(gMapTransition));
         }
     } else {
         if (!isInCombat()) {
-            if (gMapTransition.map != gMapHeader.field_34 || gElevation == gMapTransition.elevation) {
+            if (gMapTransition.map != gMapHeader.field_34
+                || gElevation == gMapTransition.elevation) {
                 mapLoadById(gMapTransition.map);
             }
 
-            if (gMapTransition.tile != -1 && gMapTransition.tile != 0
-                && gMapHeader.field_34 != MAP_MODOC_BEDNBREAKFAST && gMapHeader.field_34 != MAP_THE_SQUAT_A
+            if (gMapTransition.tile != -1
+                && gMapTransition.tile != 0
+                && gMapHeader.field_34 != MAP_MODOC_BEDNBREAKFAST
+                && gMapHeader.field_34 != MAP_THE_SQUAT_A
                 && elevationIsValid(gMapTransition.elevation)) {
-                objectSetLocation(gDude, gMapTransition.tile, gMapTransition.elevation, nullptr);
+                objectSetLocation(
+                    gDude,
+                    gMapTransition.tile,
+                    gMapTransition.elevation,
+                    nullptr);
                 mapSetElevation(gMapTransition.elevation);
                 objectSetRotation(gDude, gMapTransition.rotation, nullptr);
             }
 
-            if (tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW) == -1) {
+            if (tileSetCenter(
+                    gDude->tile,
+                    TILE_SET_CENTER_REFRESH_WINDOW)
+                == -1) {
                 debugPrint("\nError: map: attempt to center out-of-bounds!");
             }
 
@@ -1365,7 +1333,8 @@ int mapHandleTransition()
             int city;
             wmMatchAreaContainingMapIdx(gMapHeader.field_34, &city);
             if (wmTeleportToArea(city) == -1) {
-                debugPrint("\nError: couldn't make jump on worldmap for map jump!");
+                debugPrint(
+                    "\nError: couldn't make jump on worldmap for map jump!");
             }
         }
     }
