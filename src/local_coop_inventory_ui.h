@@ -20,8 +20,8 @@
 
 namespace fallout {
 
-inline constexpr int kLocalCoopHandLeft = 0;
-inline constexpr int kLocalCoopHandRight = 1;
+inline constexpr int kLocalCoopHandLeft = HAND_LEFT;
+inline constexpr int kLocalCoopHandRight = HAND_RIGHT;
 
 struct LocalCoopInventoryUiSlot {
     int selectedSharedIndex = 0;
@@ -29,6 +29,8 @@ struct LocalCoopInventoryUiSlot {
     bool upWasDown = false;
     bool downWasDown = false;
     bool confirmWasDown = false;
+    bool leftEquipWasDown = false;
+    bool rightEquipWasDown = false;
     bool rightUnequipWasDown = false;
     bool leftUnequipWasDown = false;
     bool useWasDown = false;
@@ -49,7 +51,6 @@ inline bool localCoopAnyInventoryUiOpen()
             return true;
         }
     }
-
     return false;
 }
 
@@ -69,7 +70,6 @@ inline int localCoopSharedInventoryVisibleCount()
         }
         count++;
     }
-
     return count;
 }
 
@@ -99,10 +99,8 @@ inline Object* localCoopSharedInventoryVisibleItem(int visibleIndex, int* quanti
             }
             return item;
         }
-
         current++;
     }
-
     return nullptr;
 }
 
@@ -111,7 +109,7 @@ inline const char* localCoopUiItemName(Object* item)
     return item != nullptr ? itemGetName(item) : "-";
 }
 
-inline bool localCoopEquipSelectedSharedItem(int slot)
+inline bool localCoopEquipSelectedSharedItem(int slot, int requestedHand)
 {
     if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
         return false;
@@ -124,8 +122,7 @@ inline bool localCoopEquipSelectedSharedItem(int slot)
         return false;
     }
 
-    LocalCoopInventoryUiSlot& ui = gLocalCoopInventoryUiSlots[slot];
-    Object* item = localCoopSharedInventoryVisibleItem(ui.selectedSharedIndex);
+    Object* item = localCoopSharedInventoryVisibleItem(gLocalCoopInventoryUiSlots[slot].selectedSharedIndex);
     if (item == nullptr) {
         return false;
     }
@@ -138,7 +135,7 @@ inline bool localCoopEquipSelectedSharedItem(int slot)
             }
         }
 
-        if (_invenWieldFunc(actor, item, kLocalCoopHandRight, true) != 0) {
+        if (_invenWieldFunc(actor, item, HAND_RIGHT, true) != 0) {
             if (actor != sharedOwner && item->owner == actor) {
                 itemMoveForce(actor, sharedOwner, item, 1);
             }
@@ -147,11 +144,21 @@ inline bool localCoopEquipSelectedSharedItem(int slot)
         return true;
     }
 
-    if (itemType == ITEM_TYPE_WEAPON) {
-        return localCoopEquipSharedItem(slot, item, kLocalCoopHandRight);
+    if (itemType != ITEM_TYPE_WEAPON) {
+        return false;
     }
 
-    return false;
+    int hand = requestedHand;
+    if (hand != HAND_LEFT && hand != HAND_RIGHT) {
+        hand = localCoopGetActiveHand(player);
+    }
+
+    if (!localCoopEquipSharedItem(slot, item, hand)) {
+        return false;
+    }
+
+    localCoopSetActiveHand(slot, hand, false);
+    return true;
 }
 
 inline bool localCoopUseSelectedSharedItem(int slot)
@@ -167,8 +174,7 @@ inline bool localCoopUseSelectedSharedItem(int slot)
         return false;
     }
 
-    Object* item = localCoopSharedInventoryVisibleItem(
-        gLocalCoopInventoryUiSlots[slot].selectedSharedIndex);
+    Object* item = localCoopSharedInventoryVisibleItem(gLocalCoopInventoryUiSlots[slot].selectedSharedIndex);
     if (item == nullptr) {
         return false;
     }
@@ -194,20 +200,15 @@ inline bool localCoopUseSelectedSharedItem(int slot)
             success = true;
             consumed = true;
         }
-    } else {
-        // Match stock inventory semantics: temporarily detach the object before
-        // executing its use script/proto hook, then put it back if it was not
-        // consumed. This keeps scripted misc/weapon use behavior intact.
-        if (itemRemove(actor, item, 1) == 0) {
-            int useResult = _protinst_use_item(actor, item);
-            if (useResult == 1) {
-                _obj_destroy(item);
-                consumed = true;
-                success = true;
-            } else {
-                itemAdd(actor, item, 1);
-                success = useResult != -1;
-            }
+    } else if (itemRemove(actor, item, 1) == 0) {
+        int useResult = _protinst_use_item(actor, item);
+        if (useResult == 1) {
+            _obj_destroy(item);
+            consumed = true;
+            success = true;
+        } else {
+            itemAdd(actor, item, 1);
+            success = useResult != -1;
         }
     }
 
@@ -232,18 +233,13 @@ inline bool localCoopDropSelectedSharedItem(int slot)
         return false;
     }
 
-    Object* item = localCoopSharedInventoryVisibleItem(
-        gLocalCoopInventoryUiSlots[slot].selectedSharedIndex);
+    Object* item = localCoopSharedInventoryVisibleItem(gLocalCoopInventoryUiSlots[slot].selectedSharedIndex);
     if (item == nullptr || item->pid == PROTO_ID_MONEY) {
-        // Stock money dropping has special amount bookkeeping. Keep caps in the
-        // shared pool until the live quantity selector is implemented.
         return false;
     }
 
-    if (actor != sharedOwner) {
-        if (itemMoveForce(sharedOwner, actor, item, 1) != 0) {
-            return false;
-        }
+    if (actor != sharedOwner && itemMoveForce(sharedOwner, actor, item, 1) != 0) {
+        return false;
     }
 
     int rc = _obj_drop(actor, item);
@@ -280,17 +276,17 @@ inline void localCoopInventoryUiProcessInput()
         bool upDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0;
         bool downDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0;
         bool confirmDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
+        bool leftEquipDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+        bool rightEquipDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
         bool rightUnequipDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_B) != 0;
         bool leftUnequipDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
         bool useDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
         bool dropDown = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000;
 
         if (backDown && !ui.backWasDown) {
-            if (player.uiMode == LocalCoopUiMode::Inventory) {
-                player.uiMode = LocalCoopUiMode::World;
-            } else if (player.uiMode == LocalCoopUiMode::World) {
-                player.uiMode = LocalCoopUiMode::Inventory;
-            }
+            player.uiMode = player.uiMode == LocalCoopUiMode::Inventory
+                ? LocalCoopUiMode::World
+                : LocalCoopUiMode::Inventory;
         }
 
         if (player.uiMode == LocalCoopUiMode::Inventory) {
@@ -298,32 +294,36 @@ inline void localCoopInventoryUiProcessInput()
                 ui.selectedSharedIndex--;
                 localCoopInventoryUiClampSelection(slot);
             }
-
             if (downDown && !ui.downWasDown) {
                 ui.selectedSharedIndex++;
                 localCoopInventoryUiClampSelection(slot);
             }
 
             if (confirmDown && !ui.confirmWasDown) {
-                localCoopEquipSelectedSharedItem(slot);
+                localCoopEquipSelectedSharedItem(slot, localCoopGetActiveHand(player));
+                localCoopInventoryUiClampSelection(slot);
+            }
+            if (leftEquipDown && !ui.leftEquipWasDown) {
+                localCoopEquipSelectedSharedItem(slot, HAND_LEFT);
+                localCoopInventoryUiClampSelection(slot);
+            }
+            if (rightEquipDown && !ui.rightEquipWasDown) {
+                localCoopEquipSelectedSharedItem(slot, HAND_RIGHT);
                 localCoopInventoryUiClampSelection(slot);
             }
 
             if (rightUnequipDown && !ui.rightUnequipWasDown) {
-                localCoopUnequipToSharedPool(slot, kLocalCoopHandRight);
+                localCoopUnequipToSharedPool(slot, HAND_RIGHT);
                 localCoopInventoryUiClampSelection(slot);
             }
-
             if (leftUnequipDown && !ui.leftUnequipWasDown) {
-                localCoopUnequipToSharedPool(slot, kLocalCoopHandLeft);
+                localCoopUnequipToSharedPool(slot, HAND_LEFT);
                 localCoopInventoryUiClampSelection(slot);
             }
-
             if (useDown && !ui.useWasDown) {
                 localCoopUseSelectedSharedItem(slot);
                 localCoopInventoryUiClampSelection(slot);
             }
-
             if (dropDown && !ui.dropWasDown) {
                 localCoopDropSelectedSharedItem(slot);
                 localCoopInventoryUiClampSelection(slot);
@@ -334,6 +334,8 @@ inline void localCoopInventoryUiProcessInput()
         ui.upWasDown = upDown;
         ui.downWasDown = downDown;
         ui.confirmWasDown = confirmDown;
+        ui.leftEquipWasDown = leftEquipDown;
+        ui.rightEquipWasDown = rightEquipDown;
         ui.rightUnequipWasDown = rightUnequipDown;
         ui.leftUnequipWasDown = leftUnequipDown;
         ui.useWasDown = useDown;
@@ -409,23 +411,19 @@ inline void localCoopInventoryUiRender()
 
         char line[160];
         if (actor != nullptr) {
-            std::snprintf(line,
-                sizeof(line),
-                "P%d %s%s",
-                slot + 1,
-                critterGetName(actor),
-                player.uiMode == LocalCoopUiMode::Inventory ? " [EDIT]" : "");
+            std::snprintf(line, sizeof(line), "P%d %s%s", slot + 1, critterGetName(actor), player.uiMode == LocalCoopUiMode::Inventory ? " [EDIT]" : "");
         } else {
             std::snprintf(line, sizeof(line), "P%d -", slot + 1);
         }
         windowDrawText(win, line, columnWidth - 16, x, 28, textColor);
 
         if (actor != nullptr) {
+            int activeHand = localCoopGetActiveHand(player);
             std::snprintf(line, sizeof(line), "ARM: %s", localCoopUiItemName(critterGetArmor(actor)));
             windowDrawText(win, line, columnWidth - 16, x, 46, dimColor);
-            std::snprintf(line, sizeof(line), "L: %s", localCoopUiItemName(critterGetItem1(actor)));
+            std::snprintf(line, sizeof(line), "%sL: %s", activeHand == HAND_LEFT ? ">" : " ", localCoopUiItemName(critterGetItem1(actor)));
             windowDrawText(win, line, columnWidth - 16, x, 62, dimColor);
-            std::snprintf(line, sizeof(line), "R: %s", localCoopUiItemName(critterGetItem2(actor)));
+            std::snprintf(line, sizeof(line), "%sR: %s", activeHand == HAND_RIGHT ? ">" : " ", localCoopUiItemName(critterGetItem2(actor)));
             windowDrawText(win, line, columnWidth - 16, x, 78, dimColor);
         }
     }
@@ -433,7 +431,7 @@ inline void localCoopInventoryUiRender()
     int sharedTop = 104;
     windowDrawLine(win, 6, sharedTop - 4, width - 7, sharedTop - 4, textColor);
     windowDrawText(win,
-        "SHARED POOL  D-pad select / A equip / X use / RT drop / B right off / Y left off / Back close",
+        "POOL: D-pad select | LB equip L | RB equip R | A equip active | B/Y unequip R/L | X use | RT drop",
         width - 20,
         10,
         sharedTop,
@@ -481,12 +479,7 @@ inline void localCoopInventoryUiRender()
         }
 
         char line[256];
-        std::snprintf(line,
-            sizeof(line),
-            "%s%-36s x%d",
-            selectors,
-            itemGetName(item),
-            quantity);
+        std::snprintf(line, sizeof(line), "%s%-36s x%d", selectors, itemGetName(item), quantity);
         windowDrawText(win, line, width - 24, 12, sharedTop + 22 + row * rowHeight, textColor);
     }
 
