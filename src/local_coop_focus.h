@@ -25,6 +25,31 @@ struct LocalCoopFocusSlot {
 
 inline std::array<LocalCoopFocusSlot, kLocalCoopMaxPlayers> gLocalCoopFocusSlots;
 
+// Focus is retained across frames, but Fallout can destroy a critter/item while
+// the controller still has it selected. Never dereference a retained pointer
+// until it has been found in the engine's current live-object list.
+inline bool localCoopFocusPointerIsLive(const Object* candidate)
+{
+    if (candidate == nullptr) {
+        return false;
+    }
+
+    Object* object = objectFindFirst();
+    while (object != nullptr) {
+        if (object == candidate) {
+            return true;
+        }
+        object = objectFindNext();
+    }
+
+    return false;
+}
+
+inline Object* localCoopFocusResolveLivePointer(Object* candidate)
+{
+    return localCoopFocusPointerIsLive(candidate) ? candidate : nullptr;
+}
+
 inline int localCoopFocusRotationDifference(int lhs, int rhs)
 {
     int difference = std::abs(lhs - rhs) % ROTATION_COUNT;
@@ -62,10 +87,11 @@ inline int localCoopFocusCombatRange(const Object* actor)
 
 inline bool localCoopFocusTargetStillUsable(const Object* actor, const Object* target, int maxDistance)
 {
-    return actor != nullptr
-        && target != nullptr
-        && actor != target
-        && target->elevation == actor->elevation
+    if (actor == nullptr || target == nullptr || actor == target || !localCoopFocusPointerIsLive(target)) {
+        return false;
+    }
+
+    return target->elevation == actor->elevation
         && (target->flags & OBJECT_HIDDEN) == 0
         && objectGetDistanceBetween(const_cast<Object*>(actor), const_cast<Object*>(target)) <= maxDistance;
 }
@@ -129,8 +155,10 @@ inline void localCoopFocusReleaseOutline(int slot)
     }
 
     LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[slot];
-    Object* object = focus.outlinedTarget;
+    Object* object = localCoopFocusResolveLivePointer(focus.outlinedTarget);
     if (object == nullptr) {
+        focus.outlinedTarget = nullptr;
+        focus.savedOutline = 0;
         return;
     }
 
@@ -162,13 +190,18 @@ inline void localCoopFocusApplyOutline(int slot, Object* target, bool hostile)
     }
 
     LocalCoopFocusSlot& focus = gLocalCoopFocusSlots[slot];
+    if (focus.outlinedTarget != nullptr && !localCoopFocusPointerIsLive(focus.outlinedTarget)) {
+        focus.outlinedTarget = nullptr;
+        focus.savedOutline = 0;
+    }
+
     if (focus.outlinedTarget == target) {
         return;
     }
 
     localCoopFocusReleaseOutline(slot);
 
-    if (target == nullptr || (target->flags & OBJECT_NO_HIGHLIGHT) != 0) {
+    if (target == nullptr || !localCoopFocusPointerIsLive(target) || (target->flags & OBJECT_NO_HIGHLIGHT) != 0) {
         return;
     }
 
@@ -195,7 +228,7 @@ inline void localCoopFocusApplyOutline(int slot, Object* target, bool hostile)
 
 inline double localCoopFocusAimError(const LocalCoopPlayer& player, const Object* target)
 {
-    if (player.actor == nullptr || target == nullptr || (player.aimX == 0 && player.aimY == 0)) {
+    if (player.actor == nullptr || target == nullptr || !localCoopFocusPointerIsLive(target) || (player.aimX == 0 && player.aimY == 0)) {
         return 0.0;
     }
 
@@ -229,6 +262,10 @@ inline Object* localCoopFocusFindEnemy(LocalCoopPlayer& player)
 
     if (!activelyAiming && localCoopFocusIsEnemy(actor, focus.combatTarget)) {
         return focus.combatTarget;
+    }
+
+    if (focus.combatTarget != nullptr && !localCoopFocusPointerIsLive(focus.combatTarget)) {
+        focus.combatTarget = nullptr;
     }
 
     Object** critters = nullptr;
@@ -281,6 +318,10 @@ inline Object* localCoopFocusFindInteractable(LocalCoopPlayer& player)
 
     if (aimRotation == -1 && localCoopFocusIsInteractable(actor, focus.interactionTarget)) {
         return focus.interactionTarget;
+    }
+
+    if (focus.interactionTarget != nullptr && !localCoopFocusPointerIsLive(focus.interactionTarget)) {
+        focus.interactionTarget = nullptr;
     }
 
     if (aimRotation == -1) {
