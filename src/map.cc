@@ -1297,8 +1297,12 @@ int mapHandleTransition()
                 fallout1World.worldX = worldX;
                 fallout1World.worldY = worldY;
                 fallout1World.currentTown = -1;
+                const UnifiedWorldSystemActiveChain& active =
+                    unifiedWorldSystemGetStateConst().activeChain;
                 unifiedFallout1SetEncounterRegionGlobal(
-                    unifiedFallout1EncounterRegionAt(worldX, worldY));
+                    active.special != 0
+                        ? -1
+                        : unifiedFallout1EncounterRegionAt(worldX, worldY));
             } else {
                 wmSetPartyWorldPos(worldX, worldY);
             }
