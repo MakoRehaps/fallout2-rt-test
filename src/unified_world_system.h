@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include "unified_campaign.h"
 #include "unified_fallout1_worldmap_state.h"
 
@@ -80,7 +82,15 @@ struct UnifiedWorldSystemActiveChain {
 struct UnifiedWorldSystemTravelState {
     int32_t fallout1TargetTown;
     uint8_t fallout1TravelActive;
-    uint8_t reserved[3];
+    uint8_t pipboyTravelActive;
+    uint8_t selectionConfirmed;
+    uint8_t reserved;
+    int16_t currentCellX[kUnifiedWorldSystemGameCount];
+    int16_t currentCellY[kUnifiedWorldSystemGameCount];
+    int16_t selectedCellX[kUnifiedWorldSystemGameCount];
+    int16_t selectedCellY[kUnifiedWorldSystemGameCount];
+    int16_t targetCellX[kUnifiedWorldSystemGameCount];
+    int16_t targetCellY[kUnifiedWorldSystemGameCount];
 };
 
 struct UnifiedWorldSystemLogEntry {
@@ -211,6 +221,16 @@ inline void unifiedWorldSystemReset(UnifiedWorldSystemState& state)
     memset(&state, 0, sizeof(state));
     state.revision = 1;
     state.travel.fallout1TargetTown = -1;
+    state.travel.currentCellX[0] = 16;
+    state.travel.currentCellY[0] = 1;
+    state.travel.currentCellX[1] = 17;
+    state.travel.currentCellY[1] = 28;
+    for (int gameIndex = 0; gameIndex < kUnifiedWorldSystemGameCount; gameIndex++) {
+        state.travel.selectedCellX[gameIndex] = state.travel.currentCellX[gameIndex];
+        state.travel.selectedCellY[gameIndex] = state.travel.currentCellY[gameIndex];
+        state.travel.targetCellX[gameIndex] = state.travel.currentCellX[gameIndex];
+        state.travel.targetCellY[gameIndex] = state.travel.currentCellY[gameIndex];
+    }
     state.activeChain.gameId = -1;
     state.activeChain.currentMapIdx = -1;
     state.activeChain.encounterTableId = -1;
@@ -517,6 +537,84 @@ inline bool unifiedWorldSystemEnterTravelCell(
     return true;
 }
 
+inline void unifiedWorldSystemSetCurrentWorldPosition(
+    UnifiedGameId game,
+    int worldX,
+    int worldY)
+{
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    int cellX = std::max(0, std::min(worldX / kUnifiedWorldSystemCellSize, kUnifiedWorldSystemColumns - 1));
+    int cellY = std::max(0, std::min(worldY / kUnifiedWorldSystemCellSize, kUnifiedWorldSystemRows - 1));
+    UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetState().travel;
+    travel.currentCellX[gameIndex] = static_cast<int16_t>(cellX);
+    travel.currentCellY[gameIndex] = static_cast<int16_t>(cellY);
+    if (!travel.pipboyTravelActive) {
+        travel.selectedCellX[gameIndex] = static_cast<int16_t>(cellX);
+        travel.selectedCellY[gameIndex] = static_cast<int16_t>(cellY);
+    }
+}
+
+inline void unifiedWorldSystemMovePipboySelection(UnifiedGameId game, int dx, int dy)
+{
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetState().travel;
+    travel.selectedCellX[gameIndex] = static_cast<int16_t>(std::max(
+        0,
+        std::min(static_cast<int>(travel.selectedCellX[gameIndex]) + dx, kUnifiedWorldSystemColumns - 1)));
+    travel.selectedCellY[gameIndex] = static_cast<int16_t>(std::max(
+        0,
+        std::min(static_cast<int>(travel.selectedCellY[gameIndex]) + dy, kUnifiedWorldSystemRows - 1)));
+}
+
+inline void unifiedWorldSystemConfirmPipboySelection(UnifiedGameId game)
+{
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetState().travel;
+    travel.targetCellX[gameIndex] = travel.selectedCellX[gameIndex];
+    travel.targetCellY[gameIndex] = travel.selectedCellY[gameIndex];
+    travel.selectionConfirmed = 1;
+}
+
+inline bool unifiedWorldSystemStartNextRouteCell(
+    UnifiedGameId game,
+    uint32_t gameTime,
+    int* mapIdxPtr)
+{
+    if (mapIdxPtr == nullptr) {
+        return false;
+    }
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetState().travel;
+    if (travel.selectionConfirmed) {
+        travel.selectionConfirmed = 0;
+        travel.pipboyTravelActive = 1;
+    }
+    if (!travel.pipboyTravelActive) {
+        return false;
+    }
+
+    int currentX = travel.currentCellX[gameIndex];
+    int currentY = travel.currentCellY[gameIndex];
+    int targetX = travel.targetCellX[gameIndex];
+    int targetY = travel.targetCellY[gameIndex];
+    if (currentX == targetX && currentY == targetY) {
+        travel.pipboyTravelActive = 0;
+        return false;
+    }
+    currentX += targetX > currentX ? 1 : (targetX < currentX ? -1 : 0);
+    currentY += targetY > currentY ? 1 : (targetY < currentY ? -1 : 0);
+    travel.currentCellX[gameIndex] = static_cast<int16_t>(currentX);
+    travel.currentCellY[gameIndex] = static_cast<int16_t>(currentY);
+    UnifiedWorldSystemWorldState& world = unifiedWorldSystemGetState().worlds[gameIndex];
+    world.lastPhysicalCell = -1;
+    return unifiedWorldSystemEnterTravelCell(
+        game,
+        currentX * kUnifiedWorldSystemCellSize + kUnifiedWorldSystemCellSize / 2,
+        currentY * kUnifiedWorldSystemCellSize + kUnifiedWorldSystemCellSize / 2,
+        gameTime,
+        mapIdxPtr);
+}
+
 // Defined in worldmap.cc. It keeps Fallout 2's selected encounter population
 // available when a four-map chain advances to another original random map.
 void unifiedWorldSystemRestoreFallout2EncounterContext(
@@ -554,6 +652,16 @@ inline bool unifiedWorldSystemAdvanceEncounter(
             active.length,
             gameTime);
         active.valid = 0;
+        int routeMap = -1;
+        if (unifiedWorldSystemStartNextRouteCell(game, gameTime, &routeMap)) {
+            if (game == UnifiedGameId::Fallout2) {
+                unifiedWorldSystemRestoreFallout2EncounterContext(routeMap, -1, -1);
+            }
+            if (nextMapPtr != nullptr) {
+                *nextMapPtr = routeMap;
+            }
+            return true;
+        }
         return false;
     }
 
