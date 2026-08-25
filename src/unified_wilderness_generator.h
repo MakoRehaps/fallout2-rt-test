@@ -31,10 +31,10 @@ inline bool unifiedWildernessObjectIsRemovableMountainBlocker(Object* object)
     if (type == OBJ_TYPE_WALL) return true;
     if (type != OBJ_TYPE_SCENERY) return false;
 
-    // Preserve any loaded wreck/car art so it remains repairable. Everything
-    // else without a script is set dressing on these two wilderness templates
-    // and can be regenerated safely.
-    return unifiedVehicleTypeForObject(object) == UnifiedVehicleType::None;
+    // Avoid protoGetName/protoGetProto while processing mountain templates.
+    // A name scan across hundreds of scenery objects can refill and fragment
+    // the legacy movable heap. Preserve only already-known vehicle art.
+    return !unifiedVehiclePrototypePidIsKnown(object->pid);
 }
 
 inline uint32_t unifiedWildernessCurrentSeed(UnifiedGameId game, int mapIdx)
@@ -179,14 +179,29 @@ inline void unifiedWildernessMaybeGenerateVehicle(uint32_t seed, int elevation)
 inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int mapIdx)
 {
     unifiedVehicleResetEncounterSalvage();
-    unifiedVehicleIndexLoadedMapPrototypes();
 
-    if (!unifiedWildernessIsOpenMountainMap(game, mapIdx)) return;
+    if (!unifiedWildernessIsOpenMountainMap(game, mapIdx)) {
+        unifiedVehicleIndexLoadedMapPrototypes();
+        return;
+    }
 
-    std::vector<Object*> remove;
+    debugPrint("[WILDERNESS GEN] begin game=%d map=%d elevation=%d\n",
+        static_cast<int>(static_cast<uint32_t>(game)),
+        mapIdx,
+        gElevation);
+
+    std::vector<Object*> hide;
     for (Object* object = objectFindFirst(); object != nullptr; object = objectFindNext())
-        if (unifiedWildernessObjectIsRemovableMountainBlocker(object)) remove.push_back(object);
-    for (Object* object : remove) objectDestroy(object, nullptr);
+        if (unifiedWildernessObjectIsRemovableMountainBlocker(object)) hide.push_back(object);
+
+    // Hiding is safer and much cheaper than firing hundreds of individual
+    // object destruction paths while mapLoad is still constructing the map.
+    // Random maps are discarded on exit, so these authored blockers do not
+    // need to be permanently destroyed.
+    for (Object* object : hide) {
+        object->flags |= OBJECT_NO_BLOCK;
+        objectHide(object, nullptr);
+    }
 
     uint32_t seed = unifiedWildernessCurrentSeed(game, mapIdx);
     int rebuiltElevations = 0;
@@ -204,11 +219,11 @@ inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int ma
     unifiedWildernessMaybeGenerateVehicle(seed, entranceElevation);
     tileWindowRefresh();
 
-    debugPrint("[WILDERNESS GEN] game=%d map=%d seed=%08X removed=%d rebuiltElevations=%d floorVariants=%d exits=4 elevation=%d\n",
+    debugPrint("[WILDERNESS GEN] game=%d map=%d seed=%08X hidden=%d rebuiltElevations=%d floorVariants=%d exits=4 elevation=%d\n",
         static_cast<int>(static_cast<uint32_t>(game)),
         mapIdx,
         seed,
-        static_cast<int>(remove.size()),
+        static_cast<int>(hide.size()),
         rebuiltElevations,
         floorVariants,
         entranceElevation);
