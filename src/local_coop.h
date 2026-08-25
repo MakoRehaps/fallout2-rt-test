@@ -9,6 +9,7 @@
 
 #include "animation.h"
 #include "game.h"
+#include "interface.h"
 #include "inventory.h"
 #include "item.h"
 #include "local_coop_danger.h"
@@ -42,6 +43,7 @@ struct LocalCoopPlayer {
     bool connected = false;
     bool humanOwned = false;
     bool wantsRun = false;
+    int activeHand = HAND_RIGHT;
     int moveX = 0;
     int moveY = 0;
     int aimX = 0;
@@ -148,12 +150,14 @@ inline void localCoopClearController(LocalCoopPlayer& player)
     Object* actor = player.actor;
     bool humanOwned = player.humanOwned;
     LocalCoopUiMode uiMode = player.uiMode;
+    int activeHand = player.activeHand;
 
     player = LocalCoopPlayer{};
     player.slot = slot;
     player.actor = actor;
     player.humanOwned = humanOwned;
     player.uiMode = uiMode;
+    player.activeHand = activeHand;
 }
 
 inline void localCoopCloseControllerByJoystickId(SDL_JoystickID joystickId)
@@ -168,8 +172,6 @@ inline void localCoopCloseControllerByJoystickId(SDL_JoystickID joystickId)
 
 inline void localCoopRefreshControllers()
 {
-    // Do not depend on Fallout's legacy SDL event switch knowing about
-    // controller events. Validate currently open controllers each frame.
     for (LocalCoopPlayer& player : gLocalCoopPlayers) {
         if (player.connected
             && (player.controller == nullptr || !SDL_GameControllerGetAttached(player.controller))) {
@@ -177,7 +179,6 @@ inline void localCoopRefreshControllers()
         }
     }
 
-    // Then pick up newly connected XInput-compatible/SDL GameController pads.
     int joystickCount = SDL_NumJoysticks();
     for (int deviceIndex = 0; deviceIndex < joystickCount; deviceIndex++) {
         if (localCoopFindFreeControllerSlot() == -1) {
@@ -200,10 +201,18 @@ inline void localCoopInit()
 
     for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
         gLocalCoopPlayers[index].slot = index;
+        gLocalCoopPlayers[index].activeHand = HAND_RIGHT;
     }
 
     localCoopRefreshControllers();
     localCoopRefreshActorBindings();
+
+    if (gInterfaceBarWindow != -1) {
+        int hand = interfaceGetCurrentHand();
+        if (hand == HAND_LEFT || hand == HAND_RIGHT) {
+            gLocalCoopPlayers[0].activeHand = hand;
+        }
+    }
 }
 
 inline void localCoopShutdown()
@@ -251,7 +260,6 @@ inline int localCoopDirectionFromStick(int x, int y)
         return -1;
     }
 
-    // Convert analog stick angle to Fallout's six hex directions.
     double angle = std::atan2(static_cast<double>(-y), static_cast<double>(x));
     double normalized = angle;
     if (normalized < 0.0) {
@@ -260,7 +268,6 @@ inline int localCoopDirectionFromStick(int x, int y)
 
     int sector = static_cast<int>(std::floor((normalized + 0.52359877559829887308) / 1.04719755119659774615)) % 6;
 
-    // Stick sectors are E, NE, NW, W, SW, SE. Map to Fallout rotations.
     static const int rotations[6] = {
         ROTATION_E,
         ROTATION_NE,
@@ -299,6 +306,83 @@ inline LocalCoopPlayer* localCoopGetPlayerForActor(Object* object)
     return nullptr;
 }
 
+inline int localCoopGetActiveHand(LocalCoopPlayer& player)
+{
+    if (player.slot == 0 && player.actor == gDude && gInterfaceBarWindow != -1) {
+        int hand = interfaceGetCurrentHand();
+        if (hand == HAND_LEFT || hand == HAND_RIGHT) {
+            player.activeHand = hand;
+        }
+    }
+
+    if (player.activeHand != HAND_LEFT && player.activeHand != HAND_RIGHT) {
+        player.activeHand = HAND_RIGHT;
+    }
+    return player.activeHand;
+}
+
+inline bool localCoopSetActiveHand(int slot, int hand, bool animated = false)
+{
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers || (hand != HAND_LEFT && hand != HAND_RIGHT)) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    if (slot == 0 && player.actor == gDude && gInterfaceBarWindow != -1) {
+        int current = interfaceGetCurrentHand();
+        if (current != hand && interfaceBarSwapHands(animated) != 0) {
+            return false;
+        }
+    }
+
+    player.activeHand = hand;
+    return true;
+}
+
+inline bool localCoopSwapActiveHand(int slot, bool animated = false)
+{
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    int hand = localCoopGetActiveHand(player);
+    return localCoopSetActiveHand(slot, hand == HAND_LEFT ? HAND_RIGHT : HAND_LEFT, animated);
+}
+
+inline Object* localCoopGetActiveItem(LocalCoopPlayer& player)
+{
+    if (player.actor == nullptr) {
+        return nullptr;
+    }
+
+    return localCoopGetActiveHand(player) == HAND_LEFT
+        ? critterGetItem1(player.actor)
+        : critterGetItem2(player.actor);
+}
+
+inline int localCoopGetPrimaryHitMode(LocalCoopPlayer& player)
+{
+    int hand = localCoopGetActiveHand(player);
+    Object* item = localCoopGetActiveItem(player);
+    if (item == nullptr || itemGetType(item) != ITEM_TYPE_WEAPON) {
+        return hand == HAND_LEFT ? HIT_MODE_PUNCH : HIT_MODE_KICK;
+    }
+
+    return hand == HAND_LEFT ? HIT_MODE_LEFT_WEAPON_PRIMARY : HIT_MODE_RIGHT_WEAPON_PRIMARY;
+}
+
+inline int localCoopGetSecondaryHitMode(LocalCoopPlayer& player)
+{
+    int hand = localCoopGetActiveHand(player);
+    Object* item = localCoopGetActiveItem(player);
+    if (item == nullptr || itemGetType(item) != ITEM_TYPE_WEAPON) {
+        return hand == HAND_LEFT ? HIT_MODE_PUNCH : HIT_MODE_KICK;
+    }
+
+    return hand == HAND_LEFT ? HIT_MODE_LEFT_WEAPON_SECONDARY : HIT_MODE_RIGHT_WEAPON_SECONDARY;
+}
+
 inline void localCoopSetUiMode(int slot, LocalCoopUiMode mode)
 {
     if (slot < 0 || slot >= kLocalCoopMaxPlayers) {
@@ -323,9 +407,6 @@ inline bool localCoopMoveRespectsSharedScreen(Object* actor, int destination)
         return true;
     }
 
-    // Danger is not Fallout combat mode. Movement, running and interaction stay
-    // fully realtime; only stepping onto an actual exit grid is denied until the
-    // hostile encounter is cleared.
     if (localCoopDangerBlocksMapExit() && isExitGridAt(destination, actor->elevation)) {
         return false;
     }
@@ -341,9 +422,6 @@ inline bool localCoopMoveRespectsSharedScreen(Object* actor, int destination)
         return destinationDistance <= kLocalCoopCameraTetherTiles;
     }
 
-    // If a camera recenter or knockback leaves somebody outside the tether,
-    // never trap them there: movement toward the group remains legal, movement
-    // farther away does not.
     return destinationDistance < currentDistance;
 }
 
@@ -442,9 +520,6 @@ inline void localCoopSweepSharedInventory()
                 continue;
             }
 
-            // Human companions retain only physically equipped items. Everything
-            // else is moved into P1's inventory object, which acts as the shared
-            // party pool and is already supported by Fallout's save system.
             if ((item->flags & OBJECT_EQUIPPED) != 0) {
                 continue;
             }
@@ -496,7 +571,14 @@ inline bool localCoopEquipSharedItem(int slot, Object* item, int hand)
         }
     }
 
-    return _inven_wield(actor, item, hand) == 0;
+    if (_inven_wield(actor, item, hand) != 0) {
+        return false;
+    }
+
+    if (actor == gDude && gInterfaceBarWindow != -1) {
+        interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
+    }
+    return true;
 }
 
 inline bool localCoopUnequipToSharedPool(int slot, int hand)
@@ -511,7 +593,7 @@ inline bool localCoopUnequipToSharedPool(int slot, int hand)
         return false;
     }
 
-    Object* item = hand == 0 ? critterGetItem1(actor) : critterGetItem2(actor);
+    Object* item = hand == HAND_LEFT ? critterGetItem1(actor) : critterGetItem2(actor);
     if (item == nullptr) {
         return true;
     }
@@ -525,6 +607,9 @@ inline bool localCoopUnequipToSharedPool(int slot, int hand)
         itemMoveForce(actor, sharedOwner, item, 1);
     }
 
+    if (actor == gDude && gInterfaceBarWindow != -1) {
+        interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
+    }
     return true;
 }
 
