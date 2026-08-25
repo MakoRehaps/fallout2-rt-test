@@ -21,7 +21,7 @@ inline constexpr int kUnifiedWorldSystemMaxRegisteredMaps = 150;
 inline constexpr int kUnifiedWorldSystemLogCapacity = 32;
 inline constexpr int kUnifiedWorldSystemCellSize = 50;
 inline constexpr uint32_t kUnifiedWorldSystemChunkMagic = 0x31535755; // "UWS1"
-inline constexpr uint32_t kUnifiedWorldSystemChunkVersion = 1;
+inline constexpr uint32_t kUnifiedWorldSystemChunkVersion = 2;
 inline constexpr uint32_t kUnifiedWorldSystemDefaultSeed = 0x5753544D;
 inline constexpr uint32_t kUnifiedWorldSystemEventLifetime = 7 * 864000;
 
@@ -31,6 +31,13 @@ enum UnifiedWorldSystemCellFlags : uint8_t {
     UNIFIED_WORLD_CELL_CLEARED = 0x04,
     UNIFIED_WORLD_CELL_ACTIVE_EVENT = 0x08,
     UNIFIED_WORLD_CELL_TEMPORARY_DUNGEON = 0x10,
+};
+
+enum class UnifiedWorldSystemRoadDirection : int8_t {
+    North = 0,
+    East = 1,
+    South = 2,
+    West = 3,
 };
 
 enum class UnifiedWorldSystemLogType : uint8_t {
@@ -91,6 +98,9 @@ struct UnifiedWorldSystemTravelState {
     int16_t selectedCellY[kUnifiedWorldSystemGameCount];
     int16_t targetCellX[kUnifiedWorldSystemGameCount];
     int16_t targetCellY[kUnifiedWorldSystemGameCount];
+    int8_t lastRoadDirection[kUnifiedWorldSystemGameCount];
+    uint8_t roadMode;
+    uint8_t roadReserved;
 };
 
 struct UnifiedWorldSystemLogEntry {
@@ -230,7 +240,10 @@ inline void unifiedWorldSystemReset(UnifiedWorldSystemState& state)
         state.travel.selectedCellY[gameIndex] = state.travel.currentCellY[gameIndex];
         state.travel.targetCellX[gameIndex] = state.travel.currentCellX[gameIndex];
         state.travel.targetCellY[gameIndex] = state.travel.currentCellY[gameIndex];
+        state.travel.lastRoadDirection[gameIndex] =
+            static_cast<int8_t>(UnifiedWorldSystemRoadDirection::North);
     }
+    state.travel.roadMode = 1;
     state.activeChain.gameId = -1;
     state.activeChain.currentMapIdx = -1;
     state.activeChain.encounterTableId = -1;
@@ -621,6 +634,191 @@ void unifiedWorldSystemRestoreFallout2EncounterContext(
     int mapIdx,
     int encounterTableId,
     int encounterEntryId);
+
+
+inline int unifiedWorldSystemRoadMask(UnifiedGameId game)
+{
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    const UnifiedWorldSystemTravelState& travel = unifiedWorldSystemGetStateConst().travel;
+    int x = travel.currentCellX[gameIndex];
+    int y = travel.currentCellY[gameIndex];
+    int mask = 0;
+    if (y > 0) {
+        mask |= 1 << static_cast<int>(UnifiedWorldSystemRoadDirection::North);
+    }
+    if (x + 1 < kUnifiedWorldSystemColumns) {
+        mask |= 1 << static_cast<int>(UnifiedWorldSystemRoadDirection::East);
+    }
+    if (y + 1 < kUnifiedWorldSystemRows) {
+        mask |= 1 << static_cast<int>(UnifiedWorldSystemRoadDirection::South);
+    }
+    if (x > 0) {
+        mask |= 1 << static_cast<int>(UnifiedWorldSystemRoadDirection::West);
+    }
+    return mask;
+}
+
+inline UnifiedWorldSystemRoadDirection unifiedWorldSystemRoadDirectionFromTile(int tile)
+{
+    if (tile < 0) {
+        return UnifiedWorldSystemRoadDirection::North;
+    }
+
+    constexpr int kMapTileWidth = 200;
+    constexpr int kMapTileHeight = 200;
+    int x = tile % kMapTileWidth;
+    int y = tile / kMapTileWidth;
+    int bestDistance = y;
+    UnifiedWorldSystemRoadDirection direction = UnifiedWorldSystemRoadDirection::North;
+
+    int eastDistance = kMapTileWidth - 1 - x;
+    if (eastDistance < bestDistance) {
+        bestDistance = eastDistance;
+        direction = UnifiedWorldSystemRoadDirection::East;
+    }
+
+    int southDistance = kMapTileHeight - 1 - y;
+    if (southDistance < bestDistance) {
+        bestDistance = southDistance;
+        direction = UnifiedWorldSystemRoadDirection::South;
+    }
+
+    if (x < bestDistance) {
+        direction = UnifiedWorldSystemRoadDirection::West;
+    }
+    return direction;
+}
+
+inline bool unifiedWorldSystemTraverseRoad(
+    UnifiedGameId game,
+    UnifiedWorldSystemRoadDirection direction,
+    uint32_t gameTime,
+    int* mapIdxPtr)
+{
+    if (mapIdxPtr == nullptr) {
+        return false;
+    }
+
+    UnifiedWorldSystemState& state = unifiedWorldSystemGetState();
+    int gameIndex = unifiedWorldSystemGameIndex(game);
+    UnifiedWorldSystemTravelState& travel = state.travel;
+    UnifiedWorldSystemActiveChain& active = state.activeChain;
+    travel.roadMode = 1;
+    travel.pipboyTravelActive = 0;
+    travel.selectionConfirmed = 0;
+    travel.lastRoadDirection[gameIndex] = static_cast<int8_t>(direction);
+
+    bool chainMatches = active.valid
+        && active.gameId == static_cast<int32_t>(static_cast<uint32_t>(game))
+        && active.currentMapIdx >= 0;
+    int delta = direction == UnifiedWorldSystemRoadDirection::East
+            || direction == UnifiedWorldSystemRoadDirection::South
+        ? 1
+        : -1;
+
+    if (chainMatches) {
+        int nextDepth = static_cast<int>(active.depth) + delta;
+        if (nextDepth >= 0 && nextDepth < active.length) {
+            active.depth = static_cast<uint8_t>(nextDepth);
+            active.currentMapIdx = active.maps[nextDepth];
+            UnifiedWorldSystemCellState* cell =
+                unifiedWorldSystemGetCell(game, active.cellX, active.cellY);
+            if (cell != nullptr) {
+                cell->chainDepth = active.depth;
+                cell->lastVisitGameTime = static_cast<int32_t>(gameTime);
+            }
+            if (game == UnifiedGameId::Fallout2) {
+                unifiedWorldSystemRestoreFallout2EncounterContext(
+                    active.currentMapIdx,
+                    active.encounterTableId,
+                    active.encounterEntryId);
+            }
+            *mapIdxPtr = active.currentMapIdx;
+            unifiedWorldSystemAppendLog(
+                UnifiedWorldSystemLogType::ChainAdvanced,
+                game,
+                active.cellX,
+                active.cellY,
+                active.currentMapIdx,
+                static_cast<int>(direction),
+                gameTime);
+            return true;
+        }
+    }
+
+    int nextX = travel.currentCellX[gameIndex];
+    int nextY = travel.currentCellY[gameIndex];
+    switch (direction) {
+    case UnifiedWorldSystemRoadDirection::North:
+        nextY--;
+        break;
+    case UnifiedWorldSystemRoadDirection::East:
+        nextX++;
+        break;
+    case UnifiedWorldSystemRoadDirection::South:
+        nextY++;
+        break;
+    case UnifiedWorldSystemRoadDirection::West:
+        nextX--;
+        break;
+    }
+
+    if (unifiedWorldSystemCellIndex(nextX, nextY) == -1) {
+        return false;
+    }
+
+    travel.currentCellX[gameIndex] = static_cast<int16_t>(nextX);
+    travel.currentCellY[gameIndex] = static_cast<int16_t>(nextY);
+    UnifiedWorldSystemWorldState& world = state.worlds[gameIndex];
+    world.lastPhysicalCell = -1;
+
+    unifiedWorldSystemPrepareCell(game, nextX, nextY, -1, gameTime);
+    UnifiedWorldSystemCellState* nextCell =
+        unifiedWorldSystemGetCell(game, nextX, nextY);
+    if (nextCell == nullptr || nextCell->templateMapIdx < 0) {
+        return false;
+    }
+
+    unifiedWorldSystemBuildChain(
+        game,
+        nextX,
+        nextY,
+        nextCell->templateMapIdx,
+        -1,
+        -1,
+        gameTime);
+
+    UnifiedWorldSystemActiveChain& nextActive = state.activeChain;
+    int entryDepth = direction == UnifiedWorldSystemRoadDirection::North
+            || direction == UnifiedWorldSystemRoadDirection::West
+        ? static_cast<int>(nextActive.length) - 1
+        : 0;
+    entryDepth = std::max(0, entryDepth);
+    nextActive.depth = static_cast<uint8_t>(entryDepth);
+    nextActive.currentMapIdx = nextActive.maps[entryDepth];
+    nextCell->chainDepth = nextActive.depth;
+    nextCell->lastVisitGameTime = static_cast<int32_t>(gameTime);
+    world.lastPhysicalCell = static_cast<int16_t>(
+        unifiedWorldSystemCellIndex(nextX, nextY));
+
+    if (game == UnifiedGameId::Fallout2) {
+        unifiedWorldSystemRestoreFallout2EncounterContext(
+            nextActive.currentMapIdx,
+            -1,
+            -1);
+    }
+
+    *mapIdxPtr = nextActive.currentMapIdx;
+    unifiedWorldSystemAppendLog(
+        UnifiedWorldSystemLogType::CellEntered,
+        game,
+        nextX,
+        nextY,
+        nextActive.currentMapIdx,
+        static_cast<int>(direction),
+        gameTime);
+    return true;
+}
 
 inline bool unifiedWorldSystemAdvanceEncounter(
     UnifiedGameId game,
