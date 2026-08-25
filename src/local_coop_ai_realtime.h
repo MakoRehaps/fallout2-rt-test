@@ -205,6 +205,19 @@ inline Object* localCoopRealtimeAiFindNearestHuman(Object* actor)
     return best;
 }
 
+inline bool localCoopRealtimeAiTargetIsValid(Object* actor, Object* target)
+{
+    return actor != nullptr
+        && target != nullptr
+        && target != actor
+        && target->elevation == actor->elevation
+        && (target->flags & OBJECT_HIDDEN) == 0
+        && (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) == 0
+        && (localCoopActorIsHumanOwned(target)
+            || target->data.critter.combat.team
+                != actor->data.critter.combat.team);
+}
+
 inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferredTarget)
 {
     if (actor == nullptr || actor->id == -1 || !localCoopRealtimeAiActorCanAct(actor)) {
@@ -303,15 +316,36 @@ inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
     Object* attacker = combat != nullptr ? combat->attacker : nullptr;
     Object* defender = combat != nullptr ? combat->defender : nullptr;
 
+    bool attackerIsNpc = attacker != nullptr
+        && !localCoopActorIsHumanOwned(attacker);
+    bool defenderIsNpc = defender != nullptr
+        && !localCoopActorIsHumanOwned(defender);
+
+    // Fallout 1 includes encounters such as raiders versus caravans and
+    // radscorpions versus mole rats. Preserve the script's NPC-vs-NPC target
+    // instead of silently redirecting both factions onto the human party.
+    if (attackerIsNpc
+        && defenderIsNpc
+        && localCoopRealtimeAiTargetIsValid(attacker, defender)) {
+        localCoopRealtimeAiEngageHostile(attacker, defender);
+        localCoopRealtimeAiEngageHostile(defender, attacker);
+        debugPrint("[COOP REALTIME AI] faction combat attacker=%d defender=%d teams=%d/%d\n",
+            attacker->id,
+            defender->id,
+            attacker->data.critter.combat.team,
+            defender->data.critter.combat.team);
+        return 0;
+    }
+
     Object* hostile = nullptr;
     Object* humanTarget = nullptr;
 
-    if (attacker != nullptr && !localCoopActorIsHumanOwned(attacker)) {
+    if (attackerIsNpc) {
         hostile = attacker;
         humanTarget = defender != nullptr && localCoopActorIsHumanOwned(defender)
             ? defender
             : localCoopRealtimeAiFindNearestHuman(attacker);
-    } else if (defender != nullptr && !localCoopActorIsHumanOwned(defender)) {
+    } else if (defenderIsNpc) {
         hostile = defender;
         humanTarget = attacker != nullptr && localCoopActorIsHumanOwned(attacker)
             ? attacker
@@ -331,7 +365,6 @@ inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
 
     return 0;
 }
-
 inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferredTarget)
 {
     if (actor == nullptr) {
@@ -384,10 +417,7 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     }
 
     Object* target = preferredTarget;
-    if (target == nullptr
-        || !localCoopActorIsHumanOwned(target)
-        || target->elevation != actor->elevation
-        || (target->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
+    if (!localCoopRealtimeAiTargetIsValid(actor, target)) {
         target = localCoopRealtimeAiFindNearestHuman(actor);
         state.preferredTargetId = target != nullptr ? target->id : -1;
     }
@@ -476,13 +506,17 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     state.nextActionTick = now + (moveRc == -1 ? 300 : 450);
 }
 
-inline bool localCoopRealtimeAiThreatStillEngaged(Object* actor)
+inline bool localCoopRealtimeAiThreatStillEngaged(
+    Object* actor,
+    Object* preferredTarget = nullptr)
 {
     if (!localCoopRealtimeAiActorCanAct(actor)) {
         return false;
     }
 
-    Object* target = localCoopRealtimeAiFindNearestHuman(actor);
+    Object* target = localCoopRealtimeAiTargetIsValid(actor, preferredTarget)
+        ? preferredTarget
+        : localCoopRealtimeAiFindNearestHuman(actor);
     if (target == nullptr) {
         return false;
     }
@@ -495,6 +529,57 @@ inline bool localCoopRealtimeAiThreatStillEngaged(Object* actor)
     return _can_see(actor, target);
 }
 
+inline void localCoopRealtimeAiActivateLoadedEncounterFactions()
+{
+    if (gDude == nullptr) {
+        return;
+    }
+
+    Object** critters = nullptr;
+    int count =
+        objectListCreate(-1, gDude->elevation, OBJ_TYPE_CRITTER, &critters);
+    if (count <= 0 || critters == nullptr) {
+        return;
+    }
+
+    int activated = 0;
+    for (int index = 0; index < count; index++) {
+        Object* actor = critters[index];
+        if (!localCoopRealtimeAiActorCanAct(actor)
+            || objectIsPartyMember(actor)) {
+            continue;
+        }
+
+        Object* nearestEnemy = nullptr;
+        int nearestDistance = 0x7FFFFFFF;
+        for (int otherIndex = 0; otherIndex < count; otherIndex++) {
+            Object* candidate = critters[otherIndex];
+            if (!localCoopRealtimeAiActorCanAct(candidate)
+                || objectIsPartyMember(candidate)
+                || !localCoopRealtimeAiTargetIsValid(actor, candidate)) {
+                continue;
+            }
+
+            int distance = objectGetDistanceBetween(actor, candidate);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestEnemy = candidate;
+            }
+        }
+
+        if (nearestEnemy != nullptr) {
+            localCoopRealtimeAiRegisterWorldActor(actor, nearestEnemy);
+            activated++;
+        }
+    }
+
+    objectListFree(critters);
+    if (activated > 0) {
+        debugPrint("[COOP REALTIME AI] activated encounter factions=%d map=%d\n",
+            activated,
+            gMapHeader.field_34);
+    }
+}
 inline void localCoopRealtimeAiTick()
 {
     if (gLocalCoopRealtimeAiInsideTick) {
@@ -511,16 +596,16 @@ inline void localCoopRealtimeAiTick()
 
     for (auto it = gLocalCoopRealtimeAiActors.begin(); it != gLocalCoopRealtimeAiActors.end();) {
         Object* actor = objectFindById(it->first);
-        if (actor == nullptr
-            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
-            || !localCoopRealtimeAiThreatStillEngaged(actor)) {
-            it = gLocalCoopRealtimeAiActors.erase(it);
-            continue;
-        }
-
         Object* preferredTarget = nullptr;
         if (it->second.preferredTargetId != -1) {
             preferredTarget = objectFindById(it->second.preferredTargetId);
+        }
+
+        if (actor == nullptr
+            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+            || !localCoopRealtimeAiThreatStillEngaged(actor, preferredTarget)) {
+            it = gLocalCoopRealtimeAiActors.erase(it);
+            continue;
         }
 
         localCoopRealtimeAiRunWorldActor(actor, preferredTarget, it->second, now);
