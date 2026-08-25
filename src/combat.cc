@@ -23,6 +23,7 @@
 #include "item.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
@@ -4732,6 +4733,23 @@ void _apply_damage(Attack* attack, bool animated)
     Object* attacker = attack->attacker;
     bool attackerIsCritter = attacker != nullptr && FID_TYPE(attacker->fid) == OBJ_TYPE_CRITTER;
     bool v5 = attack->defender != attack->oops;
+
+    // The battle timeout is based only on actual damage received by a human
+    // player. Do this at the common damage-application point so reflected damage
+    // and explosion extras follow the same rule as the primary target.
+    if (gLocalCoopInitialized) {
+        if (attack->attackerDamage > 0 && localCoopActorIsHumanOwned(attack->attacker)) {
+            localCoopDangerRecordPlayerDamage(attack->attackerDamage);
+        }
+        if (attack->defenderDamage > 0 && localCoopActorIsHumanOwned(attack->defender)) {
+            localCoopDangerRecordPlayerDamage(attack->defenderDamage);
+        }
+        for (int index = 0; index < attack->extrasLength; index++) {
+            if (attack->extrasDamage[index] > 0 && localCoopActorIsHumanOwned(attack->extras[index])) {
+                localCoopDangerRecordPlayerDamage(attack->extrasDamage[index]);
+            }
+        }
+    }
 
     if (attackerIsCritter && (attacker->data.critter.combat.results & DAM_DEAD) == 0) {
         _set_new_results(attacker, attack->attackerFlags);
