@@ -9,6 +9,7 @@
 #include <string>
 
 #include "unified_campaign.h"
+#include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_globals.h"
 #include "unified_fallout1_worldmap_state.h"
 #endif
@@ -104,6 +105,7 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
 {
     unifiedCampaignClearPendingSaveHeader();
     unifiedFallout1WorldMapClearPending();
+    unifiedFallout1WildernessClearPending();
 
     std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
     File* meta = fileOpen(metaPath.c_str(), "rb");
@@ -125,6 +127,17 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
             UnifiedFallout1WorldMapState state {};
             if (fileRead(&state, sizeof(state), 1, meta) == 1) {
                 unifiedFallout1WorldMapStage(state);
+
+                // Wilderness persistence was added after the original FWM1
+                // chunk. EOF here remains valid for older co-op saves.
+                UnifiedCampaignMetaChunkHeader wildernessHeader {};
+                if (fileRead(&wildernessHeader, sizeof(wildernessHeader), 1, meta) == 1
+                    && unifiedFallout1WildernessChunkIsSupported(wildernessHeader)) {
+                    UnifiedFallout1WildernessState wilderness {};
+                    if (fileRead(&wilderness, sizeof(wilderness), 1, meta) == 1) {
+                        unifiedFallout1WildernessStage(wilderness);
+                    }
+                }
             }
         }
     }
@@ -154,8 +167,16 @@ inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
         UnifiedCampaignMetaChunkHeader chunkHeader = unifiedFallout1WorldMapMakeChunkHeader();
         const UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetStateConst();
 
-        if (fileWrite(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1) {
-            fileWrite(&state, sizeof(state), 1, meta);
+        if (fileWrite(&chunkHeader, sizeof(chunkHeader), 1, meta) == 1
+            && fileWrite(&state, sizeof(state), 1, meta) == 1) {
+            UnifiedCampaignMetaChunkHeader wildernessHeader =
+                unifiedFallout1WildernessMakeChunkHeader();
+            const UnifiedFallout1WildernessState& wilderness =
+                unifiedFallout1WildernessGetStateConst();
+
+            if (fileWrite(&wildernessHeader, sizeof(wildernessHeader), 1, meta) == 1) {
+                fileWrite(&wilderness, sizeof(wilderness), 1, meta);
+            }
         }
     }
 
