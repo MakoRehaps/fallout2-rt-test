@@ -371,6 +371,7 @@ inline void localCoopRenderHealthBars(SDL_Renderer* renderer, int maxX, int maxY
     Object* object = objectFindFirst();
     while (object != nullptr) {
         if (PID_TYPE(object->pid) == OBJ_TYPE_CRITTER
+            && tileIsValid(object->tile)
             && object->elevation == gElevation
             && (object->flags & OBJECT_HIDDEN) == 0
             && (object->data.critter.combat.results & DAM_DEAD) == 0) {
