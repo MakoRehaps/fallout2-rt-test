@@ -42,6 +42,7 @@
 #include "unified_fallout1_wilderness_state.h"
 #include "unified_origin_art.h"
 #include "unified_worldmap_state_profile.h"
+#include "unified_world_system.h"
 #include "window_manager.h"
 #include "word_wrap.h"
 #include "worldmap.h"
@@ -420,6 +421,13 @@ int pipboyOpen(int intent)
         return -1;
     }
 
+    bool worldMapIntent = intent == PIPBOY_OPEN_INTENT_WORLD_MAP;
+    if (worldMapIntent) {
+        gPipboyPrevTab = gPipboyTab;
+        gPipboyTab = 1;
+        pipboyWindowHandleWildernessMap(1024);
+    }
+
     mouseGetPositionInWindow(gPipboyWindow, &gPipboyPreviousMouseX, &gPipboyPreviousMouseY);
     gPipboyLastEventTimestamp = getTicks();
 
@@ -451,6 +459,33 @@ int pipboyOpen(int intent)
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             showQuitConfirmationDialog();
             break;
+        }
+
+        if (worldMapIntent) {
+            if (keyCode == KEY_ARROW_UP) {
+                unifiedWorldSystemMovePipboySelection(unifiedCampaignGetActiveGame(), 0, -1);
+                pipboyWindowHandleWildernessMap(1024);
+                continue;
+            }
+            if (keyCode == KEY_ARROW_DOWN) {
+                unifiedWorldSystemMovePipboySelection(unifiedCampaignGetActiveGame(), 0, 1);
+                pipboyWindowHandleWildernessMap(1024);
+                continue;
+            }
+            if (keyCode == KEY_ARROW_LEFT) {
+                unifiedWorldSystemMovePipboySelection(unifiedCampaignGetActiveGame(), -1, 0);
+                pipboyWindowHandleWildernessMap(1024);
+                continue;
+            }
+            if (keyCode == KEY_ARROW_RIGHT) {
+                unifiedWorldSystemMovePipboySelection(unifiedCampaignGetActiveGame(), 1, 0);
+                pipboyWindowHandleWildernessMap(1024);
+                continue;
+            }
+            if (keyCode == KEY_RETURN) {
+                unifiedWorldSystemConfirmPipboySelection(unifiedCampaignGetActiveGame());
+                break;
+            }
         }
 
         // SFALL: Close with 'Z'.
@@ -1682,15 +1717,140 @@ static void pipboyWindowRenderWildernessMap()
     windowRefresh(gPipboyWindow);
 }
 
-static void pipboyWindowHandleWildernessMap(int a1)
+static const char* pipboyUnifiedWorldLogTypeName(uint8_t type)
 {
-    if (unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
-        pipboyWindowHandleAutomaps(a1);
-        return;
+    switch (static_cast<UnifiedWorldSystemLogType>(type)) {
+    case UnifiedWorldSystemLogType::CellEntered:
+        return "CELL";
+    case UnifiedWorldSystemLogType::EncounterStarted:
+        return "ENCOUNTER";
+    case UnifiedWorldSystemLogType::ChainAdvanced:
+        return "CHAIN";
+    case UnifiedWorldSystemLogType::ChainCleared:
+        return "CLEARED";
+    case UnifiedWorldSystemLogType::SpecialEncounter:
+        return "SPECIAL";
+    case UnifiedWorldSystemLogType::DungeonCreated:
+        return "DUNGEON";
+    case UnifiedWorldSystemLogType::DungeonExpired:
+        return "EXPIRED";
+    case UnifiedWorldSystemLogType::MapVisited:
+        return "VISITED";
+    default:
+        return "WORLD";
+    }
+}
+
+static void pipboyWindowRenderUnifiedWorldMap()
+{
+    pipboyWindowDestroyButtons();
+    blitBufferToBuffer(
+        _pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData()
+            + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y
+            + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
+        PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
+        PIPBOY_WINDOW_WIDTH,
+        gPipboyWindowBuffer
+            + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y
+            + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        PIPBOY_WINDOW_WIDTH);
+
+    const UnifiedGameId game = unifiedCampaignGetActiveGame();
+    const int gameIndex = unifiedWorldSystemGameIndex(game);
+    const UnifiedWorldSystemState& state = unifiedWorldSystemGetStateConst();
+    const UnifiedWorldSystemWorldState& world = state.worlds[gameIndex];
+    const UnifiedWorldSystemTravelState& travel = state.travel;
+
+    const int left = 262;
+    const int top = 72;
+    const int cellWidth = 12;
+    const int cellHeight = 8;
+    windowDrawText(
+        gPipboyWindow,
+        game == UnifiedGameId::Fallout1 ? "FALLOUT 1 WORLD GRID" : "FALLOUT 2 WORLD GRID",
+        340,
+        left,
+        48,
+        _colorTable[992]);
+
+    for (int cellY = 0; cellY < kUnifiedWorldSystemRows; cellY++) {
+        for (int cellX = 0; cellX < kUnifiedWorldSystemColumns; cellX++) {
+            const UnifiedWorldSystemCellState& cell =
+                world.cells[unifiedWorldSystemCellIndex(cellX, cellY)];
+            int color = (cell.flags & UNIFIED_WORLD_CELL_DISCOVERED) != 0
+                ? _colorTable[992]
+                : _colorTable[288];
+            int x = left + cellX * cellWidth;
+            int y = top + cellY * cellHeight;
+            windowDrawRect(gPipboyWindow, x, y, x + cellWidth - 2, y + cellHeight - 2, color);
+        }
     }
 
+    int currentX = travel.currentCellX[gameIndex];
+    int currentY = travel.currentCellY[gameIndex];
+    int selectedX = travel.selectedCellX[gameIndex];
+    int selectedY = travel.selectedCellY[gameIndex];
+    windowFill(
+        gPipboyWindow,
+        left + currentX * cellWidth + 2,
+        top + currentY * cellHeight + 2,
+        cellWidth - 5,
+        cellHeight - 5,
+        _colorTable[992]);
+    windowDrawRect(
+        gPipboyWindow,
+        left + selectedX * cellWidth,
+        top + selectedY * cellHeight,
+        left + selectedX * cellWidth + cellWidth - 2,
+        top + selectedY * cellHeight + cellHeight - 2,
+        _colorTable[31744]);
+
+    char line[96];
+    snprintf(
+        line,
+        sizeof(line),
+        "PARTY %02d,%02d   TARGET %02d,%02d",
+        currentX,
+        currentY,
+        selectedX,
+        selectedY);
+    windowDrawText(gPipboyWindow, line, 340, left, 320, _colorTable[992]);
+    windowDrawText(
+        gPipboyWindow,
+        "ARROWS: MOVE TARGET   ENTER: TRAVEL   ESC: CANCEL",
+        340,
+        left,
+        338,
+        _colorTable[992]);
+    windowDrawText(gPipboyWindow, "WORLD LOG", 340, left, 366, _colorTable[992]);
+
+    int logLines = std::min(static_cast<int>(state.logCount), 4);
+    for (int index = 0; index < logLines; index++) {
+        int logIndex = state.logHead - 1 - index;
+        if (logIndex < 0) {
+            logIndex += kUnifiedWorldSystemLogCapacity;
+        }
+        const UnifiedWorldSystemLogEntry& entry = state.log[logIndex];
+        snprintf(
+            line,
+            sizeof(line),
+            "%s %02d,%02d MAP %d",
+            pipboyUnifiedWorldLogTypeName(entry.type),
+            entry.cellX,
+            entry.cellY,
+            entry.mapIdx);
+        windowDrawText(gPipboyWindow, line, 340, left, 386 + index * 17, _colorTable[992]);
+    }
+
+    windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
+    windowRefresh(gPipboyWindow);
+}
+
+static void pipboyWindowHandleWildernessMap(int a1)
+{
     (void)a1;
-    pipboyWindowRenderWildernessMap();
+    pipboyWindowRenderUnifiedWorldMap();
 }
 
 static void pipboyWindowHandleAutomaps(int a1)
