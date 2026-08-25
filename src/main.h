@@ -95,6 +95,10 @@ inline void localCoopResetTransientStateForLoad()
         player.moveY = 0;
         player.aimX = 0;
         player.aimY = 0;
+        player.actionMode = LocalCoopActionMode::Interact;
+        player.hexAimHeld = false;
+        player.hexAimTile = -1;
+        player.controllerInputActive = false;
     }
 }
 
@@ -129,15 +133,52 @@ inline void localCoopSyncPlayerOneWeaponReadyCursor()
         return;
     }
 
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+
+    // The last-used device owns cursor presentation. Controller play is fully
+    // cursorless; the first keyboard or mouse event restores the pointer.
+    if (player.controllerInputActive) {
+        gameMouseObjectsHide();
+        if (!cursorIsHidden()) {
+            mouseHideCursor();
+        }
+        return;
+    }
+
+    gameMouseObjectsShow();
+    if (cursorIsHidden()) {
+        mouseShowCursor();
+    }
+
+    bool aiming = player.actionMode == LocalCoopActionMode::Aim;
+    gLocalCoopPlayerOneWeaponReady = aiming;
+
     int mode = gameMouseGetMode();
-    if (gLocalCoopPlayerOneWeaponReady) {
-        if (mode == GAME_MOUSE_MODE_MOVE) {
+    if (aiming) {
+        if (mode != GAME_MOUSE_MODE_CROSSHAIR) {
             gameMouseSetCursor(MOUSE_CURSOR_CROSSHAIR);
             gameMouseSetMode(GAME_MOUSE_MODE_CROSSHAIR);
         }
-    } else if (mode == GAME_MOUSE_MODE_CROSSHAIR) {
+    } else if (mode != GAME_MOUSE_MODE_MOVE) {
         gameMouseSetMode(GAME_MOUSE_MODE_MOVE);
     }
+}
+
+inline void localCoopTogglePlayerOneActionMode()
+{
+    if (!localCoopPlayerOneHybridWorldActive()) {
+        return;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[0];
+    player.actionMode = player.actionMode == LocalCoopActionMode::Aim
+        ? LocalCoopActionMode::Interact
+        : LocalCoopActionMode::Aim;
+    gLocalCoopPlayerOneWeaponReady = player.actionMode == LocalCoopActionMode::Aim;
+
+    debugPrint("[COOP INPUT] P1 action-mode=%s\n",
+        gLocalCoopPlayerOneWeaponReady ? "aim" : "interact");
+    localCoopSyncPlayerOneWeaponReadyCursor();
 }
 
 // Fallout's main HUD weapon/action button produces event -20. In the stock
@@ -180,6 +221,9 @@ inline bool localCoopHandlePlayerOneHybridHudAction(int keyCode)
     }
 
     gLocalCoopPlayerOneWeaponReady = !gLocalCoopPlayerOneWeaponReady;
+    player.actionMode = gLocalCoopPlayerOneWeaponReady
+        ? LocalCoopActionMode::Aim
+        : LocalCoopActionMode::Interact;
     debugPrint("[COOP HYBRID] weapon-ready=%d hand=%d itemPid=%d\n",
         gLocalCoopPlayerOneWeaponReady ? 1 : 0,
         hand,
@@ -224,6 +268,16 @@ inline int localCoopMainInputGetInput()
 
     int keyCode = inputGetInput();
 
+    // Keyboard or mouse immediately reclaims P1 input from an attached
+    // controller and restores the normal pointer.
+    if (gLocalCoopInitialized && keyCode != -1) {
+        LocalCoopPlayer& playerOne = gLocalCoopPlayers[0];
+        if (playerOne.controllerInputActive) {
+            playerOne.controllerInputActive = false;
+            localCoopSyncPlayerOneWeaponReadyCursor();
+        }
+    }
+
     // The HUD action button is no longer allowed to enter Fallout's combat
     // scheduler. Consume its -20 event before gameHandleKey/_intface_use_item.
     if (localCoopHandlePlayerOneHybridHudAction(keyCode)) {
@@ -245,8 +299,16 @@ inline int localCoopMainInputGetInput()
                 return -1;
             }
 
-            // E is a keyboard companion to controller A: interact with the
-            // current aim/facing target without changing mouse mode.
+            // Space is the explicit keyboard mode switch. In Interact mode,
+            // left click talks/uses/loots; in Aim mode it attacks. Right click
+            // remains movement in both modes.
+            if (keyCode == KEY_SPACE) {
+                localCoopTogglePlayerOneActionMode();
+                return -1;
+            }
+
+            // E remains a direct interaction shortcut regardless of the active
+            // mouse mode, matching controller A.
             if (keyCode == KEY_LOWERCASE_E || keyCode == KEY_UPPERCASE_E) {
                 localCoopPlayerOneInteract();
                 return -1;
