@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "qrcodegen.hpp"
 
@@ -75,6 +76,7 @@ std::array<MobileVirtualDevice, kLocalCoopMaxPlayers> gMobileDevices;
 std::atomic<bool> gMobileServerRunning { false };
 std::atomic<bool> gMobileServerStarted { false };
 std::thread gMobileServerThread;
+std::vector<std::thread> gMobileClientThreads;
 MobileSocket gMobileListenSocket = kInvalidMobileSocket;
 int gMobilePin = 0;
 bool gMobileNoticeShown = false;
@@ -196,12 +198,27 @@ function bindStick(id,ax,ay){
 bindStick('ls',0,1);bindStick('rs',2,3);
 $('connect').onclick=async()=>{try{const body=new URLSearchParams({slot:$('slot').value,pin:$('pin').value});
  const r=await fetch('/claim',{method:'POST',body});const j=await r.json();if(!j.ok)throw new Error(j.error||'Unable to connect');
- slot=j.slotIndex;token=j.token;$('join').style.display='none';$('pad').style.display='block';$('top').textContent=`PLAYER ${j.player} — CONNECTED`;
+ slot=j.slotIndex;token=j.token;$('join').style.display='none';$('pad').style.display='block';$('top').textContent=`PLAYER ${j.player} — CONNECTED`;openSocket();
  if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});
  if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});
 }catch(e){$('msg').textContent=e.message}};
-async function send(){if(slot<0||sending)return;sending=true;try{const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});await fetch('/input',{method:'POST',body,keepalive:true})}catch(e){}sending=false}
-setInterval(send,33);addEventListener('pagehide',()=>{if(slot>=0)navigator.sendBeacon('/release',new URLSearchParams({slot,token}))});
+let ws=null,reconnectTimer=null;
+function openSocket(){
+ if(slot<0)return;
+ const scheme=location.protocol==='https:'?'wss':'ws';
+ ws=new WebSocket(`${scheme}://${location.host}/ws?slot=${slot}&token=${token}`);
+ ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — LOW LATENCY`;navigator.vibrate?.(35)};
+ ws.onclose=()=>{$('top').textContent='RECONNECTING…';if(slot>=0)reconnectTimer=setTimeout(openSocket,700)};
+}
+async function send(){
+ if(slot<0)return;
+ const packet=[axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
+ if(ws&&ws.readyState===WebSocket.OPEN){ws.send(packet);return}
+ if(sending)return;sending=true;
+ try{const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});await fetch('/input',{method:'POST',body,keepalive:true})}catch(e){}
+ sending=false;
+}
+setInterval(send,16);addEventListener('pagehide',()=>{slot<0||navigator.sendBeacon('/release',new URLSearchParams({slot,token}))});
 </script></body></html>)PHOBOI";
 }
 
@@ -263,6 +280,300 @@ void mobileSendResponse(MobileSocket socket, const char* status, const char* typ
 #endif
 }
 
+uint32_t mobileRotateLeft(uint32_t value, int amount)
+{
+    return (value << amount) | (value >> (32 - amount));
+}
+
+std::array<uint8_t, 20> mobileSha1(const std::string& input)
+{
+    std::vector<uint8_t> bytes(input.begin(), input.end());
+    uint64_t bitLength = static_cast<uint64_t>(bytes.size()) * 8;
+    bytes.push_back(0x80);
+    while ((bytes.size() % 64) != 56) {
+        bytes.push_back(0);
+    }
+    for (int shift = 56; shift >= 0; shift -= 8) {
+        bytes.push_back(static_cast<uint8_t>(bitLength >> shift));
+    }
+
+    uint32_t h0 = 0x67452301;
+    uint32_t h1 = 0xEFCDAB89;
+    uint32_t h2 = 0x98BADCFE;
+    uint32_t h3 = 0x10325476;
+    uint32_t h4 = 0xC3D2E1F0;
+
+    for (size_t chunk = 0; chunk < bytes.size(); chunk += 64) {
+        uint32_t words[80] {};
+        for (int i = 0; i < 16; i++) {
+            size_t at = chunk + i * 4;
+            words[i] =
+                (static_cast<uint32_t>(bytes[at]) << 24)
+                | (static_cast<uint32_t>(bytes[at + 1]) << 16)
+                | (static_cast<uint32_t>(bytes[at + 2]) << 8)
+                | static_cast<uint32_t>(bytes[at + 3]);
+        }
+        for (int i = 16; i < 80; i++) {
+            words[i] = mobileRotateLeft(
+                words[i - 3] ^ words[i - 8] ^ words[i - 14] ^ words[i - 16],
+                1);
+        }
+
+        uint32_t a = h0;
+        uint32_t b = h1;
+        uint32_t d = h3;
+        uint32_t e = h4;
+        uint32_t f;
+        uint32_t k;
+        uint32_t cc = h2;
+
+        for (int i = 0; i < 80; i++) {
+            if (i < 20) {
+                f = (b & cc) | ((~b) & d);
+                k = 0x5A827999;
+            } else if (i < 40) {
+                f = b ^ cc ^ d;
+                k = 0x6ED9EBA1;
+            } else if (i < 60) {
+                f = (b & cc) | (b & d) | (cc & d);
+                k = 0x8F1BBCDC;
+            } else {
+                f = b ^ cc ^ d;
+                k = 0xCA62C1D6;
+            }
+
+            uint32_t temp = mobileRotateLeft(a, 5) + f + e + k + words[i];
+            e = d;
+            d = cc;
+            cc = mobileRotateLeft(b, 30);
+            b = a;
+            a = temp;
+        }
+
+        h0 += a;
+        h1 += b;
+        h2 += cc;
+        h3 += d;
+        h4 += e;
+    }
+
+    std::array<uint8_t, 20> digest {};
+    uint32_t hashes[5] = { h0, h1, h2, h3, h4 };
+    for (int i = 0; i < 5; i++) {
+        digest[i * 4] = static_cast<uint8_t>(hashes[i] >> 24);
+        digest[i * 4 + 1] = static_cast<uint8_t>(hashes[i] >> 16);
+        digest[i * 4 + 2] = static_cast<uint8_t>(hashes[i] >> 8);
+        digest[i * 4 + 3] = static_cast<uint8_t>(hashes[i]);
+    }
+    return digest;
+}
+
+std::string mobileBase64(const uint8_t* data, size_t length)
+{
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string result;
+    for (size_t i = 0; i < length; i += 3) {
+        uint32_t value = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < length) {
+            value |= static_cast<uint32_t>(data[i + 1]) << 8;
+        }
+        if (i + 2 < length) {
+            value |= data[i + 2];
+        }
+
+        result.push_back(alphabet[(value >> 18) & 63]);
+        result.push_back(alphabet[(value >> 12) & 63]);
+        result.push_back(i + 1 < length ? alphabet[(value >> 6) & 63] : '=');
+        result.push_back(i + 2 < length ? alphabet[value & 63] : '=');
+    }
+    return result;
+}
+
+std::string mobileHeaderValue(const std::string& request, const char* name)
+{
+    std::string prefix = std::string(name) + ":";
+    size_t at = request.find(prefix);
+    if (at == std::string::npos) {
+        return "";
+    }
+    at += prefix.size();
+    while (at < request.size() && (request[at] == ' ' || request[at] == '\t')) {
+        at++;
+    }
+    size_t end = request.find("\r\n", at);
+    return request.substr(at, end == std::string::npos ? std::string::npos : end - at);
+}
+
+bool mobileRecvExact(MobileSocket socket, uint8_t* bytes, size_t length)
+{
+    size_t received = 0;
+    while (received < length) {
+#ifdef _WIN32
+        int count = recv(
+            socket,
+            reinterpret_cast<char*>(bytes + received),
+            static_cast<int>(length - received),
+            0);
+#else
+        int count = static_cast<int>(recv(socket, bytes + received, length - received, 0));
+#endif
+        if (count <= 0) {
+            return false;
+        }
+        received += static_cast<size_t>(count);
+    }
+    return true;
+}
+
+bool mobileWaitReadable(MobileSocket socket, int milliseconds)
+{
+    fd_set readSet;
+    FD_ZERO(&readSet);
+    FD_SET(socket, &readSet);
+    timeval timeout {
+        milliseconds / 1000,
+        (milliseconds % 1000) * 1000
+    };
+#ifdef _WIN32
+    return select(0, &readSet, nullptr, nullptr, &timeout) > 0;
+#else
+    return select(socket + 1, &readSet, nullptr, nullptr, &timeout) > 0;
+#endif
+}
+
+bool mobileReadWebSocketText(MobileSocket socket, std::string& text)
+{
+    uint8_t header[2];
+    if (!mobileRecvExact(socket, header, sizeof(header))) {
+        return false;
+    }
+
+    int opcode = header[0] & 0x0F;
+    bool masked = (header[1] & 0x80) != 0;
+    uint64_t length = header[1] & 0x7F;
+    if (length == 126) {
+        uint8_t extended[2];
+        if (!mobileRecvExact(socket, extended, sizeof(extended))) {
+            return false;
+        }
+        length = (static_cast<uint64_t>(extended[0]) << 8) | extended[1];
+    } else if (length == 127) {
+        uint8_t extended[8];
+        if (!mobileRecvExact(socket, extended, sizeof(extended))) {
+            return false;
+        }
+        length = 0;
+        for (uint8_t byte : extended) {
+            length = (length << 8) | byte;
+        }
+    }
+
+    if (!masked || length > 1024) {
+        return false;
+    }
+
+    uint8_t mask[4];
+    if (!mobileRecvExact(socket, mask, sizeof(mask))) {
+        return false;
+    }
+
+    std::vector<uint8_t> payload(static_cast<size_t>(length));
+    if (length > 0 && !mobileRecvExact(socket, payload.data(), payload.size())) {
+        return false;
+    }
+    for (size_t i = 0; i < payload.size(); i++) {
+        payload[i] ^= mask[i % 4];
+    }
+
+    if (opcode == 8) {
+        return false;
+    }
+    if (opcode != 1) {
+        text.clear();
+        return true;
+    }
+
+    text.assign(payload.begin(), payload.end());
+    return true;
+}
+
+void mobileRunWebSocket(
+    MobileSocket socket,
+    const std::string& request,
+    int slot,
+    uint32_t token)
+{
+    std::string key = mobileHeaderValue(request, "Sec-WebSocket-Key");
+    if (key.empty()) {
+        mobileSendResponse(socket, "400 Bad Request", "text/plain", "Missing WebSocket key");
+        return;
+    }
+
+    std::array<uint8_t, 20> digest = mobileSha1(
+        key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    std::string accept = mobileBase64(digest.data(), digest.size());
+
+    std::ostringstream response;
+    response << "HTTP/1.1 101 Switching Protocols\r\n"
+             << "Upgrade: websocket\r\n"
+             << "Connection: Upgrade\r\n"
+             << "Sec-WebSocket-Accept: " << accept << "\r\n\r\n";
+    std::string bytes = response.str();
+#ifdef _WIN32
+    send(socket, bytes.c_str(), static_cast<int>(bytes.size()), 0);
+#else
+    send(socket, bytes.c_str(), bytes.size(), 0);
+#endif
+
+    MobileSlotState& state = gMobileSlots[slot];
+    while (gMobileServerRunning.load()
+        && state.claimed.load()
+        && state.token.load() == token) {
+        if (!mobileWaitReadable(socket, 500)) {
+            continue;
+        }
+
+        std::string message;
+        if (!mobileReadWebSocketText(socket, message)) {
+            break;
+        }
+        if (message.empty()) {
+            continue;
+        }
+
+        int lx;
+        int ly;
+        int rx;
+        int ry;
+        int lt;
+        int rt;
+        unsigned int buttons;
+        if (sscanf(
+                message.c_str(),
+                "%d,%d,%d,%d,%d,%d,%u",
+                &lx,
+                &ly,
+                &rx,
+                &ry,
+                &lt,
+                &rt,
+                &buttons)
+            == 7) {
+            state.axes[SDL_CONTROLLER_AXIS_LEFTX].store(lx);
+            state.axes[SDL_CONTROLLER_AXIS_LEFTY].store(ly);
+            state.axes[SDL_CONTROLLER_AXIS_RIGHTX].store(rx);
+            state.axes[SDL_CONTROLLER_AXIS_RIGHTY].store(ry);
+            state.axes[SDL_CONTROLLER_AXIS_TRIGGERLEFT].store(lt);
+            state.axes[SDL_CONTROLLER_AXIS_TRIGGERRIGHT].store(rt);
+            state.buttons.store(buttons);
+            state.lastSeen.store(mobileNow());
+        }
+    }
+
+    mobileResetInput(state);
+}
+
 void mobileResetInput(MobileSlotState& state)
 {
     for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
@@ -309,6 +620,16 @@ void mobileHandleClient(MobileSocket client)
     }
 
     MobileSlotState& state = gMobileSlots[slot];
+
+    if (method == "GET" && route == "/ws") {
+        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        if (!state.claimed.load() || token == 0 || token != state.token.load()) {
+            mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
+            return;
+        }
+        mobileRunWebSocket(client, request, slot, token);
+        return;
+    }
 
     if (method == "POST" && route == "/claim") {
         int pin = mobileValue(values, "pin", -1);
@@ -393,8 +714,10 @@ void mobileServerLoop()
             continue;
         }
 
-        mobileHandleClient(client);
-        mobileCloseSocket(client);
+        gMobileClientThreads.emplace_back([client]() {
+            mobileHandleClient(client);
+            mobileCloseSocket(client);
+        });
     }
 }
 
@@ -777,6 +1100,12 @@ void localCoopMobileShutdown()
     if (gMobileServerThread.joinable()) {
         gMobileServerThread.join();
     }
+    for (std::thread& clientThread : gMobileClientThreads) {
+        if (clientThread.joinable()) {
+            clientThread.join();
+        }
+    }
+    gMobileClientThreads.clear();
 
     for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
         mobileDetachController(slot);
