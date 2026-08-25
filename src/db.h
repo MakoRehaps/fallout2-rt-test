@@ -14,6 +14,7 @@
 #include "unified_fallout1_wilderness_state.h"
 #include "unified_fallout1_worldmap_globals.h"
 #include "unified_fallout1_worldmap_state.h"
+#include "unified_world_system.h"
 #endif
 
 #include "unified_resource_resolver.h"
@@ -108,6 +109,7 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
     unifiedCampaignClearPendingSaveHeader();
     unifiedFallout1WorldMapClearPending();
     unifiedFallout1WildernessClearPending();
+    unifiedWorldSystemClearPending();
     localCoopCharacterStateClearPending();
 
     std::string metaPath = localCoopLoadSaveMetaPath(saveDatPath);
@@ -138,6 +140,12 @@ inline void localCoopLoadSaveStageCampaignMeta(const char* saveDatPath)
                 UnifiedFallout1WildernessState wilderness {};
                 if (fileRead(&wilderness, sizeof(wilderness), 1, meta) == 1) {
                     unifiedFallout1WildernessStage(wilderness);
+                    consumed = true;
+                }
+            } else if (unifiedWorldSystemChunkIsSupported(chunkHeader)) {
+                UnifiedWorldSystemState world {};
+                if (fileRead(&world, sizeof(world), 1, meta) == 1) {
+                    unifiedWorldSystemStage(world);
                     consumed = true;
                 }
             } else if (localCoopCharacterStateChunkIsSupported(chunkHeader)) {
@@ -193,6 +201,13 @@ inline void localCoopLoadSaveWriteCampaignMeta(const char* saveDatPath)
                 fileWrite(&wilderness, sizeof(wilderness), 1, meta);
             }
         }
+    }
+
+    UnifiedCampaignMetaChunkHeader worldHeader =
+        unifiedWorldSystemMakeChunkHeader();
+    const UnifiedWorldSystemState& world = unifiedWorldSystemGetStateConst();
+    if (fileWrite(&worldHeader, sizeof(worldHeader), 1, meta) == 1) {
+        fileWrite(&world, sizeof(world), 1, meta);
     }
 
     UnifiedCampaignMetaChunkHeader charactersHeader =
