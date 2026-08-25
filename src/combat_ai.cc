@@ -34,6 +34,7 @@
 #include "svga.h"
 #include "text_object.h"
 #include "tile.h"
+#include "unified_campaign.h"
 
 namespace fallout {
 
@@ -598,12 +599,33 @@ int aiSave(File* stream)
         if (pid != -1 && PID_TYPE(pid) == OBJ_TYPE_CRITTER) {
             Proto* proto;
             if (protoGetProto(pid, &proto) == -1) {
+                // The unified executable retains Fallout 2 party descriptors
+                // while Fallout 1's proto database is mounted. Missing foreign
+                // descriptors are not members of the active party and must not
+                // invalidate the entire autosave.
+                if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+                    debugPrint(
+                        "[UNIFIED SAVE] skipping unavailable party AI pid=%d index=%d\\n",
+                        pid,
+                        index);
+                    continue;
+                }
                 return -1;
             }
 
             AiPacket* ai = aiGetPacketByNum(proto->critter.aiPacket);
-            if (ai->disposition == 0) {
-                aiPacketWrite(stream, ai);
+            if (ai == nullptr) {
+                if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+                    debugPrint(
+                        "[UNIFIED SAVE] skipping unavailable AI packet=%d pid=%d\\n",
+                        proto->critter.aiPacket,
+                        pid);
+                    continue;
+                }
+                return -1;
+            }
+            if (ai->disposition == 0 && aiPacketWrite(stream, ai) == -1) {
+                return -1;
             }
         }
     }
