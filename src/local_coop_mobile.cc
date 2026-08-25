@@ -563,9 +563,14 @@ void localCoopMobileTick()
     for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
         MobileSlotState& state = gMobileSlots[slot];
 
-        if (state.claimed.load()
-            && now - state.lastSeen.load() > kMobileTimeoutMs) {
+        uint64_t inputAge = now - state.lastSeen.load();
+        if (state.claimed.load() && inputAge > 250) {
+            // A lost packet must never leave movement, aiming, or an attack held.
+            // Keep the player's reservation for ten seconds, but neutralize the
+            // virtual pad almost immediately.
             mobileResetInput(state);
+        }
+        if (state.claimed.load() && inputAge > kMobileTimeoutMs) {
             state.claimed.store(false);
             state.token.store(0);
         }
