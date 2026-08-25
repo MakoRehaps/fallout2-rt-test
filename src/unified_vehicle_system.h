@@ -197,6 +197,14 @@ inline void unifiedVehicleRememberLoadedPrototype(UnifiedVehicleType type, int p
         gUnifiedVehicleLoadedPrototypePids[index] = pid;
 }
 
+inline bool unifiedVehiclePrototypePidIsKnown(int pid)
+{
+    if (pid == PROTO_ID_CAR) return true;
+    for (int index = 0; index < static_cast<int>(UnifiedVehicleType::Count); index++)
+        if (gUnifiedVehicleLoadedPrototypePids[index] == pid) return true;
+    return false;
+}
+
 inline void unifiedVehicleIndexLoadedMapPrototypes()
 {
     int indexed = 0;
