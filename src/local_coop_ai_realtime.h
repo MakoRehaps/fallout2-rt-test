@@ -21,10 +21,6 @@
 
 namespace fallout {
 
-// The fused co-op game has no combat/non-combat phase. Hostiles are registered
-// here when a script or player attack starts an encounter, then act on independent
-// wall-clock schedules in the normal live world. `local_coop_danger.h` tracks
-// only whether map exits should be locked; it never changes movement/AP/UI mode.
 struct LocalCoopRealtimeAiActorState {
     Uint32 nextActionTick = 0;
     int preferredTargetId = -1;
@@ -34,6 +30,9 @@ inline std::unordered_map<int, LocalCoopRealtimeAiActorState> gLocalCoopRealtime
 inline Uint32 gLocalCoopRealtimeCombatClockTick = 0;
 inline bool gLocalCoopRealtimeAiInsideTick = false;
 inline bool gLocalCoopRealtimeWorldCombatActive = false;
+
+inline constexpr int kLocalCoopRealtimeTeamWakeDistance = 18;
+inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;
 
 inline Uint32 localCoopRealtimeAiCooldownForSlice(int actionPoints)
 {
@@ -47,7 +46,6 @@ inline Uint32 localCoopRealtimeAiInitialStagger(const Object* actor)
     if (actor == nullptr) {
         return 100;
     }
-
     return 100 + static_cast<Uint32>((actor->id & 0x0F) * 35);
 }
 
@@ -86,7 +84,6 @@ inline bool localCoopRealtimeAiActorCanAct(Object* actor)
         || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
         return false;
     }
-
     return true;
 }
 
@@ -114,15 +111,12 @@ inline Object* localCoopRealtimeAiFindNearestHuman(Object* actor)
             best = candidate;
         }
     }
-
     return best;
 }
 
 inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferredTarget)
 {
-    if (actor == nullptr
-        || actor->id == -1
-        || !localCoopRealtimeAiActorCanAct(actor)) {
+    if (actor == nullptr || actor->id == -1 || !localCoopRealtimeAiActorCanAct(actor)) {
         return;
     }
 
@@ -136,6 +130,7 @@ inline void localCoopRealtimeAiRegisterWorldActor(Object* actor, Object* preferr
 
     gLocalCoopRealtimeWorldCombatActive = true;
     localCoopDangerBegin();
+    localCoopDangerSetLiveHostiles(static_cast<int>(gLocalCoopRealtimeAiActors.size()));
 }
 
 inline void localCoopRealtimeAiEngageHostile(Object* hostile, Object* preferredTarget)
@@ -146,28 +141,26 @@ inline void localCoopRealtimeAiEngageHostile(Object* hostile, Object* preferredT
 
     localCoopRealtimeAiRegisterWorldActor(hostile, preferredTarget);
 
-    // Wake nearby members of the same team. This is encounter propagation only;
-    // it does not create turns or alter the player's movement state.
     Object** critters = nullptr;
     int count = objectListCreate(-1, hostile->elevation, OBJ_TYPE_CRITTER, &critters);
     if (count <= 0 || critters == nullptr) {
         return;
     }
 
-    constexpr int kRealtimeTeamWakeDistance = 18;
     for (int index = 0; index < count; index++) {
         Object* candidate = critters[index];
         if (candidate == nullptr
             || candidate == hostile
             || candidate->data.critter.combat.team != hostile->data.critter.combat.team
             || localCoopActorIsHumanOwned(candidate)
-            || objectGetDistanceBetween(hostile, candidate) > kRealtimeTeamWakeDistance) {
+            || objectGetDistanceBetween(hostile, candidate) > kLocalCoopRealtimeTeamWakeDistance) {
             continue;
         }
         localCoopRealtimeAiRegisterWorldActor(candidate, preferredTarget);
     }
 
     objectListFree(critters);
+    localCoopDangerSetLiveHostiles(static_cast<int>(gLocalCoopRealtimeAiActors.size()));
 }
 
 inline Object* localCoopRealtimeAiFindScriptHostile(Object* preferredTarget)
@@ -206,9 +199,6 @@ inline Object* localCoopRealtimeAiFindScriptHostile(Object* preferredTarget)
     return best;
 }
 
-// Script attack opcodes call this instead of queuing SCRIPT_REQUEST_COMBAT.
-// The exact same attacker/defender intent becomes a realtime engagement and the
-// interpreter continues running in the normal world immediately.
 inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
 {
     if (!gLocalCoopInitialized || gDude == nullptr) {
@@ -242,20 +232,14 @@ inline int localCoopRealtimeAiHandleScriptCombatRequest(CombatStartData* combat)
 
     if (hostile != nullptr && humanTarget != nullptr) {
         localCoopRealtimeAiEngageHostile(hostile, humanTarget);
-    } else {
-        // A combat request without a resolvable pair still becomes danger rather
-        // than entering the stock turn loop. It will clear once no hostile actor
-        // is registered by the normal critter/script update path.
-        localCoopDangerBegin();
-        gLocalCoopRealtimeWorldCombatActive = true;
     }
 
+    // An unresolved legacy combat request is ignored instead of creating a
+    // phantom danger flag. Only an actual registered hostile is allowed to lock
+    // map exits in the realtime game.
     return 0;
 }
 
-// Compatibility bridge retained for any old combat AI dispatch that still gets
-// reached by a save/script while conversion continues. New encounters do not use
-// this path and never require isInCombat().
 inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferredTarget)
 {
     if (actor == nullptr) {
@@ -280,7 +264,6 @@ inline void localCoopRealtimeAiRegisterLegacyTurn(Object* actor, Object* preferr
 
     localCoopRealtimeAiRegisterWorldActor(actor,
         preferredTarget != nullptr ? preferredTarget : localCoopRealtimeAiFindNearestHuman(actor));
-    actor->data.critter.combat.ap = 0;
 }
 
 inline void localCoopRealtimeAiRunWorldActor(Object* actor,
@@ -320,8 +303,7 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
         actionSlice = 2;
     }
 
-    // AP exists only as a temporary compatibility budget for the original
-    // attack/reload calculations. It never grants or removes a turn.
+    int savedActionPoints = actor->data.critter.combat.ap;
     actor->data.critter.combat.ap = std::max(20, actionSlice);
     int badShot = _combat_check_bad_shot(actor, target, hitMode, false);
     if (badShot == COMBAT_BAD_SHOT_NO_AMMO && weapon != nullptr) {
@@ -331,13 +313,13 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
 
     if (badShot == COMBAT_BAD_SHOT_OK) {
         _combat_attack(actor, target, hitMode, HIT_LOCATION_UNCALLED);
-        actor->data.critter.combat.ap = 0;
+        actor->data.critter.combat.ap = savedActionPoints;
         state.nextActionTick = now + localCoopRealtimeAiCooldownForSlice(actionSlice);
         localCoopDangerTouch();
         return;
     }
 
-    actor->data.critter.combat.ap = 0;
+    actor->data.critter.combat.ap = savedActionPoints;
 
     int moveRc = -1;
     if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED | ANIMATION_REQUEST_INSIGNIFICANT) != -1) {
@@ -352,9 +334,32 @@ inline void localCoopRealtimeAiRunWorldActor(Object* actor,
     localCoopDangerTouch();
 }
 
+inline bool localCoopRealtimeAiThreatStillEngaged(Object* actor)
+{
+    if (!localCoopRealtimeAiActorCanAct(actor)) {
+        return false;
+    }
+
+    Object* target = localCoopRealtimeAiFindNearestHuman(actor);
+    if (target == nullptr) {
+        return false;
+    }
+
+    int distance = objectGetDistanceBetween(actor, target);
+    if (distance <= kLocalCoopRealtimeDisengageDistance) {
+        return true;
+    }
+
+    return _can_see(actor, target);
+}
+
 inline void localCoopRealtimeAiTick()
 {
-    if (gLocalCoopRealtimeAiInsideTick || !gLocalCoopDangerActive) {
+    if (gLocalCoopRealtimeAiInsideTick) {
+        return;
+    }
+
+    if (!gLocalCoopDangerActive && gLocalCoopRealtimeAiActors.empty()) {
         return;
     }
 
@@ -365,7 +370,8 @@ inline void localCoopRealtimeAiTick()
     for (auto it = gLocalCoopRealtimeAiActors.begin(); it != gLocalCoopRealtimeAiActors.end();) {
         Object* actor = objectFindById(it->first);
         if (actor == nullptr
-            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0) {
+            || (actor->data.critter.combat.results & (DAM_DEAD | DAM_KNOCKED_OUT)) != 0
+            || !localCoopRealtimeAiThreatStillEngaged(actor)) {
             it = gLocalCoopRealtimeAiActors.erase(it);
             continue;
         }
@@ -376,15 +382,16 @@ inline void localCoopRealtimeAiTick()
         }
 
         localCoopRealtimeAiRunWorldActor(actor, preferredTarget, it->second, now);
-        if (localCoopRealtimeAiActorCanAct(actor)) {
-            liveWorldActors++;
-        }
+        liveWorldActors++;
         ++it;
     }
 
+    localCoopDangerSetLiveHostiles(liveWorldActors);
     if (liveWorldActors == 0) {
         gLocalCoopRealtimeWorldCombatActive = false;
         localCoopDangerEnd();
+    } else {
+        gLocalCoopRealtimeWorldCombatActive = true;
     }
 
     gLocalCoopRealtimeAiInsideTick = false;
