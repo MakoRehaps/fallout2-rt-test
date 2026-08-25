@@ -398,7 +398,7 @@ inline int unifiedFallout1LoadEncounterMap(const UnifiedFallout1EncounterSelecti
     }
 
     char fileName[32];
-    std::snprintf(fileName, sizeof(fileName), "%s.MAP", name);
+    std::snprintf(fileName, sizeof(fileName), "%s", name);
     UnifiedFallout1WorldMapState& state = unifiedFallout1WorldMapGetState();
     state.currentTown = -1;
     state.currentSection = 0;
