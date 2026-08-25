@@ -89,7 +89,7 @@ inline constexpr unsigned char kUnifiedFallout1EncounterChanceTable[kUnifiedFall
 
 inline constexpr int kUnifiedFallout1RandomMapIds[4][3] = {
     { 0, 1, 2 }, // DESERT1, DESERT2, DESERT3
-    { 49, 50, -1 }, // MOUNTN1, MOUNTN2
+    { 0, 1, 2 }, // MOUNTAIN terrain reuses DESERT1/2/3
     { 19, -1, -1 }, // CITY1
     { 20, 21, -1 }, // COAST1, COAST2
 };

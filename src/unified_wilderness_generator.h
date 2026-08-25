@@ -12,6 +12,7 @@
 #include "proto_types.h"
 #include "tile.h"
 #include "unified_campaign.h"
+#include "unified_fomap_encounter_layout.h"
 #include "unified_vehicle_system.h"
 #include "unified_world_system.h"
 
@@ -182,6 +183,11 @@ inline void unifiedWildernessMaybeGenerateVehicle(uint32_t seed, int elevation)
 inline void unifiedWildernessGenerateLoadedMapForGame(UnifiedGameId game, int mapIdx)
 {
     unifiedVehicleResetEncounterSalvage();
+
+    // If the user prepared the reference encounter archive, replace the
+    // stock encounter floor/roof with one of its compatible layouts. CE
+    // still owns critters, scripts, exits and combat setup.
+    (void)unifiedFomapEncounterApplyForLoadedMap();
 
     if (!unifiedWildernessIsOpenMountainMap(game, mapIdx)) {
         unifiedVehicleIndexLoadedMapPrototypes();

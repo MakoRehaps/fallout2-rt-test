@@ -135,9 +135,9 @@ inline bool gUnifiedWorldSystemStateInitialized = false;
 inline bool gUnifiedWorldSystemPendingStateValid = false;
 
 inline constexpr int kUnifiedWorldSystemFallout1OrdinaryMaps[] = {
-    // Mountain templates 49/50 are temporarily replaced by duplicated safe,
-    // open wilderness templates 19/20.
-    0, 1, 2, 19, 20, 21, 19, 20,
+    // Mountain templates 49/50 reuse desert templates. Keep duplicate
+    // desert entries so mountain weighting remains represented.
+    0, 1, 2, 19, 20, 21, 0, 1,
     56, 57, 58, 59, 61, 62, 63, 64,
 };
 
@@ -162,8 +162,8 @@ inline int unifiedWorldSystemGameIndex(UnifiedGameId game)
 inline int unifiedWorldSystemSafeTemplateMap(UnifiedGameId game, int mapIdx)
 {
     if (game == UnifiedGameId::Fallout1) {
-        if (mapIdx == 49) return 19;
-        if (mapIdx == 50) return 20;
+        if (mapIdx == 49) return 0;
+        if (mapIdx == 50) return 1;
     } else {
         if (mapIdx == 74) return 81;
         if (mapIdx == 75) return 82;

@@ -56,6 +56,7 @@ inline constexpr int kLocalCoopRealtimeMapWidth = 200;
 inline constexpr int kLocalCoopRealtimeMapHeight = 200;
 inline int gLocalCoopRealtimePursuitDirection = 0;
 inline constexpr int kLocalCoopRealtimeDisengageDistance = 28;
+inline constexpr Uint32 kLocalCoopRealtimeMaximumMapEntryGrace = 1200;
 
 inline Uint32 localCoopRealtimeAiCooldownForSlice(int actionPoints)
 {
@@ -72,8 +73,13 @@ inline Uint32 localCoopRealtimeAiInitialStagger(const Object* actor)
     return 100 + static_cast<Uint32>((actor->id & 0x0F) * 35);
 }
 
-inline void localCoopRealtimeAiBeginMapEntryGrace(Uint32 duration = 3000)
+inline void localCoopRealtimeAiBeginMapEntryGrace(Uint32 duration = 1200)
 {
+    // Road transitions used to request ten seconds here, which let the
+    // party cross most encounter maps before anything could react. Keep
+    // a short spawn-safety window, then let speed and distance decide
+    // whether the party can genuinely outrun the encounter.
+    duration = std::min(duration, kLocalCoopRealtimeMaximumMapEntryGrace);
     Uint32 now = SDL_GetTicks();
     gLocalCoopRealtimeMapEntryGraceUntil = now + duration;
     for (auto& entry : gLocalCoopRealtimeAiActors) {
