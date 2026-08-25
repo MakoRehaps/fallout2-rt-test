@@ -36,6 +36,9 @@ inline constexpr int kUnifiedVehicleSalvageLogCapacity = 32;
 
 inline int gUnifiedVehicleSalvagedObjectIds[kUnifiedVehicleSalvageLogCapacity] {};
 inline int gUnifiedVehicleSalvagedObjectCount = 0;
+inline int gUnifiedVehicleLoadedPrototypePids[static_cast<int>(UnifiedVehicleType::Count)] {
+    -1, -1, -1, -1, -1
+};
 
 inline const char* unifiedVehicleName(UnifiedVehicleType type)
 {
@@ -185,18 +188,47 @@ inline bool unifiedVehicleTryUseWreck(Object* object)
     return true;
 }
 
+inline void unifiedVehicleRememberLoadedPrototype(UnifiedVehicleType type, int pid)
+{
+    int index = static_cast<int>(type);
+    if (index < 0 || index >= static_cast<int>(UnifiedVehicleType::Count)) return;
+    if (gUnifiedVehicleLoadedPrototypePids[index] == -1)
+        gUnifiedVehicleLoadedPrototypePids[index] = pid;
+}
+
+inline void unifiedVehicleIndexLoadedMapPrototypes()
+{
+    int indexed = 0;
+    for (Object* object = objectFindFirst(); object != nullptr; object = objectFindNext()) {
+        UnifiedVehicleType type = unifiedVehicleTypeForObject(object);
+        if (type == UnifiedVehicleType::None) continue;
+        int index = static_cast<int>(type);
+        if (gUnifiedVehicleLoadedPrototypePids[index] == -1) {
+            gUnifiedVehicleLoadedPrototypePids[index] = object->pid;
+            indexed++;
+        }
+    }
+    if (indexed != 0)
+        debugPrint("[VEHICLE] indexed=%d loaded-map wreck prototypes without global proto scan\n", indexed);
+}
+
 inline int unifiedVehicleFindPrototype(UnifiedVehicleType requested)
 {
+    int index = static_cast<int>(requested);
+    if (index < 0 || index >= static_cast<int>(UnifiedVehicleType::Count)) return -1;
+
+    int loadedPid = gUnifiedVehicleLoadedPrototypePids[index];
+    if (loadedPid != -1) return loadedPid;
+
+    // The Highwayman is the only stock vehicle PID guaranteed by the engine.
+    // Never sweep proto_max_id here: protoGetProto retains every scenery proto
+    // it touches and eventually fragments the legacy movable heap.
     if (requested == UnifiedVehicleType::Highwayman) {
         Proto* proto = nullptr;
-        if (protoGetProto(PROTO_ID_CAR, &proto) == 0) return PROTO_ID_CAR;
-    }
-    int maximum = proto_max_id(OBJ_TYPE_SCENERY);
-    for (int index = 1; index <= maximum; index++) {
-        int pid = (OBJ_TYPE_SCENERY << 24) | index;
-        Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) == 0 && unifiedVehicleTypeFromName(protoGetName(pid)) == requested)
-            return pid;
+        if (protoGetProto(PROTO_ID_CAR, &proto) == 0) {
+            gUnifiedVehicleLoadedPrototypePids[index] = PROTO_ID_CAR;
+            return PROTO_ID_CAR;
+        }
     }
     return -1;
 }
