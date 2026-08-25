@@ -49,6 +49,7 @@
 #include "text_font.h"
 #include "tile.h"
 #include "window_manager.h"
+#include "unified_world_system.h"
 
 namespace fallout {
 
@@ -775,6 +776,43 @@ static int wmTownMapButtonId[ENTRANCE_LIST_CAPACITY];
 //
 // 0x672E00
 static WmGenData wmGenData;
+
+
+void unifiedWorldSystemRestoreFallout2EncounterContext(
+    int mapIdx,
+    int encounterTableId,
+    int encounterEntryId)
+{
+    wmGenData.encounterMapId = mapIdx;
+
+    if (encounterTableId >= 0 && encounterEntryId >= 0) {
+        wmGenData.encounterTableId = encounterTableId;
+        wmGenData.encounterEntryId = encounterEntryId;
+        return;
+    }
+
+    const UnifiedWorldSystemTravelState& travel =
+        unifiedWorldSystemGetStateConst().travel;
+    int gameIndex = unifiedWorldSystemGameIndex(UnifiedGameId::Fallout2);
+    wmGenData.worldPosX =
+        travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+        + kUnifiedWorldSystemCellSize / 2;
+    wmGenData.worldPosY =
+        travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+        + kUnifiedWorldSystemCellSize / 2;
+    wmGenData.currentSubtile = nullptr;
+
+    if (wmRndEncounterPick() == -1) {
+        wmGenData.encounterMapId = -1;
+        wmGenData.encounterTableId = -1;
+        wmGenData.encounterEntryId = -1;
+        return;
+    }
+
+    // Keep the persistent cell's original wilderness map while using the
+    // biome-correct encounter population selected at this world position.
+    wmGenData.encounterMapId = mapIdx;
+}
 
 // worldmap.msg
 //
