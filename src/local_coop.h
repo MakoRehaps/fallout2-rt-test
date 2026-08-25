@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "animation.h"
+#include "color.h"
 #include "art.h"
 #include "debug.h"
 #include "game.h"
@@ -17,7 +18,12 @@
 #include "local_coop_danger.h"
 #include "object.h"
 #include "party_member.h"
+#include "proto.h"
 #include "proto_types.h"
+#include "stat.h"
+#include "svga.h"
+#include "text_font.h"
+#include "window_manager.h"
 #include "tile.h"
 
 namespace fallout {
@@ -44,7 +50,18 @@ struct LocalCoopPlayer {
     LocalCoopUiMode uiMode = LocalCoopUiMode::World;
     bool connected = false;
     bool humanOwned = false;
+    bool slotLocked = false;
+    bool joinMenuActive = false;
+    bool joinStartWasDown = false;
+    bool joinLeftWasDown = false;
+    bool joinRightWasDown = false;
+    bool joinConfirmWasDown = false;
+    bool joinCancelWasDown = false;
     bool wantsRun = false;
+    int archetype = 0;
+    int gender = GENDER_MALE;
+    int joinWindow = -1;
+    char controllerGuid[64] {};
     int activeHand = HAND_RIGHT;
     int moveX = 0;
     int moveY = 0;
@@ -65,34 +82,58 @@ inline void localCoopClearActorBindings()
 
 inline void localCoopRefreshActorBindings()
 {
-    localCoopClearActorBindings();
-
     gLocalCoopPlayers[0].actor = gDude;
     gLocalCoopPlayers[0].humanOwned = gDude != nullptr;
+    gLocalCoopPlayers[0].slotLocked = true;
 
-    std::vector<Object*> party = get_all_party_members_objects(false);
-    int slot = 1;
-    for (Object* object : party) {
-        if (object == nullptr || object == gDude) {
-            continue;
-        }
-
-        if (slot >= kLocalCoopMaxPlayers) {
-            break;
-        }
-
-        gLocalCoopPlayers[slot].actor = object;
-        gLocalCoopPlayers[slot].humanOwned = true;
-        slot++;
+    // P2-P4 are independent synthetic player critters. Recruited companions
+    // remain in the stock party and are never consumed as controller bodies.
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        player.humanOwned = player.slotLocked && player.actor != nullptr;
     }
 }
 
 inline int localCoopFindFreeControllerSlot()
 {
     for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
-        if (!gLocalCoopPlayers[index].connected) {
+        const LocalCoopPlayer& player = gLocalCoopPlayers[index];
+        if (!player.connected && !player.slotLocked) {
             return index;
         }
+    }
+
+    return -1;
+}
+
+inline int localCoopFindReservedControllerSlot(const char* guid)
+{
+    if (guid != nullptr && *guid != '\0') {
+        for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+            const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+            if (player.slotLocked
+                && !player.connected
+                && strcmp(player.controllerGuid, guid) == 0) {
+                return slot;
+            }
+        }
+    }
+
+    // When every numbered slot is already reserved, permit a replacement
+    // controller to reclaim the only disconnected reservation.
+    if (localCoopFindFreeControllerSlot() == -1) {
+        int candidate = -1;
+        for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+            const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+            if (!player.slotLocked || player.connected) {
+                continue;
+            }
+            if (candidate != -1) {
+                return -1;
+            }
+            candidate = slot;
+        }
+        return candidate;
     }
 
     return -1;
@@ -124,7 +165,14 @@ inline void localCoopOpenController(int deviceIndex)
         return;
     }
 
-    int slot = localCoopFindFreeControllerSlot();
+    SDL_JoystickGUID deviceGuid = SDL_JoystickGetDeviceGUID(deviceIndex);
+    char guid[64] {};
+    SDL_JoystickGetGUIDString(deviceGuid, guid, sizeof(guid));
+
+    int slot = localCoopFindReservedControllerSlot(guid);
+    if (slot == -1) {
+        slot = localCoopFindFreeControllerSlot();
+    }
     if (slot == -1) {
         return;
     }
@@ -140,6 +188,7 @@ inline void localCoopOpenController(int deviceIndex)
     player.controller = controller;
     player.joystickId = SDL_JoystickInstanceID(joystick);
     player.connected = true;
+    snprintf(player.controllerGuid, sizeof(player.controllerGuid), "%s", guid);
 }
 
 inline void localCoopClearController(LocalCoopPlayer& player)
@@ -148,18 +197,31 @@ inline void localCoopClearController(LocalCoopPlayer& player)
         SDL_GameControllerClose(player.controller);
     }
 
+    if (player.joinWindow != -1) {
+        windowDestroy(player.joinWindow);
+    }
+
     int slot = player.slot;
     Object* actor = player.actor;
     bool humanOwned = player.humanOwned;
+    bool slotLocked = player.slotLocked;
     LocalCoopUiMode uiMode = player.uiMode;
     int activeHand = player.activeHand;
+    int archetype = player.archetype;
+    int gender = player.gender;
+    char controllerGuid[64] {};
+    snprintf(controllerGuid, sizeof(controllerGuid), "%s", player.controllerGuid);
 
-    player = LocalCoopPlayer{};
+    player = LocalCoopPlayer {};
     player.slot = slot;
     player.actor = actor;
     player.humanOwned = humanOwned;
+    player.slotLocked = slotLocked;
     player.uiMode = uiMode;
     player.activeHand = activeHand;
+    player.archetype = archetype;
+    player.gender = gender;
+    snprintf(player.controllerGuid, sizeof(player.controllerGuid), "%s", controllerGuid);
 }
 
 inline void localCoopCloseControllerByJoystickId(SDL_JoystickID joystickId)
@@ -205,6 +267,7 @@ inline void localCoopInit()
         gLocalCoopPlayers[index].slot = index;
         gLocalCoopPlayers[index].activeHand = HAND_RIGHT;
     }
+    gLocalCoopPlayers[0].slotLocked = true;
 
     localCoopRefreshControllers();
     localCoopRefreshActorBindings();
@@ -223,7 +286,13 @@ inline void localCoopShutdown()
         if (player.controller != nullptr) {
             SDL_GameControllerClose(player.controller);
         }
-        player = LocalCoopPlayer{};
+        if (player.joinWindow != -1) {
+            windowDestroy(player.joinWindow);
+        }
+        if (player.slot > 0 && player.actor != nullptr) {
+            player.actor->flags &= ~(OBJECT_NO_REMOVE | OBJECT_NO_SAVE);
+        }
+        player = LocalCoopPlayer {};
     }
 
     localCoopDangerEnd();
@@ -244,6 +313,242 @@ inline bool localCoopHandleEvent(const SDL_Event& event)
     }
 
     return false;
+}
+
+inline constexpr int kLocalCoopArchetypeCount = 4;
+inline constexpr const char* kLocalCoopArchetypeNames[kLocalCoopArchetypeCount] = {
+    "WASTELAND FIGHTER",
+    "SCOUT",
+    "MEDIC",
+    "TECH SPECIALIST",
+};
+
+inline constexpr int kLocalCoopArchetypeStats[kLocalCoopArchetypeCount][PRIMARY_STAT_COUNT] = {
+    { 7, 5, 7, 4, 5, 7, 5 },
+    { 5, 8, 5, 4, 6, 8, 4 },
+    { 4, 6, 5, 6, 8, 6, 5 },
+    { 4, 6, 4, 5, 9, 6, 6 },
+};
+
+inline int localCoopFindSpawnTile(Object* anchor, int distance)
+{
+    if (anchor == nullptr || !tileIsValid(anchor->tile)) {
+        return -1;
+    }
+
+    for (int ring = 1; ring <= distance; ring++) {
+        for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+            int tile = tileGetTileInDirection(anchor->tile, rotation, ring);
+            if (tileIsValid(tile)
+                && _obj_blocking_at(anchor, tile, anchor->elevation) == nullptr) {
+                return tile;
+            }
+        }
+    }
+    return -1;
+}
+
+inline bool localCoopCreatePlayerActor(int slot)
+{
+    if (slot <= 0 || slot >= kLocalCoopMaxPlayers || gDude == nullptr) {
+        return false;
+    }
+
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    int archetype = std::max(0, std::min(player.archetype, kLocalCoopArchetypeCount - 1));
+    int pid = protoConfigureLocalCoopPlayer(
+        slot,
+        kLocalCoopArchetypeStats[archetype],
+        player.gender);
+    if (pid == -1) {
+        return false;
+    }
+
+    Object* actor = nullptr;
+    if (objectCreateWithPid(&actor, pid) == -1 || actor == nullptr) {
+        return false;
+    }
+
+    actor->flags |= OBJECT_NO_REMOVE | OBJECT_NO_SAVE | OBJECT_LIGHT_THRU;
+    actor->flags &= ~OBJECT_HIDDEN;
+    actor->data.critter.combat.results = 0;
+    critterUpdateDerivedStats(actor);
+    actor->data.critter.combat.hp = critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS);
+    actor->data.critter.combat.ap = critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS);
+
+    int spawnTile = localCoopFindSpawnTile(gDude, 3);
+    if (spawnTile == -1
+        || objectSetLocation(actor, spawnTile, gDude->elevation, nullptr) == -1) {
+        actor->flags &= ~(OBJECT_NO_REMOVE | OBJECT_NO_SAVE);
+        objectDestroy(actor, nullptr);
+        return false;
+    }
+
+    player.actor = actor;
+    player.humanOwned = true;
+    player.slotLocked = true;
+    player.archetype = archetype;
+    debugPrint(
+        "[COOP JOIN] slot=%d locked archetype=%s pid=%d tile=%d\n",
+        slot,
+        kLocalCoopArchetypeNames[archetype],
+        pid,
+        spawnTile);
+    return true;
+}
+
+inline void localCoopDrawJoinMenu(LocalCoopPlayer& player)
+{
+    if (player.joinWindow == -1) {
+        return;
+    }
+
+    windowFill(player.joinWindow, 0, 0, 420, 230, _colorTable[0]);
+    windowDrawBorder(player.joinWindow);
+
+    char title[64];
+    snprintf(title, sizeof(title), "PLAYER %d - CREATE CHARACTER", player.slot + 1);
+    windowDrawText(player.joinWindow, title, 380, 20, 18, _colorTable[992]);
+    windowDrawText(
+        player.joinWindow,
+        "LEFT/RIGHT: ARCHETYPE    Y: GENDER",
+        380,
+        20,
+        48,
+        _colorTable[992]);
+
+    char choice[96];
+    snprintf(
+        choice,
+        sizeof(choice),
+        "<  %s  >",
+        kLocalCoopArchetypeNames[player.archetype]);
+    windowDrawText(player.joinWindow, choice, 380, 20, 92, _colorTable[992]);
+
+    const int* stats = kLocalCoopArchetypeStats[player.archetype];
+    char special[128];
+    snprintf(
+        special,
+        sizeof(special),
+        "ST %d  PE %d  EN %d  CH %d  IN %d  AG %d  LK %d",
+        stats[STAT_STRENGTH],
+        stats[STAT_PERCEPTION],
+        stats[STAT_ENDURANCE],
+        stats[STAT_CHARISMA],
+        stats[STAT_INTELLIGENCE],
+        stats[STAT_AGILITY],
+        stats[STAT_LUCK]);
+    windowDrawText(player.joinWindow, special, 380, 20, 126, _colorTable[992]);
+    windowDrawText(
+        player.joinWindow,
+        player.gender == GENDER_FEMALE ? "GENDER: FEMALE" : "GENDER: MALE",
+        380,
+        20,
+        154,
+        _colorTable[992]);
+    windowDrawText(
+        player.joinWindow,
+        "A: JOIN AND LOCK SLOT    B: CANCEL",
+        380,
+        20,
+        194,
+        _colorTable[992]);
+    windowRefresh(player.joinWindow);
+}
+
+inline void localCoopOpenJoinMenu(LocalCoopPlayer& player)
+{
+    if (player.joinMenuActive || player.slot <= 0 || player.slotLocked) {
+        return;
+    }
+
+    player.joinWindow = windowCreate(
+        (screenGetWidth() - 420) / 2,
+        (screenGetVisibleHeight() - 230) / 2,
+        420,
+        230,
+        _colorTable[0],
+        WINDOW_MOVE_ON_TOP);
+    if (player.joinWindow == -1) {
+        return;
+    }
+
+    player.joinMenuActive = true;
+    localCoopDrawJoinMenu(player);
+}
+
+inline void localCoopCloseJoinMenu(LocalCoopPlayer& player)
+{
+    if (player.joinWindow != -1) {
+        windowDestroy(player.joinWindow);
+    }
+    player.joinWindow = -1;
+    player.joinMenuActive = false;
+}
+
+inline void localCoopProcessJoinMenus()
+{
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!player.connected || player.controller == nullptr) {
+            continue;
+        }
+
+        bool startDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+        bool leftDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+        bool rightDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
+        bool confirmDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
+        bool cancelDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_B) != 0;
+        bool genderDown =
+            SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+
+        if (!player.slotLocked
+            && startDown
+            && !player.joinStartWasDown
+            && !player.joinMenuActive) {
+            localCoopOpenJoinMenu(player);
+        }
+
+        bool dirty = false;
+        if (player.joinMenuActive) {
+            if (leftDown && !player.joinLeftWasDown) {
+                player.archetype =
+                    (player.archetype + kLocalCoopArchetypeCount - 1)
+                    % kLocalCoopArchetypeCount;
+                dirty = true;
+            }
+            if (rightDown && !player.joinRightWasDown) {
+                player.archetype =
+                    (player.archetype + 1) % kLocalCoopArchetypeCount;
+                dirty = true;
+            }
+            if (genderDown && !player.joinConfirmWasDown) {
+                player.gender =
+                    player.gender == GENDER_MALE ? GENDER_FEMALE : GENDER_MALE;
+                dirty = true;
+            }
+            if (confirmDown && !player.joinConfirmWasDown) {
+                if (localCoopCreatePlayerActor(slot)) {
+                    localCoopCloseJoinMenu(player);
+                }
+            } else if (cancelDown && !player.joinCancelWasDown) {
+                localCoopCloseJoinMenu(player);
+            } else if (dirty) {
+                localCoopDrawJoinMenu(player);
+            }
+        }
+
+        player.joinStartWasDown = startDown;
+        player.joinLeftWasDown = leftDown;
+        player.joinRightWasDown = rightDown;
+        player.joinConfirmWasDown = confirmDown || genderDown;
+        player.joinCancelWasDown = cancelDown;
+    }
 }
 
 inline int localCoopReadAxis(SDL_GameController* controller, SDL_GameControllerAxis axis)
