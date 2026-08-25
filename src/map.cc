@@ -1223,16 +1223,19 @@ int mapSetTransition(MapTransition* transition)
         return -1;
     }
 
+    int requestedMap = transition->map;
     memcpy(&gMapTransition, transition, sizeof(gMapTransition));
 
     if (gMapTransition.map == 0) {
         gMapTransition.map = -2;
     }
 
-    if (isInCombat()) {
-        _game_user_wants_to_quit = 1;
-    }
-
+    debugPrint(
+        "[COOP MAP EXIT] transition queued currentMap=%d requested=%d normalized=%d combat=%d\n",
+        gMapHeader.field_34,
+        requestedMap,
+        gMapTransition.map,
+        isInCombat() ? 1 : 0);
     return 0;
 }
 
@@ -1247,59 +1250,92 @@ int mapHandleTransition()
     gameMouseSetCursor(MOUSE_CURSOR_NONE);
 
     if (gMapTransition.map == -1) {
-        if (!isInCombat()) {
-            animationStop();
-            wmTownMap();
-            memset(&gMapTransition, 0, sizeof(gMapTransition));
-        }
+        animationStop();
+        wmTownMap();
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
     } else if (gMapTransition.map == -2) {
-        if (!isInCombat()) {
-            animationStop();
+        // Realtime co-op danger must not strand the party. Stop the current
+        // animation batch, clear map-local hostiles, and execute the road exit.
+        animationStop();
 
-            UnifiedGameId game = unifiedCampaignGetActiveGame();
-            UnifiedWorldSystemRoadDirection direction =
-                unifiedWorldSystemRoadDirectionFromTile(
-                    gDude != nullptr ? gDude->tile : -1);
-            int nextMap = -1;
-            bool loadRoadMap = unifiedWorldSystemTraverseRoad(
-                game,
-                gMapHeader.field_34,
-                direction,
-                gameTimeGetTime(),
-                &nextMap);
+        UnifiedGameId game = unifiedCampaignGetActiveGame();
+        int exitTile = localCoopConsumeMapExitTile();
+        if (exitTile < 0 && gDude != nullptr) {
+            exitTile = gDude->tile;
+        }
+        UnifiedWorldSystemRoadDirection direction =
+            unifiedWorldSystemRoadDirectionFromTile(exitTile);
 
-            if (loadRoadMap) {
-                const UnifiedWorldSystemTravelState& travel =
-                    unifiedWorldSystemGetStateConst().travel;
-                int gameIndex = unifiedWorldSystemGameIndex(game);
-                int worldX =
-                    travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
-                    + kUnifiedWorldSystemCellSize / 2;
-                int worldY =
-                    travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
-                    + kUnifiedWorldSystemCellSize / 2;
+        const UnifiedWorldSystemTravelState& before =
+            unifiedWorldSystemGetStateConst().travel;
+        int gameIndex = unifiedWorldSystemGameIndex(game);
+        int fromX = before.currentCellX[gameIndex];
+        int fromY = before.currentCellY[gameIndex];
 
-                if (game == UnifiedGameId::Fallout1) {
-                    UnifiedFallout1WorldMapState& fallout1World =
-                        unifiedFallout1WorldMapGetState();
-                    fallout1World.worldX = worldX;
-                    fallout1World.worldY = worldY;
-                    fallout1World.currentTown = -1;
-                    unifiedFallout1SetEncounterRegionGlobal(
-                        unifiedFallout1EncounterRegionAt(worldX, worldY));
-                } else {
-                    wmSetPartyWorldPos(worldX, worldY);
-                }
+        int nextMap = -1;
+        bool loadRoadMap = unifiedWorldSystemTraverseRoad(
+            game,
+            gMapHeader.field_34,
+            direction,
+            gameTimeGetTime(),
+            &nextMap);
 
-                gMapTransition.map = nextMap;
-                gMapTransition.elevation = 0;
-                gMapTransition.tile = -1;
-                gMapTransition.rotation = 0;
-                mapLoadById(nextMap);
+        if (loadRoadMap) {
+            const UnifiedWorldSystemTravelState& travel =
+                unifiedWorldSystemGetStateConst().travel;
+            int worldX =
+                travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+                + kUnifiedWorldSystemCellSize / 2;
+            int worldY =
+                travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+                + kUnifiedWorldSystemCellSize / 2;
+
+            if (game == UnifiedGameId::Fallout1) {
+                UnifiedFallout1WorldMapState& fallout1World =
+                    unifiedFallout1WorldMapGetState();
+                fallout1World.worldX = worldX;
+                fallout1World.worldY = worldY;
+                fallout1World.currentTown = -1;
+                unifiedFallout1SetEncounterRegionGlobal(
+                    unifiedFallout1EncounterRegionAt(worldX, worldY));
+            } else {
+                wmSetPartyWorldPos(worldX, worldY);
             }
 
-            memset(&gMapTransition, 0, sizeof(gMapTransition));
+            debugPrint(
+                "[COOP ROAD] game=%d dir=%d tile=%d from=%d,%d to=%d,%d map=%d\n",
+                static_cast<int>(static_cast<uint32_t>(game)),
+                static_cast<int>(direction),
+                exitTile,
+                fromX,
+                fromY,
+                travel.currentCellX[gameIndex],
+                travel.currentCellY[gameIndex],
+                nextMap);
+
+            localCoopDangerEnd();
+            gMapTransition.map = nextMap;
+            gMapTransition.elevation = 0;
+            gMapTransition.tile = -1;
+            gMapTransition.rotation = 0;
+            int loadRc = mapLoadById(nextMap);
+            debugPrint(
+                "[COOP ROAD] load map=%d rc=%d now=%d\n",
+                nextMap,
+                loadRc,
+                gMapHeader.field_34);
+        } else {
+            debugPrint(
+                "[COOP ROAD] blocked game=%d dir=%d tile=%d cell=%d,%d map=%d\n",
+                static_cast<int>(static_cast<uint32_t>(game)),
+                static_cast<int>(direction),
+                exitTile,
+                fromX,
+                fromY,
+                gMapHeader.field_34);
         }
+
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
     } else {
         if (!isInCombat()) {
             if (gMapTransition.map != gMapHeader.field_34
