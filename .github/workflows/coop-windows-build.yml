@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply PhoBoi and co-op simulation fixes
+      - name: Apply PhoBoi, co-op, and wilderness fixes
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
@@ -36,21 +36,22 @@ jobs:
           python tools/patch_phoboi_pagehide_release.py
           python tools/patch_phoboi_websocket_headers.py
           python tools/patch_coop_simulation_pause.py
+          python tools/patch_no_mountain_maps.py
 
-          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h
+          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/map.cc
           $sourceChanged = $LASTEXITCODE -ne 0
 
           if (-not $sourceChanged) {
-            Write-Host "PhoBoi/co-op source already current."
+            Write-Host "PhoBoi/co-op/wilderness source already current."
           } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h
-            git commit -m "Apply PhoBoi and co-op simulation fixes"
+            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/map.cc
+            git commit -m "Apply PhoBoi, co-op, and wilderness fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            Write-Host "Applied PhoBoi/co-op patches to this build workspace."
+            Write-Host "Applied PhoBoi/co-op/wilderness patches to this build workspace."
           }
 
           # git diff --quiet deliberately returns 1 when patches changed files.
