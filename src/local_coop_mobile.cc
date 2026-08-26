@@ -70,6 +70,9 @@ struct MobileSlotState {
     std::atomic<int> packetIntervalMs { kMobileNominalPacketMs };
     std::atomic<int> jitterMs { 0 };
     std::atomic<int> rttMs { 0 };
+    // PHOBOI_MOBILE_RELIABILITY_V3
+    std::atomic<int> controlConnections { 0 };
+    std::atomic<int> streamConnections { 0 };
 
     MobileSlotState()
     {
@@ -267,47 +270,89 @@ function bindStick(id,ax,ay){
 bindStick('ls',0,1);bindStick('rs',2,3);
 $('connect').onclick=async()=>{try{const body=new URLSearchParams({slot:$('slot').value,pin:$('pin').value});
  const r=await fetch('/claim',{method:'POST',body});const j=await r.json();if(!j.ok)throw new Error(j.error||'Unable to connect');
- slot=j.slotIndex;token=j.token;$('join').style.display='none';$('pad').style.display='block';$('top').textContent=`PLAYER ${j.player} — CONNECTED`;openSocket();
+ slot=j.slotIndex;token=j.token;sessionStorage.setItem('phoboiSession',JSON.stringify({slot,token}));$('join').style.display='none';$('pad').style.display='block';controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
  if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});
  if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});
 }catch(e){$('msg').textContent=e.message}};
-let ws=null,reconnectTimer=null;
+let ws=null,controlTimer=null,controlAttempt=0,controlMode='STARTING';
+let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttpSent=0;
+function updateStatus(){
+ const link=rtt>0?` ${rtt}ms ±${jitter}`:'';
+ $('top').textContent=`PLAYER ${slot+1} | CTRL ${controlMode} | VIDEO ${videoMode}${link}`;
+}
+function retryDelay(attempt){return Math.min(5000,500*Math.pow(1.55,Math.min(attempt,6)))}
+function scheduleControl(){if(slot<0||controlTimer)return;controlTimer=setTimeout(()=>{controlTimer=null;openSocket()},retryDelay(controlAttempt++))}
+function scheduleStream(){if(slot<0||streamTimer)return;streamTimer=setTimeout(()=>{streamTimer=null;openStream()},retryDelay(streamAttempt++))}
 function openSocket(){
  if(slot<0)return;
+ if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const scheme=location.protocol==='https:'?'wss':'ws';
- ws=new WebSocket(`${scheme}://${location.host}/ws?slot=${slot}&token=${token}`);
- ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — CONNECTED`;navigator.vibrate?.(35);openStream()};
- ws.onmessage=ev=>{
+ controlMode='CONNECTING';updateStatus();
+ const sock=new WebSocket(`${scheme}://${location.host}/ws?slot=${slot}&token=${token}`);ws=sock;
+ sock.onopen=()=>{if(ws!==sock)return;controlAttempt=0;controlMode='WS';updateStatus();navigator.vibrate?.(35)};
+ sock.onmessage=ev=>{
+  if(ws!==sock)return;
   const m=String(ev.data||'').split(',');if(m[0]!=='a'||m.length<3)return;
   const sent=Number(m[2]);if(!Number.isFinite(sent))return;
   const sample=Math.max(0,performance.now()-sent),delta=Math.abs(sample-lastRtt);lastRtt=sample;
   rtt=rtt?Math.round(rtt*.82+sample*.18):Math.round(sample);jitter=jitter?Math.round(jitter*.8+delta*.2):Math.round(delta);
-  const grade=rtt<55&&jitter<15?'EXCELLENT':rtt<100&&jitter<30?'GOOD':rtt<220&&jitter<70?'OK':'ROUGH';
-  $('top').textContent=`PLAYER ${slot+1} — ${grade} ${rtt}ms ±${jitter}`;
+  updateStatus();
  };
- ws.onclose=()=>{$('top').textContent='RECONNECTING…';if(slot>=0)reconnectTimer=setTimeout(openSocket,700)};
+ sock.onerror=()=>{};
+ sock.onclose=()=>{if(ws===sock)ws=null;controlMode='HTTP';updateStatus();scheduleControl()};
 }
 async function inflateFrame(buf){
- const u=new Uint8Array(buf);if(u.length<12)return;const dv=new DataView(buf);const w=dv.getUint16(4,true),h=dv.getUint16(6,true);const payload=buf.slice(12);
- const ds=new DecompressionStream('deflate');const raw=await new Response(new Blob([payload]).stream().pipeThrough(ds)).arrayBuffer();
- const rgba=new Uint8ClampedArray(raw);if(rgba.length!==w*h*4)return;const c=$('video');if(c.width!==w||c.height!==h){c.width=w;c.height=h}c.getContext('2d').putImageData(new ImageData(rgba,w,h),0,0);
+ const u=new Uint8Array(buf);if(u.length<12||u[0]!==80||u[1]!==72||u[2]!==79||u[3]!==66)return;
+ const dv=new DataView(buf);const w=dv.getUint16(4,true),h=dv.getUint16(6,true);if(!w||!h||w>1920||h>1080)return;
+ const payload=buf.slice(12);const ds=new DecompressionStream('deflate');
+ const raw=await new Response(new Blob([payload]).stream().pipeThrough(ds)).arrayBuffer();
+ const rgba=new Uint8ClampedArray(raw);if(rgba.length!==w*h*4)return;
+ const c=$('video');if(c.width!==w||c.height!==h){c.width=w;c.height=h}
+ c.getContext('2d',{alpha:false}).putImageData(new ImageData(rgba,w,h),0,0);lastFrameAt=performance.now();videoMode='OK';updateStatus();
 }
 function openStream(){
- if(slot<0||!('DecompressionStream'in window))return;const scheme=location.protocol==='https:'?'wss':'ws';stream=new WebSocket(`${scheme}://${location.host}/stream?slot=${slot}&token=${token}`);stream.binaryType='arraybuffer';
- stream.onmessage=e=>inflateFrame(e.data).catch(()=>{});stream.onclose=()=>{if(slot>=0)setTimeout(openStream,1200)};
+ if(slot<0)return;
+ if(!('DecompressionStream'in window)){videoMode='UNSUPPORTED';updateStatus();return}
+ if(stream&&(stream.readyState===WebSocket.OPEN||stream.readyState===WebSocket.CONNECTING))return;
+ const scheme=location.protocol==='https:'?'wss':'ws';videoMode='CONNECTING';updateStatus();
+ const sock=new WebSocket(`${scheme}://${location.host}/stream?slot=${slot}&token=${token}`);stream=sock;sock.binaryType='arraybuffer';
+ sock.onopen=()=>{if(stream!==sock)return;streamAttempt=0;lastFrameAt=performance.now();videoMode='WAIT';updateStatus()};
+ sock.onmessage=e=>{if(stream===sock)inflateFrame(e.data).catch(()=>{videoMode='DECODE';updateStatus()})};
+ sock.onerror=()=>{};
+ sock.onclose=()=>{if(stream===sock)stream=null;videoMode='RETRY';updateStatus();scheduleStream()};
 }
 async function send(){
  if(slot<0)return;
  const stamp=performance.now();
  const packet=[++seq,stamp,Math.round(rtt),Math.round(jitter),axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
- if(ws&&ws.readyState===WebSocket.OPEN){ws.send(packet);return}
- if(sending)return;sending=true;
- try{const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});await fetch('/input',{method:'POST',body,keepalive:true})}catch(e){}
+ if(ws&&ws.readyState===WebSocket.OPEN){try{ws.send(packet);controlMode='WS'}catch(e){}return}
+ // HTTP fallback stays responsive without flooding Cloudflare with ~60 POST/s.
+ if(stamp-lastHttpSent<50||sending)return;lastHttpSent=stamp;sending=true;controlMode='HTTP';updateStatus();
+ try{
+  const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});
+  const r=await fetch('/input',{method:'POST',body,cache:'no-store'});
+  if(r.status===403){controlMode='EXPIRED';updateStatus()}
+ }catch(e){}
  sending=false;
 }
-setInterval(send,16);// PHOBOI_NO_PAGEHIDE_RELEASE_V1
-// Do not release the claimed player slot on pagehide: browsers may fire pagehide
-// during fullscreen/orientation transitions. The server timeout owns stale sessions.
+setInterval(send,16);
+setInterval(()=>{
+ if(slot<0)return;
+ if(!ws||ws.readyState===WebSocket.CLOSED)openSocket();
+ if(!stream||stream.readyState===WebSocket.CLOSED)openStream();
+ if(stream&&stream.readyState===WebSocket.OPEN&&lastFrameAt&&performance.now()-lastFrameAt>5000){
+  videoMode='STALLED';updateStatus();try{stream.close()}catch(e){}
+ }
+},1000);
+['online','pageshow','orientationchange'].forEach(name=>window.addEventListener(name,()=>{if(slot>=0){openSocket();openStream()}}));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&slot>=0){openSocket();openStream()}});
+// PHOBOI_NO_PAGEHIDE_RELEASE_V1: fullscreen/orientation/page lifecycle never releases the slot.
+// Reloading the controller page should not strand a claimed slot for 60 seconds.
+(async()=>{try{
+ const saved=JSON.parse(sessionStorage.getItem('phoboiSession')||'null');if(!saved)return;
+ const r=await fetch(`/resume?slot=${saved.slot}&token=${saved.token}`,{cache:'no-store'});const j=await r.json();if(!j.ok)return;
+ slot=saved.slot;token=saved.token;$('join').style.display='none';$('pad').style.display='block';controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
+}catch(e){}})();
 </script></body></html>)PHOBOI";
 }
 
@@ -690,6 +735,7 @@ void mobileRunWebSocket(
 #endif
 
     MobileSlotState& state = gMobileSlots[slot];
+    state.controlConnections.fetch_add(1);
     while (gMobileServerRunning.load()
         && state.claimed.load()
         && state.token.load() == token) {
@@ -749,7 +795,13 @@ void mobileRunWebSocket(
         }
     }
 
-    mobileResetInput(state);
+    int remaining = state.controlConnections.fetch_sub(1) - 1;
+    uint64_t age = mobileNow() - state.lastSeen.load();
+    if (remaining <= 0 && age > 250) {
+        mobileResetInput(state);
+    }
+    debugPrint("[PHOBOI WS] control closed slot=%d remaining=%d ageMs=%llu\n",
+        slot + 1, remaining, static_cast<unsigned long long>(age));
 }
 
 void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, int slot, uint32_t token)
@@ -770,8 +822,10 @@ void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, i
 #else
     send(socket, bytes.c_str(), bytes.size(), 0);
 #endif
+    MobileSlotState& streamState = gMobileSlots[slot];
+    streamState.streamConnections.fetch_add(1);
     uint32_t sentSequence = 0;
-    while (gMobileServerRunning.load() && gMobileSlots[slot].claimed.load() && gMobileSlots[slot].token.load() == token) {
+    while (gMobileServerRunning.load() && streamState.claimed.load() && streamState.token.load() == token) {
         uint32_t available = gMobileStreamSequence.load();
         if (available == sentSequence) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -782,6 +836,8 @@ void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, i
         if (!frame.empty() && !mobileSendWebSocketBinary(socket, frame)) break;
         sentSequence = available;
     }
+    int remainingStreams = streamState.streamConnections.fetch_sub(1) - 1;
+    debugPrint("[PHOBOI WS] stream closed slot=%d remaining=%d\n", slot + 1, remainingStreams);
 }
 
 void mobileCaptureStreamFrame(uint64_t now)
@@ -898,6 +954,20 @@ void mobileHandleClient(MobileSocket client)
     }
 
     MobileSlotState& state = gMobileSlots[slot];
+
+    if (method == "GET" && route == "/resume") {
+        uint32_t token = mobileUnsignedValue(values, "token", 0);
+        bool ok = state.claimed.load() && token != 0 && token == state.token.load();
+        if (ok) {
+            state.lastSeen.store(mobileNow());
+            std::ostringstream body;
+            body << "{\"ok\":true,\"player\":" << slot + 1 << "}";
+            mobileSendResponse(client, "200 OK", "application/json", body.str());
+        } else {
+            mobileSendResponse(client, "403 Forbidden", "application/json", "{\"ok\":false,\"error\":\"Session expired\"}");
+        }
+        return;
+    }
 
     if (method == "GET" && route == "/ws") {
         uint32_t token = mobileUnsignedValue(values, "token", 0);
