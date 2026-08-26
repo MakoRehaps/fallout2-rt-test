@@ -36,7 +36,11 @@ jobs:
           python tools/patch_phoboi_pagehide_release.py
           python tools/patch_phoboi_websocket_headers.py
           python tools/patch_coop_simulation_pause.py
-          if (git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h) {
+
+          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h
+          $sourceChanged = $LASTEXITCODE -ne 0
+
+          if (-not $sourceChanged) {
             Write-Host "PhoBoi/co-op source already current."
           } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
@@ -44,9 +48,14 @@ jobs:
             git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h
             git commit -m "Apply PhoBoi and co-op simulation fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
             Write-Host "Applied PhoBoi/co-op patches to this build workspace."
           }
+
+          # git diff --quiet deliberately returns 1 when patches changed files.
+          # Do not let that expected status fail the workflow step.
+          exit 0
 
       - name: Configure
         shell: pwsh
