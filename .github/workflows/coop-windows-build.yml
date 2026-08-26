@@ -36,6 +36,8 @@ jobs:
           python tools/patch_phoboi_pagehide_release.py
           python tools/patch_phoboi_websocket_headers.py
           python tools/patch_phoboi_mobile_reliability.py
+          python tools/patch_phoboi_video_layout_v4.py
+          python tools/patch_phoboi_gamefirst_overlay_v5.py
           python tools/patch_coop_simulation_pause.py
           python tools/patch_coop_downed_medical.py
           python tools/patch_coop_nearest_clinic.py
