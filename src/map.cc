@@ -810,6 +810,21 @@ int mapLoadByName(char* fileName)
 // 0x482B34
 int mapLoadById(int map)
 {
+    // COOP_HARD_BLOCK_MOUNTAIN_MAPS_V1
+    // Final safety gate: every map-loading path comes through here, including
+    // physical-road travel, random encounters, scripts, encounter chains and
+    // temporary dungeons. Keep mountain terrain on the world map, but never
+    // load the cramped authored MOUNTN layouts.
+    UnifiedGameId activeGame = unifiedCampaignGetActiveGame();
+    int requestedMap = map;
+    map = unifiedWorldSystemSafeTemplateMap(activeGame, map);
+    if (map != requestedMap) {
+        debugPrint("[WILDERNESS MAP REMAP] game=%d blockedMountainMap=%d replacement=%d\n",
+            static_cast<int>(static_cast<uint32_t>(activeGame)),
+            requestedMap,
+            map);
+    }
+
     scriptSetFixedParam(gMapSid, map);
 
     char name[16];
