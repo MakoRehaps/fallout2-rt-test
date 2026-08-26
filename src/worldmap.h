@@ -267,6 +267,7 @@ bool wmAreaMarkVisitedState(int areaIdx, int state);
 bool wmAreaSetVisibleState(int areaIdx, int state, bool force);
 int wmAreaSetWorldPos(int areaIdx, int x, int y);
 int wmGetPartyWorldPos(int* xPtr, int* yPtr);
+int wmGetAreaWorldPos(int areaIdx, int* xPtr, int* yPtr);
 int wmGetPartyCurArea(int* areaIdxPtr);
 void wmTownMap();
 int wmCarUseGas(int amount);

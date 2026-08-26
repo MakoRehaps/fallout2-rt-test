@@ -5757,6 +5757,23 @@ int wmGetPartyWorldPos(int* xPtr, int* yPtr)
     return 0;
 }
 
+// COOP_NEAREST_CLINIC_V1
+int wmGetAreaWorldPos(int areaIdx, int* xPtr, int* yPtr)
+{
+    if (areaIdx < 0 || areaIdx >= wmMaxAreaNum || wmAreaInfoList == nullptr) {
+        return -1;
+    }
+
+    const CityInfo& city = wmAreaInfoList[areaIdx];
+    if (xPtr != nullptr) {
+        *xPtr = city.x;
+    }
+    if (yPtr != nullptr) {
+        *yPtr = city.y;
+    }
+    return 0;
+}
+
 // Returns current town.
 //
 // 0x4C47C0
