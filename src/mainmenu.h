@@ -14,6 +14,7 @@ typedef enum MainMenuOption {
     MAIN_MENU_EXIT,
     MAIN_MENU_SELFRUN,
     MAIN_MENU_OPTIONS,
+    MAIN_MENU_RESUME_CAMPAIGN,
 } MainMenuOption;
 
 int mainMenuWindowInit();
@@ -36,6 +37,11 @@ namespace fallout {
 
 inline int unifiedCampaignMainMenuWindowHandleEvents()
 {
+    if (gUnifiedCampaignPostgameResumePending
+        && unifiedCampaignBothGamesCompleted()) {
+        return MAIN_MENU_RESUME_CAMPAIGN;
+    }
+
     if (unifiedCampaignConsumeAutoStartNewGame()) {
         return MAIN_MENU_NEW_GAME;
     }

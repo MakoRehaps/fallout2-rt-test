@@ -213,6 +213,36 @@ int falloutMain(int argc, char** argv)
                     mainMenuWindowInit();
                 }
                 break;
+            case MAIN_MENU_RESUME_CAMPAIGN:
+                if (1) {
+                    int win = windowCreate(0, 0, screenGetWidth(), screenGetHeight(), _colorTable[0], WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
+                    mainMenuWindowHide(true);
+                    mainMenuWindowFree();
+
+                    main_loadgame_new();
+
+                    colorPaletteLoad("color.pal");
+                    paletteFadeTo(_cmap);
+                    int gameId = static_cast<int>(unifiedCampaignGetActiveGame());
+                    int loadGameRc = lsgLoadUnifiedCampaignCheckpoint(gameId);
+                    if (loadGameRc == -1) {
+                        debugPrint("\n ** Error restoring unified campaign checkpoint! **\n");
+                    } else if (loadGameRc != 0) {
+                        unifiedCampaignConsumePostgameResume();
+                        windowDestroy(win);
+                        win = -1;
+                        mainLoop();
+                    }
+                    paletteFadeTo(gPaletteWhite);
+                    if (win != -1) {
+                        windowDestroy(win);
+                    }
+
+                    main_unload_new();
+                    main_reset_system();
+                    mainMenuWindowInit();
+                }
+                break;
             case MAIN_MENU_TIMEOUT:
                 debugPrint("Main menu timed-out\n");
                 // FALLTHROUGH

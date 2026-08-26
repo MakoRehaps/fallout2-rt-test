@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include <algorithm>
+#include <filesystem>
 
 #include "art.h"
 #include "automap.h"
@@ -924,6 +925,97 @@ int lsgLoadLastGame()
 
     gLastLoadableSlot = slot;
     return 1;
+}
+
+
+static std::filesystem::path lsgUnifiedCampaignCheckpointPath(int gameId)
+{
+    return std::filesystem::path("SAVEGAME")
+        / (gameId == 1 ? "UNIFIED_F1_RESUME" : "UNIFIED_F2_RESUME");
+}
+
+bool lsgUnifiedCampaignCheckpointExists(int gameId)
+{
+    if (gameId != 1 && gameId != 2) {
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::path root = lsgUnifiedCampaignCheckpointPath(gameId);
+    return std::filesystem::exists(root / "SAVE.DAT", ec)
+        && std::filesystem::exists(root / "COOPMETA.SAV", ec);
+}
+
+static bool lsgCopyUnifiedCampaignCheckpointDirectory(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(source / "SAVE.DAT", ec)) {
+        return false;
+    }
+
+    std::filesystem::remove_all(destination, ec);
+    ec.clear();
+    std::filesystem::create_directories(destination.parent_path(), ec);
+    if (ec) {
+        return false;
+    }
+
+    std::filesystem::copy(
+        source,
+        destination,
+        std::filesystem::copy_options::recursive
+            | std::filesystem::copy_options::overwrite_existing,
+        ec);
+    return !ec;
+}
+
+int lsgSaveUnifiedCampaignCheckpoint(int gameId)
+{
+    if (gameId != 1 && gameId != 2) {
+        return -1;
+    }
+
+    // Slot 10 is already the engine-owned autosave slot. Save through the normal
+    // handler table first so every stock quest/script/map subsystem serializes
+    // itself, then archive that whole slot under the campaign-specific name.
+    if (lsgAutosaveGame() != 1) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint save failed game=%d\n", gameId);
+        return -1;
+    }
+
+    std::filesystem::path source = std::filesystem::path("SAVEGAME") / "SLOT10";
+    std::filesystem::path destination = lsgUnifiedCampaignCheckpointPath(gameId);
+    if (!lsgCopyUnifiedCampaignCheckpointDirectory(source, destination)) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint archive failed game=%d\n", gameId);
+        return -1;
+    }
+
+    debugPrint("[CAMPAIGN RESUME] checkpoint saved game=%d\n", gameId);
+    return 1;
+}
+
+int lsgLoadUnifiedCampaignCheckpoint(int gameId)
+{
+    if (gameId != 1 && gameId != 2 || !lsgUnifiedCampaignCheckpointExists(gameId)) {
+        return -1;
+    }
+
+    std::filesystem::path source = lsgUnifiedCampaignCheckpointPath(gameId);
+    std::filesystem::path destination = std::filesystem::path("SAVEGAME") / "SLOT10";
+    if (!lsgCopyUnifiedCampaignCheckpointDirectory(source, destination)) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint restore failed game=%d\n", gameId);
+        return -1;
+    }
+
+    // Force the normal loader to use the restored campaign slot. COOPMETA.SAV
+    // belongs to this same checkpoint and therefore stages the matching profile
+    // plus unified/F1 world state before the stock SAVE.DAT handler table runs.
+    gLastLoadableSlot = 9;
+    int rc = lsgLoadLastGame();
+    debugPrint("[CAMPAIGN RESUME] checkpoint load game=%d rc=%d\n", gameId, rc);
+    return rc;
 }
 
 // 0x47C5B4
