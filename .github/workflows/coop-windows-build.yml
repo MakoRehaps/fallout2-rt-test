@@ -47,8 +47,9 @@ jobs:
           python tools/patch_f1_f2_lineage_transition.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
+          python tools/patch_zoom_scroll_bounds.py
 
-          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
+          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
           $sourceChanged = $LASTEXITCODE -ne 0
 
           if (-not $sourceChanged) {
@@ -56,7 +57,7 @@ jobs:
           } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
+            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
             git commit -m "Apply PhoBoi mobile, co-op medical, quest, lineage, and wilderness fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
