@@ -28,7 +28,6 @@ jobs:
           fetch-depth: 0
 
       - name: Apply PhoBoi and co-op simulation fixes
-        if: github.event_name == 'push'
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
@@ -38,12 +37,14 @@ jobs:
           python tools/patch_coop_simulation_pause.py
           if (git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h) {
             Write-Host "PhoBoi/co-op source already current."
-          } else {
+          } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h
-            git commit -m "Pause realtime simulation for join and level choice [coop-explicit-pause-v1]"
+            git commit -m "Apply PhoBoi and co-op simulation fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
+          } else {
+            Write-Host "Applied PhoBoi/co-op patches to this build workspace."
           }
 
       - name: Configure
