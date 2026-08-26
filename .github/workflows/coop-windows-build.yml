@@ -37,9 +37,10 @@ jobs:
           python tools/patch_phoboi_websocket_headers.py
           python tools/patch_coop_simulation_pause.py
           python tools/patch_coop_downed_medical.py
+          python tools/patch_coop_nearest_clinic.py
           python tools/patch_no_mountain_maps.py
 
-          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc
+          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/worldmap.cc src/worldmap.h
           $sourceChanged = $LASTEXITCODE -ne 0
 
           if (-not $sourceChanged) {
@@ -47,7 +48,7 @@ jobs:
           } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc
+            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/worldmap.cc src/worldmap.h
             git commit -m "Apply PhoBoi, co-op medical, and wilderness fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
