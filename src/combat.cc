@@ -4839,6 +4839,20 @@ void _apply_damage(Attack* attack, bool animated)
 // 0x424EE8
 static void _check_for_death(Object* object, int damage, int* flags)
 {
+    // COOP_DOWNED_MEDICAL_V1
+    // Human-controlled co-op actors do not enter Fallout's stock death path.
+    // At 0 HP they become downed; the co-op runtime owns the 60 second bleedout,
+    // -100 HP hard floor, Doctor revival and medical evacuation.
+    if (object != nullptr
+        && gLocalCoopInitialized
+        && localCoopActorIsHumanOwned(object)
+        && damage > 0
+        && critterGetHitPoints(object) - damage <= 0) {
+        *flags &= ~DAM_DEAD;
+        *flags |= DAM_KNOCKED_OUT;
+        return;
+    }
+
     if (object == nullptr || !_critter_flag_check(object->pid, CRITTER_INVULNERABLE)) {
         if (object == nullptr || PID_TYPE(object->pid) == OBJ_TYPE_CRITTER) {
             if (damage > 0) {
