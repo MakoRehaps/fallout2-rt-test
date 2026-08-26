@@ -134,24 +134,28 @@ inline UnifiedWorldSystemState gUnifiedWorldSystemPendingState {};
 inline bool gUnifiedWorldSystemStateInitialized = false;
 inline bool gUnifiedWorldSystemPendingStateValid = false;
 
+// COOP_FOUR_SIDE_WILDERNESS_POOL_V1
+// Physical world travel only chooses generic wilderness/encounter layouts here.
+// Authored destinations (towns, caves, vaults, quest maps, forts/holds) are not
+// members of this pool and keep their intentional entrance/exit layout. Coast
+// locations are also handled outside this ordinary four-side wilderness pool.
+//
+// Keep this list conservative: a generic road/battle tile must be able to serve
+// as a through-map when the party enters from any world direction. Low-number
+// authored-location IDs and the later dungeon/special ranges are intentionally
+// excluded instead of being treated as interchangeable wilderness.
 inline constexpr int kUnifiedWorldSystemFallout1OrdinaryMaps[] = {
-    // Mountain templates 49/50 reuse desert templates. Keep duplicate
-    // desert entries so mountain weighting remains represented.
-    0, 1, 2, 19, 20, 21, 0, 1,
     56, 57, 58, 59, 61, 62, 63, 64,
 };
 
 inline constexpr int kUnifiedWorldSystemFallout2OrdinaryMaps[] = {
-    0, 1, 2,
-    // Mountain templates are replaced with open desert templates. Keep the
-    // duplicate entries so terrain weighting stays stable without loading the
-    // narrow authored mountain corridors.
-    68, 69, 70, 71, 72, 73, 81, 82, 76, 77,
+    // Core open random-encounter wilderness set. Mountain corridor layouts
+    // 74/75 and 95 remain excluded; the no-mountain safety gate still protects
+    // direct/scripted loads separately.
+    68, 69, 70, 71, 72, 73,
+    76, 77,
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
-    94, 94,
-    110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120,
-    113, 114, 115, 116, 125,
-    141, 142, 143, 144, 145, 146,
+    94,
 };
 
 inline int unifiedWorldSystemGameIndex(UnifiedGameId game)
