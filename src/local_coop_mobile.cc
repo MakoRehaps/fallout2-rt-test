@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -478,19 +479,44 @@ std::string mobileBase64(const uint8_t* data, size_t length)
     return result;
 }
 
+// PHOBOI_CASE_INSENSITIVE_WEBSOCKET_HEADERS_V1
 std::string mobileHeaderValue(const std::string& request, const char* name)
 {
-    std::string prefix = std::string(name) + ":";
-    size_t at = request.find(prefix);
-    if (at == std::string::npos) {
-        return "";
+    // HTTP field names are case-insensitive. Reverse proxies such as Cloudflare
+    // are allowed to normalize header casing, so never search the raw request
+    // with a case-sensitive substring match.
+    std::string wanted(name != nullptr ? name : "");
+    std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    size_t lineStart = 0;
+    while (lineStart < request.size()) {
+        size_t lineEnd = request.find("\r\n", lineStart);
+        if (lineEnd == std::string::npos) {
+            lineEnd = request.size();
+        }
+        size_t colon = request.find(':', lineStart);
+        if (colon != std::string::npos && colon < lineEnd) {
+            std::string field = request.substr(lineStart, colon - lineStart);
+            std::transform(field.begin(), field.end(), field.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (field == wanted) {
+                size_t valueStart = colon + 1;
+                while (valueStart < lineEnd
+                    && (request[valueStart] == ' ' || request[valueStart] == '\t')) {
+                    valueStart++;
+                }
+                return request.substr(valueStart, lineEnd - valueStart);
+            }
+        }
+        if (lineEnd >= request.size()) {
+            break;
+        }
+        lineStart = lineEnd + 2;
     }
-    at += prefix.size();
-    while (at < request.size() && (request[at] == ' ' || request[at] == '\t')) {
-        at++;
-    }
-    size_t end = request.find("\r\n", at);
-    return request.substr(at, end == std::string::npos ? std::string::npos : end - at);
+    return "";
 }
 
 bool mobileRecvExact(MobileSocket socket, uint8_t* bytes, size_t length)
@@ -641,9 +667,11 @@ void mobileRunWebSocket(
 {
     std::string key = mobileHeaderValue(request, "Sec-WebSocket-Key");
     if (key.empty()) {
+        debugPrint("[PHOBOI WS] control handshake missing Sec-WebSocket-Key slot=%d\n", slot + 1);
         mobileSendResponse(socket, "400 Bad Request", "text/plain", "Missing WebSocket key");
         return;
     }
+    debugPrint("[PHOBOI WS] control handshake accepted slot=%d\n", slot + 1);
 
     std::array<uint8_t, 20> digest = mobileSha1(
         key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
@@ -727,7 +755,11 @@ void mobileRunWebSocket(
 void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, int slot, uint32_t token)
 {
     std::string key = mobileHeaderValue(request, "Sec-WebSocket-Key");
-    if (key.empty()) return;
+    if (key.empty()) {
+        debugPrint("[PHOBOI WS] stream handshake missing Sec-WebSocket-Key slot=%d\n", slot + 1);
+        return;
+    }
+    debugPrint("[PHOBOI WS] stream handshake accepted slot=%d\n", slot + 1);
     auto digest = mobileSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
     std::string accept = mobileBase64(digest.data(), digest.size());
     std::ostringstream response;
