@@ -34,6 +34,7 @@ jobs:
           python tools/patch_phoboi_labels.py
           python tools/patch_phoboi_session_token.py
           python tools/patch_phoboi_pagehide_release.py
+          python tools/patch_phoboi_websocket_headers.py
           python tools/patch_coop_simulation_pause.py
           if (git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h) {
             Write-Host "PhoBoi/co-op source already current."
