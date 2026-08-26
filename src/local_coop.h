@@ -387,19 +387,69 @@ inline bool localCoopHandleEvent(const SDL_Event& event)
     return false;
 }
 
-inline constexpr int kLocalCoopArchetypeCount = 4;
+// COOP_18_ARCHETYPES_V1
+inline constexpr int kLocalCoopArchetypeCount = 18;
 inline constexpr const char* kLocalCoopArchetypeNames[kLocalCoopArchetypeCount] = {
-    "WASTELAND FIGHTER",
+    "BRUISER",
+    "GUNSLINGER",
+    "SNIPER",
+    "COMMANDO",
+    "HEAVY GUNNER",
+    "MELEE RAIDER",
+    "UNARMED BRAWLER",
     "SCOUT",
+    "SURVIVALIST",
     "MEDIC",
-    "TECH SPECIALIST",
+    "SCIENTIST",
+    "MECHANIC",
+    "DIPLOMAT",
+    "THIEF",
+    "DEMOLITIONIST",
+    "RANGER",
+    "LUCKY DRIFTER",
+    "ENERGY SPECIALIST",
+};
+
+inline constexpr const char* kLocalCoopArchetypeRoles[kLocalCoopArchetypeCount] = {
+    "TOUGH / CLOSE COMBAT",
+    "PISTOLS / CRITICALS",
+    "RIFLES / LONG RANGE",
+    "AUTOMATICS / MOBILITY",
+    "BIG GUNS / ENDURANCE",
+    "MELEE / ARMOR",
+    "UNARMED / SPEED",
+    "SCOUTING / SMALL GUNS",
+    "OUTDOORS / SELF RELIANCE",
+    "FIRST AID / DOCTOR",
+    "SCIENCE / ENERGY",
+    "REPAIR / UTILITY",
+    "SPEECH / BARTER",
+    "LOCKPICK / STEAL",
+    "TRAPS / EXPLOSIVES",
+    "RIFLES / SURVIVAL",
+    "LUCK / GENERALIST",
+    "ENERGY WEAPONS / SCIENCE",
 };
 
 inline constexpr int kLocalCoopArchetypeStats[kLocalCoopArchetypeCount][PRIMARY_STAT_COUNT] = {
-    { 7, 5, 7, 4, 5, 7, 5 },
+    { 8, 5, 8, 3, 4, 7, 5 },
+    { 4, 8, 5, 5, 6, 8, 4 },
+    { 4, 9, 4, 4, 7, 7, 5 },
+    { 6, 7, 6, 3, 5, 8, 5 },
+    { 8, 5, 8, 3, 4, 6, 6 },
+    { 8, 5, 8, 4, 4, 7, 4 },
+    { 7, 6, 7, 4, 5, 8, 3 },
     { 5, 8, 5, 4, 6, 8, 4 },
+    { 6, 7, 7, 4, 6, 6, 4 },
     { 4, 6, 5, 6, 8, 6, 5 },
-    { 4, 6, 4, 5, 9, 6, 6 },
+    { 3, 6, 4, 5, 10, 6, 6 },
+    { 5, 6, 5, 4, 9, 6, 5 },
+    { 3, 6, 4, 10, 7, 5, 5 },
+    { 4, 7, 4, 5, 6, 9, 5 },
+    { 5, 7, 5, 3, 7, 7, 6 },
+    { 6, 8, 6, 4, 6, 6, 4 },
+    { 4, 6, 5, 6, 5, 6, 8 },
+    { 4, 7, 4, 4, 9, 7, 5 },
 };
 
 inline bool localCoopApplyPlayerOneArchetype(int archetype, int gender)
@@ -629,7 +679,8 @@ inline void localCoopDrawJoinMenu(LocalCoopPlayer& player)
         sizeof(choice),
         "<  %s  >",
         kLocalCoopArchetypeNames[player.archetype]);
-    windowDrawText(player.joinWindow, choice, 380, 20, 92, _colorTable[992]);
+    windowDrawText(player.joinWindow, choice, 380, 20, 82, _colorTable[992]);
+    windowDrawText(player.joinWindow, kLocalCoopArchetypeRoles[player.archetype], 380, 20, 106, _colorTable[992]);
 
     const int* stats = kLocalCoopArchetypeStats[player.archetype];
     char special[128];
@@ -650,14 +701,14 @@ inline void localCoopDrawJoinMenu(LocalCoopPlayer& player)
         player.gender == GENDER_FEMALE ? "GENDER: FEMALE" : "GENDER: MALE",
         380,
         20,
-        154,
+        164,
         _colorTable[992]);
     windowDrawText(
         player.joinWindow,
         "A: JOIN AND LOCK SLOT    B: CANCEL",
         380,
         20,
-        194,
+        204,
         _colorTable[992]);
     windowRefresh(player.joinWindow);
 }
