@@ -55,6 +55,7 @@ def main():
     run([CONTROL, '--scan', a.scan, '--output', control])
 
     manifest = maps / 'fo3_world_manifest.json'
+    world_graph = maps / 'fallout_rt_world_graph.json'
     structures = out / 'structures'
     run([STRUCT, '--manifest', manifest, '--output', structures, '--seed', a.seed])
 
@@ -68,6 +69,7 @@ def main():
     runtime_cmd = [
         RUNTIME,
         '--structures', structures / 'structure_plans.json',
+        '--world-graph', world_graph,
         '--output', runtime,
         '--maps-dir', maps / 'MAPS',
     ]
@@ -84,7 +86,7 @@ def main():
         run([TACTICS, a.tactics, '--output', tactics_manifest])
 
     summary = {
-        'format': 'PhoBoi.Fallout3AutoBuild/4',
+        'format': 'PhoBoi.Fallout3AutoBuild/5',
         'profile': profile.get('id', 'unknown'),
         'seed': a.seed,
         'inputs': {
@@ -96,6 +98,7 @@ def main():
         'outputs': {
             'maps': str(maps),
             'world_manifest': str(manifest),
+            'world_graph': str(world_graph),
             'control_maps': str(control),
             'structure_plans': str(structures / 'structure_plans.json'),
             'subway_graph': str(subway_graph) if subway_graph else None,
@@ -103,8 +106,8 @@ def main():
             'runtime_sidecars': str(maps / 'MAPS'),
             'tactics_manifest': str(tactics_manifest) if tactics_manifest else None,
         },
-        'engine_runtime': 'F3O sidecars are loaded automatically by fallout2-rt-test for generated F3M maps. Walls and doors are instantiated from installed classic prototypes and marked no-save to prevent duplication.',
-        'engine_next_stage': 'Resolve loot/NPC anchors, generated exit grids, and subway map transitions; improve style-aware prototype selection instead of first-compatible prototype.'
+        'engine_runtime': 'Generated F3M maps load matching F3O sidecars. Runtime geometry uses category/material-aware classic wall and door prototypes, loot anchors become containers, and world-graph links become exit-grid transitions.',
+        'engine_next_stage': 'Generate actual metro maps/transitions, resolve NPC anchors from FO3 actor semantics, add clutter/scenery families, then replace inherited MAP object tails with clean generated native object sections.'
     }
     (out / 'AUTO_BUILD_COMPLETE.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
 
