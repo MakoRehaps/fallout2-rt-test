@@ -1,13 +1,13 @@
 # F3O runtime placement format
 
-`F3O` is the generated-object intermediate format used by the Fallout 3 classic generator.
+`F3O` is the generated-object intermediate format used by the Fallout 3 classic generator and consumed directly by `src/fo3_runtime_layout.h`.
 
-It is intentionally separate from native Fallout `.MAP` serialization. The generator first decides **what** should exist and **where**; an asset resolver/runtime loader later decides which concrete Fallout PID/FID implements each symbolic role.
+The generator decides **what** should exist and **where**. The engine resolves symbolic roles against the installed Fallout prototype data, so the generator does not need to hardcode one particular Fallout 2 PID set.
 
 Example:
 
 ```text
-F3O 1
+F3O 2
 MAP F3M0007
 CATEGORY urban
 STRUCTURE F3M0007_S00 ruined_house 20 18 12 9 ruin=0.650
@@ -19,15 +19,37 @@ DOOR F3M0007_S00 26 26 south
 ANCHOR F3M0007_S00 center 26 22
 ANCHOR F3M0007_S00 loot 25 21
 ANCHOR F3M0007_S00 npc 27 23
+EXIT east 98 50 214 20100 0 4 target=F3M0014
 ```
 
 Commands:
 
-- `STRUCTURE`: declares a generated building/compound footprint.
-- `WALL_RUN`: requests a connected run of compatible classic wall pieces.
-- `DOOR`: punches a doorway into the owning structure and requests a compatible portal object.
+- `CATEGORY`: style/material family used by the runtime prototype resolver.
+- `STRUCTURE`: generated building/compound footprint metadata.
+- `WALL_RUN`: connected run of classic wall objects.
+- `DOOR`: doorway position; the runtime selects an installed door scenery prototype.
 - `ANCHOR center`: general-purpose structure center.
-- `ANCHOR loot`: container/loot placement candidate.
-- `ANCHOR npc`: actor/quest placement candidate.
+- `ANCHOR loot`: becomes a compatible item-container object.
+- `ANCHOR npc`: reserved for the FO3 actor-semantic resolver.
+- `EXIT`: creates an engine exit-grid object. Fields are `side x y destination_map destination_hex destination_elevation destination_rotation`; a trailing `target=<map name>` is human-readable/debug metadata.
 
-The next resolver stage will map symbolic requests to source-tagged FO1/FO2/Tactics assets and ultimately to engine object creation/native MAP object records.
+## Coordinate spaces
+
+`WALL_RUN`, `DOOR`, `ANCHOR`, and the local `EXIT x y` coordinates use the generator's 100x100 square-grid space. The runtime converts these positions into the classic 200x200 hex grid.
+
+`EXIT destination_hex` is already a classic hex tile number. Generated maps currently use `20100` as the default arrival hex, elevation `0`.
+
+## Runtime persistence
+
+Generated F3O objects are marked `OBJECT_NO_SAVE`. They are reconstructed once when an `F3Mxxxx.MAP` becomes active, which prevents generated walls, doors, containers, and exits from duplicating inside savegames.
+
+## Resolver behavior
+
+The current engine resolver examines loaded prototype metadata directly:
+
+- wall material for generated wall runs;
+- scenery subtype/material for doors;
+- item subtype/material for loot containers;
+- the built-in exit-grid PID range for map transitions.
+
+Category preferences currently distinguish `vault`, `industrial`, `urban`, `cave`, and `wasteland`. Later passes can add finer FO1/FO2/Tactics style families without changing F3O geometry.
