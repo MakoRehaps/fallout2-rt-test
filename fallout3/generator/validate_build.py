@@ -70,6 +70,14 @@ def main():
             for line in f3o.read_text(encoding='utf-8',errors='replace').splitlines():
                 if line.startswith('EXIT '): check_exit_line(line,f3o,valid_ids); total_exit_lines+=1
 
+    actor_plans=Path(outs.get('actor_plans',''))
+    if not actor_plans.exists(): fail('actor plans missing')
+    actor_doc=json.loads(actor_plans.read_text(encoding='utf-8'))
+    if actor_doc.get('scope')!='build-time-only': fail('actor plans are not marked build-time-only')
+    for actor in actor_doc.get('placements',[]):
+        if actor.get('target_map') not in surface_names: fail(f"actor targets unknown surface map {actor.get('target_map')}")
+        if int(actor.get('target_map_id',-1)) not in set(surface_ids): fail(f"actor targets unknown surface map id {actor.get('target_map_id')}")
+
     control=Path(outs.get('control_maps',''))
     for n in ('terrain_roughness.pgm','settlement_density.pgm','buildability.pgm','control_map_meta.json'):
         if not (control/n).exists(): fail('control map output missing: '+n)
@@ -78,7 +86,7 @@ def main():
     maps_txt=outs.get('maps_txt_complete')
     if maps_txt and not Path(maps_txt).exists(): fail('complete MAPS.TXT fragment missing')
 
-    print(f'[FO3 VALIDATE] OK: isolated build, surface={len(generated)}, subway={len(subway_maps)}, planned exits={total_exit_lines}, no F3O in playable MAPS')
+    print(f"[FO3 VALIDATE] OK: isolated build, surface={len(generated)}, subway={len(subway_maps)}, actors={len(actor_doc.get('placements',[]))}, planned exits={total_exit_lines}, no F3O in playable MAPS")
     return 0
 
 if __name__=='__main__': raise SystemExit(main())
