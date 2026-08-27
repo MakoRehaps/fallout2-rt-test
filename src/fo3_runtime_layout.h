@@ -42,6 +42,15 @@ struct AnchorPlacement {
     std::string role;
 };
 
+struct ExitPlacement {
+    int x;
+    int y;
+    int targetMap;
+    int targetTile;
+    int targetElevation;
+    int targetRotation;
+};
+
 static inline int makePid(int type, int id)
 {
     return (type << 24) | (id & 0x00FFFFFF);
@@ -141,7 +150,7 @@ static inline int findContainerPidForCategory(const std::string& category)
     return bestPid;
 }
 
-static inline bool spawnObject(int pid, int x, int y, int rotation)
+static inline bool spawnObject(int pid, int x, int y, int rotation, Object** outObject = nullptr)
 {
     if (pid == -1) return false;
 
@@ -158,6 +167,21 @@ static inline bool spawnObject(int pid, int x, int y, int rotation)
         return false;
     }
     objectSetRotation(object, rotation, nullptr);
+    if (outObject != nullptr) *outObject = object;
+    return true;
+}
+
+static inline bool spawnExit(const ExitPlacement& exit)
+{
+    Object* object = nullptr;
+    if (!spawnObject(FIRST_EXIT_GRID_PID, exit.x, exit.y, ROTATION_NE, &object) || object == nullptr) {
+        return false;
+    }
+
+    object->data.misc.map = exit.targetMap;
+    object->data.misc.tile = exit.targetTile;
+    object->data.misc.elevation = exit.targetElevation;
+    object->data.misc.rotation = exit.targetRotation;
     return true;
 }
 
@@ -182,6 +206,7 @@ static inline void loadLayoutForCurrentMap()
     std::vector<WallRun> walls;
     std::vector<DoorPlacement> doors;
     std::vector<AnchorPlacement> anchors;
+    std::vector<ExitPlacement> exits;
     std::set<int> doorSquares;
 
     char line[512];
@@ -225,6 +250,24 @@ static inline void loadLayoutForCurrentMap()
             anchor.y = y;
             anchor.role = word;
             anchors.push_back(anchor);
+            continue;
+        }
+
+        int targetMap;
+        int targetTile;
+        int targetElevation;
+        int targetRotation;
+        if (sscanf(line, "EXIT %31s %d %d %d %d %d %d", side, &x, &y, &targetMap, &targetTile, &targetElevation, &targetRotation) == 7) {
+            if (targetMap >= 0 && hexGridTileIsValid(targetTile) && elevationIsValid(targetElevation)) {
+                ExitPlacement exit;
+                exit.x = x;
+                exit.y = y;
+                exit.targetMap = targetMap;
+                exit.targetTile = targetTile;
+                exit.targetElevation = targetElevation;
+                exit.targetRotation = std::max(0, std::min(ROTATION_COUNT - 1, targetRotation));
+                exits.push_back(exit);
+            }
         }
     }
     fileClose(stream);
@@ -235,6 +278,7 @@ static inline void loadLayoutForCurrentMap()
     int spawnedWalls = 0;
     int spawnedDoors = 0;
     int spawnedContainers = 0;
+    int spawnedExits = 0;
 
     for (const WallRun& run : walls) {
         for (int i = 0; i < run.length; i++) {
@@ -256,12 +300,17 @@ static inline void loadLayoutForCurrentMap()
         }
     }
 
-    debugPrint("\nFO3 runtime: %s category=%s walls=%d doors=%d containers=%d wallPid=%08X doorPid=%08X containerPid=%08X",
+    for (const ExitPlacement& exit : exits) {
+        if (spawnExit(exit)) spawnedExits++;
+    }
+
+    debugPrint("\nFO3 runtime: %s category=%s walls=%d doors=%d containers=%d exits=%d wallPid=%08X doorPid=%08X containerPid=%08X",
         base,
         category.c_str(),
         spawnedWalls,
         spawnedDoors,
         spawnedContainers,
+        spawnedExits,
         wallPid,
         doorPid,
         containerPid);
