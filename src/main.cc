@@ -21,6 +21,7 @@
 #include "input.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop_staging_room.h"
 #include "mainmenu.h"
 #include "map.h"
 #include "mouse.h"
@@ -140,7 +141,6 @@ int falloutMain(int argc, char** argv)
                 mainMenuWindowHide(true);
                 mainMenuWindowFree();
                 if (characterSelectorOpen() == 2) {
-                    gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                     randomSeedPrerandom(-1);
 
                     // SFALL: Override starting map.
@@ -152,7 +152,24 @@ int falloutMain(int argc, char** argv)
                     }
 
                     char* mapNameCopy = compat_strdup(mapName != nullptr ? mapName : _mainMap);
-                    _main_load_new(mapNameCopy);
+
+                    // COOP_PREOPENING_STAGING_ROOM_HOOK_V1
+                    // Give the party a quiet preparation map before any opening
+                    // movie/story scene. V13ENT is an original Fallout 1 asset
+                    // already present in the mounted data and works as a small
+                    // contained staging space. Walking out consumes staging,
+                    // plays the normal opening sequence once, then loads the real
+                    // requested campaign start map. Fallout 2 keeps its stock
+                    // Elder/Temple opening path.
+                    bool useCoopStaging = unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1;
+                    if (useCoopStaging) {
+                        localCoopBeginStagingRoom(mapNameCopy);
+                        char stagingMap[] = "V13ENT.MAP";
+                        _main_load_new(stagingMap);
+                    } else {
+                        gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
+                        _main_load_new(mapNameCopy);
+                    }
                     free(mapNameCopy);
 
                     // SFALL: AfterNewGameStartHook.

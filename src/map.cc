@@ -27,6 +27,7 @@
 #include "loadsave.h"
 #include "map_entry_utils.h"
 #include "local_coop_ai_realtime.h"
+#include "local_coop_staging_room.h"
 #include "memory.h"
 #include "object.h"
 #include "palette.h"
@@ -1365,6 +1366,24 @@ int mapSetTransition(MapTransition* transition)
 int mapHandleTransition()
 {
     if (gMapTransition.map == 0) {
+        return 0;
+    }
+
+    // COOP_PREOPENING_STAGING_ROOM_HOOK_V1
+    // The first outward transition from the preparation room is the party's
+    // explicit READY action. Do not enter the world graph yet: show the normal
+    // opening movie once and move into the real campaign start map instead.
+    if (localCoopConsumeStagingRoomExit()) {
+        animationStop();
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
+        gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
+        if (gLocalCoopStagingDestinationMap[0] != '\0') {
+            char destination[COMPAT_MAX_PATH];
+            strncpy(destination, gLocalCoopStagingDestinationMap, sizeof(destination) - 1);
+            destination[sizeof(destination) - 1] = '\0';
+            debugPrint("[COOP STAGING] ready; loading campaign start %s\n", destination);
+            return mapLoadByName(destination);
+        }
         return 0;
     }
 

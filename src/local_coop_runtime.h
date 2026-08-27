@@ -18,6 +18,8 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
+#include "local_coop_system_menu.h"
+#include "mouse.h"
 #include "object.h"
 #include "perk.h"
 #include "proto_types.h"
@@ -48,7 +50,13 @@ struct LocalCoopRuntimeSlot {
     bool doctorWasDown = false;
     bool pipboyWasDown = false;
     bool inventoryWasDown = false;
+    bool pipboyToggleArmed = true;
+    bool inventoryToggleArmed = true;
+    Uint32 pipboyReleaseStartedTick = 0;
+    Uint32 inventoryReleaseStartedTick = 0;
     bool startWasDown = false;
+    bool startToggleArmed = true;
+    Uint32 startReleaseStartedTick = 0;
     bool skilldexWasDown = false;
     bool postgameSwitchWasDown = false;
     bool queuedAttackPending = false;
@@ -66,6 +74,12 @@ inline bool gLocalCoopLegacyYieldQueued = false;
 inline Uint32 gLocalCoopNextLegacyYieldTick = 0;
 inline Uint32 gLocalCoopNextCameraStepTick = 0;
 inline int gLocalCoopCameraTargetTile = -1;
+
+// COOP_P1_HYBRID_INPUT_START_TOGGLE_V1
+inline bool gLocalCoopP1ControllerActive = false;
+inline int gLocalCoopP1LastMouseX = -1;
+inline int gLocalCoopP1LastMouseY = -1;
+inline int gLocalCoopP1LastMouseButtons = 0;
 
 // COOP_FOUR_PLAYER_HUD_V1
 inline int gLocalCoopHudWindow = -1;
@@ -651,7 +665,16 @@ inline void localCoopProcessModalMenuInput()
         | GameMode::kHero
         | GameMode::kDialogReview
         | GameMode::kCounter;
-    bool modalActive = (GameMode::getCurrentGameMode() & kBlockingMenuModes) != 0;
+    int currentGameMode = GameMode::getCurrentGameMode();
+    bool modalActive = (currentGameMode & kBlockingMenuModes) != 0;
+    bool inventoryModalActive = (currentGameMode & GameMode::kInventory) != 0;
+    bool pipboyModalActive = (currentGameMode & (GameMode::kPipboy | GameMode::kAutomap)) != 0;
+    bool startMenuModalActive = (currentGameMode & (GameMode::kOptions
+        | GameMode::kPreferences
+        | GameMode::kSaveGame
+        | GameMode::kLoadGame
+        | GameMode::kHelp)) != 0;
+    Uint32 now = SDL_GetTicks();
 
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         LocalCoopPlayer& player = gLocalCoopPlayers[slot];
@@ -673,33 +696,83 @@ inline void localCoopProcessModalMenuInput()
             && player.uiMode == LocalCoopUiMode::World
             && !localCoopDangerBlocksMapExit();
         // COOP_P1_GLOBAL_UI_OWNER_V1
-        // Inventory and Pip-Boy/map are global modal screens, so only P1 may
-        // open or close them. P2-P4 keep their normal co-op equipment/map
-        // interaction once those screens are already open; this gate only owns
-        // the global modal launch/close action.
-        bool canOwnGlobalUi = canOpen && slot == 0;
+        // COOP_P1_GLOBAL_UI_TOGGLE_V1
+        // Inventory and Pip-Boy/map are global modal screens, so only P1 owns
+        // their open/close toggle. A phone packet can momentarily cross neutral,
+        // so a simple rising-edge test is not enough: after every toggle require
+        // a real release held for 140 ms before the button is armed again. This
+        // prevents one physical tap from closing and immediately reopening.
+        if (slot == 0) {
+            if (!pipboyDown) {
+                if (runtime.pipboyReleaseStartedTick == 0) runtime.pipboyReleaseStartedTick = now;
+                if (!runtime.pipboyToggleArmed
+                    && static_cast<Sint32>(now - runtime.pipboyReleaseStartedTick) >= 140) {
+                    runtime.pipboyToggleArmed = true;
+                }
+            } else {
+                runtime.pipboyReleaseStartedTick = 0;
+            }
 
-        if (canOwnGlobalUi && pipboyDown && !runtime.pipboyWasDown) {
+            if (!inventoryDown) {
+                if (runtime.inventoryReleaseStartedTick == 0) runtime.inventoryReleaseStartedTick = now;
+                if (!runtime.inventoryToggleArmed
+                    && static_cast<Sint32>(now - runtime.inventoryReleaseStartedTick) >= 140) {
+                    runtime.inventoryToggleArmed = true;
+                }
+            } else {
+                runtime.inventoryReleaseStartedTick = 0;
+            }
+
+            if (!startDown) {
+                if (runtime.startReleaseStartedTick == 0) runtime.startReleaseStartedTick = now;
+                if (!runtime.startToggleArmed
+                    && static_cast<Sint32>(now - runtime.startReleaseStartedTick) >= 140) {
+                    runtime.startToggleArmed = true;
+                }
+            } else {
+                runtime.startReleaseStartedTick = 0;
+            }
+        }
+
+        bool canOwnGlobalUi = canOpen && slot == 0;
+        bool p1PipboyToggle = slot == 0 && pipboyDown && runtime.pipboyToggleArmed;
+        bool p1InventoryToggle = slot == 0 && inventoryDown && runtime.inventoryToggleArmed;
+
+        if (p1PipboyToggle && pipboyModalActive) {
+            runtime.pipboyToggleArmed = false;
+            gLocalCoopModalControllerSlot = 0;
+            enqueueInputEvent(KEY_ESCAPE);
+            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=close\n");
+        } else if (p1InventoryToggle && inventoryModalActive) {
+            runtime.inventoryToggleArmed = false;
+            gLocalCoopModalControllerSlot = 0;
+            enqueueInputEvent(KEY_ESCAPE);
+            debugPrint("[COOP INVENTORY] slot=0 global-ui=inventory action=close\n");
+        } else if (canOwnGlobalUi && p1PipboyToggle) {
+            runtime.pipboyToggleArmed = false;
             gLocalCoopModalControllerSlot = 0;
             enqueueInputEvent(KEY_LOWERCASE_P);
             modalActive = true;
-            debugPrint("[PHOBOI INPUT] slot=0 source=controller button=dpad-left global-ui=pipboy\n");
-        } else if (canOwnGlobalUi && inventoryDown && !runtime.inventoryWasDown) {
+            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=open\n");
+        } else if (canOwnGlobalUi && p1InventoryToggle) {
+            runtime.inventoryToggleArmed = false;
             gLocalCoopModalControllerSlot = 0;
             enqueueInputEvent(KEY_LOWERCASE_I);
             modalActive = true;
-            debugPrint("[COOP INVENTORY] slot=0 source=controller button=back global-ui=inventory\n");
+            debugPrint("[COOP INVENTORY] slot=0 global-ui=inventory action=open\n");
         } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {
             gLocalCoopModalControllerSlot = slot;
             gLocalCoopSkilldexInvokerSlot = slot;
             enqueueInputEvent(KEY_LOWERCASE_S);
             modalActive = true;
             debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\n", slot);
-        } else if (canOpen && startDown && !runtime.startWasDown) {
-            gLocalCoopModalControllerSlot = slot;
-            enqueueInputEvent(KEY_ESCAPE);
+        } else if (canOpen && slot == 0 && startDown && runtime.startToggleArmed) {
+            // COOP_SYSTEM_MENU_RUNTIME_V1
+            runtime.startToggleArmed = false;
+            gLocalCoopModalControllerSlot = 0;
+            localCoopSystemMenuOpen();
             modalActive = true;
-            debugPrint("[COOP MENU] slot=%d source=controller button=start\n", slot);
+            debugPrint("[COOP MENU] slot=0 source=controller button=start action=open-phoboi\n");
         }
 
         runtime.pipboyWasDown = pipboyDown;
@@ -841,6 +914,57 @@ inline void localCoopProcessCombatInput()
         runtime.swapWasDown = swapDown;
         runtime.firstAidWasDown = false;
         runtime.doctorWasDown = medicalDown;
+    }
+}
+
+inline void localCoopUpdateP1InputSource()
+{
+    LocalCoopPlayer& p1 = gLocalCoopPlayers[0];
+
+    int mouseX = 0;
+    int mouseY = 0;
+    mouseGetPosition(&mouseX, &mouseY);
+    int mouseButtons = mouse_get_last_buttons();
+    bool mouseActivity = gLocalCoopP1LastMouseX != -1
+        && (mouseX != gLocalCoopP1LastMouseX
+            || mouseY != gLocalCoopP1LastMouseY
+            || mouseButtons != gLocalCoopP1LastMouseButtons);
+    gLocalCoopP1LastMouseX = mouseX;
+    gLocalCoopP1LastMouseY = mouseY;
+    gLocalCoopP1LastMouseButtons = mouseButtons;
+
+    bool keyboardActivity = false;
+    int keyboardCount = 0;
+    const Uint8* keyboard = SDL_GetKeyboardState(&keyboardCount);
+    if (keyboard != nullptr) {
+        for (int i = 0; i < keyboardCount; i++) {
+            if (keyboard[i]) { keyboardActivity = true; break; }
+        }
+    }
+
+    bool controllerActivity = false;
+    if (p1.controller != nullptr) {
+        for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
+            int value = SDL_GameControllerGetAxis(p1.controller, static_cast<SDL_GameControllerAxis>(axis));
+            if (std::abs(value) > 9000) { controllerActivity = true; break; }
+        }
+        if (!controllerActivity) {
+            for (int button = 0; button < SDL_CONTROLLER_BUTTON_MAX; button++) {
+                if (SDL_GameControllerGetButton(p1.controller, static_cast<SDL_GameControllerButton>(button))) {
+                    controllerActivity = true; break;
+                }
+            }
+        }
+    }
+
+    // Latest active device wins. Mouse/keyboard can immediately take the cursor
+    // back; controller activity hides it again. Neither device is disabled.
+    if (mouseActivity || keyboardActivity) {
+        gLocalCoopP1ControllerActive = false;
+        if (cursorIsHidden()) mouseShowCursor();
+    } else if (controllerActivity) {
+        gLocalCoopP1ControllerActive = true;
+        if (!cursorIsHidden()) mouseHideCursor();
     }
 }
 
@@ -990,7 +1114,9 @@ inline void localCoopRuntimeTick()
     localCoopRealtimeAiInstall();
     localCoopRuntimeEnsureTicker();
     localCoopPollControllers();
+    localCoopUpdateP1InputSource();
     localCoopProcessJoinMenus();
+    localCoopSystemMenuTick();
     localCoopRestoreCharactersFromSave();
     localCoopKeepReservedActorsWithParty();
 

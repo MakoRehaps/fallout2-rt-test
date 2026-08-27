@@ -96,6 +96,9 @@ inline uint32_t gLocalCoopAppliedCharacterStateRevision = 0xFFFFFFFF;
 inline int gLocalCoopModalControllerSlot = -1;
 inline int gLocalCoopSkilldexInvokerSlot = -1;
 
+// COOP_SYSTEM_MENU_RUNTIME_V1
+inline bool gLocalCoopSystemMenuActive = false;
+
 // COOP_EXPLICIT_SIMULATION_PAUSE_V1
 // Window focus/Alt+Tab must never pause realtime co-op. Only explicit gameplay
 // flows such as joining a player or choosing a level-up perk freeze simulation.
@@ -113,7 +116,9 @@ inline bool localCoopJoinChoiceActive()
 
 inline bool localCoopSimulationPaused()
 {
-    return gLocalCoopLevelChoiceActive || localCoopJoinChoiceActive();
+    return gLocalCoopLevelChoiceActive
+        || localCoopJoinChoiceActive()
+        || gLocalCoopSystemMenuActive;
 }
 
 inline void localCoopSetLevelChoiceActive(bool active)
