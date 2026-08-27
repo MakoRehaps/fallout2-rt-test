@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 #include "color.h"
 #include "input.h"
@@ -16,12 +17,46 @@
 
 namespace fallout {
 
-// COOP_TILELESS_GROUP_ROOM_V1
-// A pure UI scene shown before the real Fallout 1 opening. It deliberately
-// creates no map, no tiles, no scripts, no critters and no world transitions.
-// Controllers press Start once to JOIN, release it, then press Start again to
-// vote READY. When every joined controller is ready, the caller continues into
-// the normal opening movie and real campaign map.
+// COOP_TILELESS_GROUP_ROOM_V2
+// Pure UI scene shown before the real Fallout opening. It deliberately creates
+// no map, no tiles, no scripts, no critters and no world transitions.
+//
+// On first launch this room doubles as the co-op onboarding screen. The READY
+// vote remains locked until the guide has been read. The guide is saved in an
+// SDL per-user preferences directory, so each Windows user sees it once per
+// install/profile without requiring writes beside the game executable.
+
+inline bool localCoopTutorialAlreadySeen()
+{
+    char* prefPath = SDL_GetPrefPath("PhoBoi", "FalloutUnifiedCoop");
+    if (prefPath == nullptr) return false;
+
+    char marker[1024];
+    std::snprintf(marker, sizeof(marker), "%scoop_onboarding_v2.seen", prefPath);
+    SDL_free(prefPath);
+
+    FILE* stream = std::fopen(marker, "rb");
+    if (stream == nullptr) return false;
+    std::fclose(stream);
+    return true;
+}
+
+inline void localCoopMarkTutorialSeen()
+{
+    char* prefPath = SDL_GetPrefPath("PhoBoi", "FalloutUnifiedCoop");
+    if (prefPath == nullptr) return;
+
+    char marker[1024];
+    std::snprintf(marker, sizeof(marker), "%scoop_onboarding_v2.seen", prefPath);
+    SDL_free(prefPath);
+
+    FILE* stream = std::fopen(marker, "wb");
+    if (stream == nullptr) return;
+    const char* text = "PhoBoi co-op onboarding complete\n";
+    std::fwrite(text, 1, std::strlen(text), stream);
+    std::fclose(stream);
+}
+
 inline bool localCoopRunTilelessGroupRoom()
 {
     localCoopInit();
@@ -29,10 +64,66 @@ inline bool localCoopRunTilelessGroupRoom()
     std::array<bool, kLocalCoopMaxPlayers> joined {};
     std::array<bool, kLocalCoopMaxPlayers> ready {};
     std::array<bool, kLocalCoopMaxPlayers> startWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> aWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> leftWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> rightWasDown {};
 
-    // P1 is always part of the session. If P1 has a controller, Start is still
-    // used for the ready vote; keyboard Enter can ready P1 as a fallback.
     joined[0] = true;
+
+    static const char* kTutorialPages[][6] = {
+        {
+            "WELCOME TO FALLOUT UNIFIED CO-OP",
+            "This build supports up to four local players in the same live world.",
+            "Player 1 owns global menus and campaign decisions.",
+            "Other players keep their own character, HUD, camera and combat input.",
+            "Phones can join through the PhoBoi controller page shown by the game.",
+            ""
+        },
+        {
+            "PARTY / SESSION",
+            "Press START to join a player slot.",
+            "After the guide, press START again to toggle READY.",
+            "The game begins only when every joined player is READY.",
+            "Disconnected player slots can return without replacing another player.",
+            ""
+        },
+        {
+            "COMBAT AND PERSONAL CONTROLS",
+            "Each human player controls their own movement, aiming and attacks.",
+            "Controller RT = primary attack, RB = secondary attack.",
+            "X = reload, Y = swap active hand/weapon.",
+            "D-pad Right = quick self medical; Right Stick Click = Skilldex.",
+            ""
+        },
+        {
+            "MENUS / INVENTORY",
+            "Controller Back/Select opens Inventory.",
+            "D-pad Left opens the Pip-Boy / personal device flow.",
+            "START opens the system menu during normal gameplay.",
+            "Player 1 remains the owner of shared/global Fallout interfaces.",
+            ""
+        },
+        {
+            "ISOMETRIC <-> FIRST PERSON",
+            "The first-person mode uses the same live Fallout map and simulation.",
+            "Walls are raycast and critters/objects are rendered as billboards.",
+            "Keyboard: F9 toggles camera mode.",
+            "Controller: L3 / Left Stick Click. Phone: tap FPS / ISO.",
+            ""
+        },
+        {
+            "READY TO PLAY",
+            "The guide is now complete for this Windows user.",
+            "You can still use the normal game menus and controller labels as reminders.",
+            "Press A on a controller/phone or ENTER on keyboard to unlock READY voting.",
+            "Then each joined player presses START to vote READY.",
+            ""
+        },
+    };
+    constexpr int kTutorialPageCount = static_cast<int>(sizeof(kTutorialPages) / sizeof(kTutorialPages[0]));
+
+    bool tutorialComplete = localCoopTutorialAlreadySeen();
+    int tutorialPage = 0;
 
     const int width = 720;
     const int height = 440;
@@ -44,7 +135,7 @@ inline bool localCoopRunTilelessGroupRoom()
         _colorTable[0],
         WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
-        return true; // fail open rather than block a new game
+        return true;
     }
 
     bool oldCursorHidden = cursorIsHidden();
@@ -53,30 +144,53 @@ inline bool localCoopRunTilelessGroupRoom()
     auto draw = [&]() {
         windowFill(win, 0, 0, width, height, _colorTable[0]);
         windowDrawBorder(win);
-        windowDrawText(win, "PHOBOI CO-OP GROUP ROOM", width - 48, 24, 22, _colorTable[992]);
-        windowDrawText(win, "NO MAP / NO TILES - FORM PARTY BEFORE THE VAULT INTRO", width - 48, 24, 52, _colorTable[992]);
-        windowDrawText(win, "PRESS START TO JOIN. RELEASE. PRESS START AGAIN TO VOTE READY.", width - 48, 24, 82, _colorTable[32747]);
+        windowDrawText(win, "PHOBOI CO-OP GROUP ROOM", width - 48, 24, 20, _colorTable[992]);
 
-        for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
-            const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-            char line[180];
-            const char* state = ready[slot]
-                ? "READY"
-                : joined[slot]
-                    ? "JOINED - PRESS START TO READY"
-                    : player.connected
-                        ? "PRESS START TO JOIN"
-                        : "WAITING FOR CONTROLLER";
-            if (slot == 0 && player.controller == nullptr && joined[slot] && !ready[slot]) {
-                state = "JOINED - ENTER OR START TO READY";
+        if (!tutorialComplete) {
+            char pageLabel[80];
+            std::snprintf(pageLabel, sizeof(pageLabel), "FIRST-LAUNCH GUIDE  %d / %d", tutorialPage + 1, kTutorialPageCount);
+            windowDrawText(win, pageLabel, width - 48, 24, 48, _colorTable[32747]);
+            windowDrawText(win, kTutorialPages[tutorialPage][0], width - 48, 24, 86, _colorTable[992]);
+
+            for (int line = 1; line < 6; ++line) {
+                if (kTutorialPages[tutorialPage][line][0] == '\0') continue;
+                windowDrawText(win, kTutorialPages[tutorialPage][line], width - 72, 38,
+                    122 + (line - 1) * 40, _colorTable[992]);
             }
-            std::snprintf(line, sizeof(line), "PLAYER %d   %s", slot + 1, state);
-            windowDrawText(win, line, width - 72, 38, 132 + slot * 54,
-                ready[slot] ? _colorTable[32747] : _colorTable[992]);
+
+            windowDrawText(win,
+                "LEFT/RIGHT OR D-PAD = PAGE    A/ENTER = NEXT    START = JOIN",
+                width - 48,
+                24,
+                height - 58,
+                _colorTable[32747]);
+            windowDrawText(win, "READY VOTING UNLOCKS AFTER THIS GUIDE", width - 48, 24, height - 32, _colorTable[992]);
+        } else {
+            windowDrawText(win, "FORM PARTY BEFORE THE VAULT INTRO", width - 48, 24, 50, _colorTable[992]);
+            windowDrawText(win, "PRESS START TO JOIN. RELEASE. PRESS START AGAIN TO VOTE READY.", width - 48, 24, 80, _colorTable[32747]);
+
+            for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+                const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+                char line[180];
+                const char* state = ready[slot]
+                    ? "READY"
+                    : joined[slot]
+                        ? "JOINED - PRESS START TO READY"
+                        : player.connected
+                            ? "PRESS START TO JOIN"
+                            : "WAITING FOR CONTROLLER / PHONE";
+                if (slot == 0 && player.controller == nullptr && joined[slot] && !ready[slot]) {
+                    state = "JOINED - ENTER OR START TO READY";
+                }
+                std::snprintf(line, sizeof(line), "PLAYER %d   %s", slot + 1, state);
+                windowDrawText(win, line, width - 72, 38, 126 + slot * 54,
+                    ready[slot] ? _colorTable[32747] : _colorTable[992]);
+            }
+
+            windowDrawText(win, "ALL JOINED PLAYERS MUST VOTE READY", width - 48, 24, height - 54, _colorTable[992]);
+            windowDrawText(win, "ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
         }
 
-        windowDrawText(win, "ALL JOINED PLAYERS MUST VOTE READY", width - 48, 24, height - 54, _colorTable[992]);
-        windowDrawText(win, "ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
         windowRefresh(win);
     };
 
@@ -93,21 +207,47 @@ inline bool localCoopRunTilelessGroupRoom()
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         bool enterDown = keys != nullptr && keys[SDL_SCANCODE_RETURN] != 0;
         bool escapeDown = keys != nullptr && keys[SDL_SCANCODE_ESCAPE] != 0;
+        bool keyLeft = keys != nullptr && keys[SDL_SCANCODE_LEFT] != 0;
+        bool keyRight = keys != nullptr && keys[SDL_SCANCODE_RIGHT] != 0;
+        static bool keyLeftWasDown = false;
+        static bool keyRightWasDown = false;
+
         if (escapeDown) {
             break;
         }
 
+        bool tutorialAdvance = enterDown && !enterWasDown;
+        bool tutorialPrevious = keyLeft && !keyLeftWasDown;
+        bool tutorialNext = keyRight && !keyRightWasDown;
+
         for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
             LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-            bool startDown = player.controller != nullptr
+            bool hasController = player.controller != nullptr;
+            bool startDown = hasController
                 && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+            bool aDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_A) != 0;
+            bool leftDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+            bool rightDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
 
-            bool edge = startDown && !startWasDown[slot];
-            if (slot == 0 && enterDown && !enterWasDown) {
-                edge = true;
-            }
+            bool startEdge = startDown && !startWasDown[slot];
+            bool aEdge = aDown && !aWasDown[slot];
+            bool leftEdge = leftDown && !leftWasDown[slot];
+            bool rightEdge = rightDown && !rightWasDown[slot];
 
-            if (edge) {
+            if (!tutorialComplete) {
+                if (startEdge && !joined[slot]) {
+                    joined[slot] = true;
+                    ready[slot] = false;
+                    dirty = true;
+                    debugPrint("[COOP GROUP] slot=%d joined during guide\n", slot);
+                }
+                tutorialAdvance = tutorialAdvance || aEdge;
+                tutorialPrevious = tutorialPrevious || leftEdge;
+                tutorialNext = tutorialNext || rightEdge;
+            } else if (startEdge || (slot == 0 && enterDown && !enterWasDown)) {
                 if (!joined[slot]) {
                     joined[slot] = true;
                     ready[slot] = false;
@@ -119,24 +259,52 @@ inline bool localCoopRunTilelessGroupRoom()
                     debugPrint("[COOP GROUP] slot=%d ready=%d\n", slot, ready[slot] ? 1 : 0);
                 }
             }
-            startWasDown[slot] = startDown;
-        }
-        enterWasDown = enterDown;
 
-        int joinedCount = 0;
-        int readyCount = 0;
-        for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
-            if (joined[slot]) {
-                ++joinedCount;
-                if (ready[slot]) ++readyCount;
+            startWasDown[slot] = startDown;
+            aWasDown[slot] = aDown;
+            leftWasDown[slot] = leftDown;
+            rightWasDown[slot] = rightDown;
+        }
+
+        if (!tutorialComplete) {
+            if (tutorialPrevious && tutorialPage > 0) {
+                --tutorialPage;
+                dirty = true;
+            }
+            if (tutorialNext && tutorialPage < kTutorialPageCount - 1) {
+                ++tutorialPage;
+                dirty = true;
+            }
+            if (tutorialAdvance) {
+                if (tutorialPage < kTutorialPageCount - 1) {
+                    ++tutorialPage;
+                } else {
+                    tutorialComplete = true;
+                    localCoopMarkTutorialSeen();
+                    debugPrint("[COOP GROUP] first-launch guide complete; ready vote unlocked\n");
+                }
+                dirty = true;
             }
         }
 
-        // Require P1 plus at least one ready vote. Solo remains possible: P1 can
-        // ready and continue even if no additional controller joins.
-        if (joinedCount > 0 && readyCount == joinedCount) {
-            accepted = true;
-            break;
+        enterWasDown = enterDown;
+        keyLeftWasDown = keyLeft;
+        keyRightWasDown = keyRight;
+
+        if (tutorialComplete) {
+            int joinedCount = 0;
+            int readyCount = 0;
+            for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+                if (joined[slot]) {
+                    ++joinedCount;
+                    if (ready[slot]) ++readyCount;
+                }
+            }
+
+            if (joinedCount > 0 && readyCount == joinedCount) {
+                accepted = true;
+                break;
+            }
         }
 
         if (dirty) {
