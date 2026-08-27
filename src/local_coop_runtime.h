@@ -18,6 +18,7 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
+#include "local_coop_personal_ui.h"
 #include "local_coop_system_menu.h"
 #include "mouse.h"
 #include "object.h"
@@ -643,6 +644,8 @@ inline void localCoopProcessPostgameWorldSwitch()
 
 inline void localCoopProcessModalMenuInput()
 {
+    // COOP_FOUR_PERSONAL_HUD_SHARED_BAG_RUNTIME_V1
+    localCoopPersonalUiTick();
     // The co-op ticker continues to run inside stock modal loops. Treat every
     // non-world UI as exclusive so PhoBoi/Skilldex input can never stack a
     // second screen over Inventory, Loot, Barter, Dialogue, Character, etc.
@@ -688,7 +691,8 @@ inline void localCoopProcessModalMenuInput()
             && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0;
         bool pipboyDown = player.controller != nullptr
             && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
-        bool inventoryDown = backDown;
+        // Personal co-op bag overlays consume Back per player; stock Inventory is global.
+        bool inventoryDown = false;
         bool canOpen = !modalActive
             && player.connected
             && player.humanOwned
@@ -1035,7 +1039,7 @@ inline void localCoopUpdateSharedCamera()
     gLocalCoopCameraTargetTile = targetTile;
 
     Uint32 now = SDL_GetTicks();
-    localCoopDrawHud(now);
+    // Personal HUDs are rendered independently by localCoopPersonalUiTick.
     if (!localCoopTickReached(now, gLocalCoopNextCameraStepTick)) {
         return;
     }
@@ -1166,6 +1170,7 @@ inline void localCoopRuntimeTick()
     }
 
     localCoopUpdateSharedCamera();
+    localCoopPersonalUiTick();
     localCoopSweepSharedInventory();
 
     gLocalCoopRuntimeInsideTick = false;
