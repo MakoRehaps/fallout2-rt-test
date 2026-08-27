@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply PhoBoi, co-op, UI, audio, quest, lineage, and world fixes
+      - name: Apply PhoBoi, co-op, UI, accessibility, audio, quest, lineage, and world fixes
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
@@ -50,6 +50,7 @@ jobs:
           python tools/patch_p1_hybrid_input_start_toggle.py
           python tools/patch_p1_hybrid_input_repair_v2.py
           python tools/patch_coop_system_menu.py
+          python tools/patch_coop_accessibility_highlights.py
           python tools/patch_coop_melee_hit_unlock.py
 
           python tools/patch_dialog_dos_chatter.py
@@ -79,8 +80,11 @@ jobs:
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_START_TOGGLE_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_TRIGGER_FIX_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'localCoopAccessibilityTick' },
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_V1' },
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_OPEN_LATCH_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_ACCESSIBILITY_MENU_V1' },
+            @{ File = 'src/local_coop_accessibility.h'; Marker = 'COOP_ACCESSIBILITY_HIGHLIGHTS_V1' },
             @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_TILELESS_GROUP_ROOM_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
@@ -98,7 +102,7 @@ jobs:
 
           $tracked = @(
             'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
-            'src/local_coop_group_room.h', 'src/local_coop_system_menu.h',
+            'src/local_coop_group_room.h', 'src/local_coop_system_menu.h', 'src/local_coop_accessibility.h',
             'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
             'src/map.cc', 'src/tile.cc', 'src/worldmap.cc', 'src/worldmap.h', 'src/scripts.cc',
             'src/loadsave.cc', 'src/loadsave.h', 'src/unified_campaign_transition.h',
@@ -114,7 +118,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply tileless group room and phone readability fixes"
+            git commit -m "Apply accessibility highlights and current co-op fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
