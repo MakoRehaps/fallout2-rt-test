@@ -1,0 +1,40 @@
+name: Materialize FPS Controller Phone Toggle
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - tools/patch_fps_controller_phone.py
+      - .github/workflows/materialize-fps-controller-phone.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Patch controller and phone FPS controls
+        run: python tools/patch_fps_controller_phone.py
+      - name: Commit materialized source changes
+        shell: bash
+        run: |
+          if git diff --quiet -- src/local_coop_fps.h src/local_coop_mobile.cc; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_fps.h src/local_coop_mobile.cc
+          git commit -m "Enable FPS camera toggle on controllers and phones"
+          git push origin HEAD:fix/no-debug-no-data-copy
