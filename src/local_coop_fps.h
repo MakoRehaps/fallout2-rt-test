@@ -12,6 +12,7 @@
 #include "color.h"
 #include "draw.h"
 #include "local_coop.h"
+#include "local_coop_fps_raycast.h"
 #include "object.h"
 #include "svga.h"
 #include "tile.h"
@@ -21,6 +22,7 @@ namespace fallout {
 
 // COOP_NATIVE_BILLBOARD_FPS_V1
 // COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2
+// COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1
 // A second renderer over the SAME live Fallout map/simulation. Nothing is
 // teleported or converted into another game mode. In first-person mode every
 // joined player owns one camera viewport following that player's actor.
@@ -161,7 +163,8 @@ inline void localCoopFpsCollect(Object* camera, std::vector<LocalCoopFpsBillboar
 inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
     unsigned char* dest,
     int pitch,
-    const LocalCoopFpsViewport& view)
+    const LocalCoopFpsViewport& view,
+    const std::vector<float>& wallDepth)
 {
     Object* object = billboard.object;
     if (object == nullptr || dest == nullptr || view.width <= 0 || view.height <= 0) return;
@@ -183,6 +186,12 @@ inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
         int drawWidth = std::max(3, srcWidth * drawHeight / std::max(1, srcHeight));
         int centerX = view.x + view.width / 2
             + static_cast<int>((billboard.lateral / billboard.depth) * view.width * 0.44f);
+        int localColumn = centerX - view.x;
+        if (localColumn >= 0 && localColumn < static_cast<int>(wallDepth.size())
+            && billboard.depth > wallDepth[static_cast<size_t>(localColumn)] + 6.0f) {
+            artUnlock(handle);
+            return;
+        }
         int x = centerX - drawWidth / 2;
         int y = view.y + view.height / 2 + view.height / 5 - drawHeight;
 
@@ -245,10 +254,15 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
     windowFill(gLocalCoopFpsWindow, view.x, view.y + view.height / 2, view.width,
         view.height - view.height / 2, _colorTable[4228]);
 
+    // Cast one collision ray per viewport column through the real Fallout map.
+    // Walls/scenery stop the ray; Freedoom supplies a BSD-licensed texture.
+    std::vector<float> wallDepth = localCoopFpsRaycastWalls(
+        player.actor, buffer, pitch, view.x, view.y, view.width, view.height);
+
     std::vector<LocalCoopFpsBillboard> billboards;
     localCoopFpsCollect(player.actor, billboards);
     for (const auto& billboard : billboards) {
-        localCoopFpsDrawBillboard(billboard, buffer, pitch, view);
+        localCoopFpsDrawBillboard(billboard, buffer, pitch, view, wallDepth);
     }
 
     int cx = view.x + view.width / 2;
