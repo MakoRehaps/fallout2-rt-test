@@ -18,6 +18,7 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
+#include "local_coop_fps.h"
 #include "local_coop_personal_ui.h"
 #include "local_coop_system_menu.h"
 #include "mouse.h"
@@ -1169,7 +1170,10 @@ inline void localCoopRuntimeTick()
         interfaceRenderActionPoints(-1, -1);
     }
 
+    // COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1
     localCoopUpdateSharedCamera();
+    localCoopFpsTick();
+    // Personal HUDs draw after FPS so all four remain readable.
     localCoopPersonalUiTick();
     localCoopSweepSharedInventory();
 

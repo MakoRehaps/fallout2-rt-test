@@ -11,6 +11,7 @@
 #include "loadsave.h"
 #include "local_coop.h"
 #include "local_coop_accessibility.h"
+#include "local_coop_fps.h"
 #include "mouse.h"
 #include "preferences.h"
 #include "svga.h"
@@ -29,6 +30,7 @@ enum class LocalCoopSystemMenuAction {
     Skilldex,
     Character,
     Accessibility,
+    CameraMode,
     Save,
     Load,
     Options,
@@ -53,10 +55,15 @@ inline const char* localCoopSystemMenuLabel(int index)
         "SKILLDEX",
         "CHARACTER / PERKS",
         "ACCESSIBILITY HIGHLIGHTS",
+        "CAMERA MODE",
         "SAVE GAME",
         "LOAD GAME",
         "OPTIONS",
     };
+    // COOP_NATIVE_BILLBOARD_FPS_MENU_V1
+    if (index == static_cast<int>(LocalCoopSystemMenuAction::CameraMode)) {
+        return localCoopFpsActive() ? "CAMERA: FIRST PERSON" : "CAMERA: ISOMETRIC";
+    }
     // COOP_ACCESSIBILITY_MENU_V1
     if (index == static_cast<int>(LocalCoopSystemMenuAction::Accessibility)) {
         return gLocalCoopAccessibilityHighlightsEnabled
@@ -192,6 +199,9 @@ inline void localCoopSystemMenuActivate(int index)
     case LocalCoopSystemMenuAction::Accessibility:
         localCoopAccessibilityToggle();
         debugPrint("[COOP ACCESSIBILITY] highlights=%s\n", localCoopAccessibilityStatusLabel());
+        break;
+    case LocalCoopSystemMenuAction::CameraMode:
+        localCoopFpsToggle();
         break;
     case LocalCoopSystemMenuAction::Save:
         lsgSaveGame(LOAD_SAVE_MODE_NORMAL);
