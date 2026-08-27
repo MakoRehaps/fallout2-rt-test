@@ -1,0 +1,19 @@
+{
+  "id": "tactics_military",
+  "description": "Optional military DLC profile using Fallout Tactics as an additional layout/prefab source.",
+  "sources": {
+    "fallout1": 0.20,
+    "fallout2": 0.35,
+    "tactics": 0.45
+  },
+  "preferred_tags": ["military", "industrial", "fortified", "bunker", "checkpoint", "warehouse"],
+  "excluded_tags": [],
+  "ruin_bias": 0.45,
+  "settlement_density_multiplier": 1.15,
+  "military_bias": 0.85,
+  "industrial_bias": 0.70,
+  "subway": {
+    "enabled": true,
+    "allow_tactics_material": true
+  }
+}
