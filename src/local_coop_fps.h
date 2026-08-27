@@ -13,6 +13,7 @@
 #include "draw.h"
 #include "local_coop.h"
 #include "local_coop_fps_raycast.h"
+#include "local_coop_fps_weapon.h"
 #include "object.h"
 #include "svga.h"
 #include "tile.h"
@@ -264,6 +265,11 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
     for (const auto& billboard : billboards) {
         localCoopFpsDrawBillboard(billboard, buffer, pitch, view, wallDepth);
     }
+
+    // COOP_FREEDOOM_FIRST_PERSON_WEAPONS_RUNTIME_V1
+    // Draw the equipped player's first-person weapon after world geometry and
+    // billboards so it behaves like a classic FPS view model.
+    localCoopFpsDrawWeapon(slot, buffer, pitch, view.x, view.y, view.width, view.height);
 
     int cx = view.x + view.width / 2;
     int cy = view.y + view.height / 2;
