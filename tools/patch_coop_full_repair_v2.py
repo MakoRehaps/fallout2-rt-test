@@ -20,8 +20,6 @@ if '// COOP_FINAL_HOTBINDS_V1' not in s:
     if state_old in s:
         s = s.replace(state_old, state_new, 1)
 
-    # The lineage patch may already have removed the obsolete Back+Start switch.
-    # If it still exists, disable it; otherwise place the marker by runtime state.
     fn = 'inline void localCoopProcessPostgameCampaignSwitch()\n{\n'
     if fn in s:
         s = s.replace(fn, fn + '    // COOP_FINAL_HOTBINDS_V1\n    return;\n\n', 1)
@@ -131,6 +129,17 @@ if '// COOP_FINAL_HOTBINDS_V1' not in s:
         return false;
     }''', 1)
 
-    p.write_text(s, encoding='utf-8')
+# Fix stale HUD code that may already be committed with its marker. The HUD is
+# defined before localCoopTickReached, so its throttle must use an inline
+# wrap-safe comparison instead of calling the later helper.
+stale_hud = '''    if (!localCoopTickReached(now, gLocalCoopNextHudRefreshTick)) {
+        return;
+    }'''
+fixed_hud = '''    if (static_cast<Sint32>(now - gLocalCoopNextHudRefreshTick) < 0) {
+        return;
+    }'''
+if stale_hud in s:
+    s = s.replace(stale_hud, fixed_hud, 1)
 
-print('Repaired 18-choice menu marker and final hotbinds')
+p.write_text(s, encoding='utf-8')
+print('Repaired 18-choice menu, final hotbinds, and materialized HUD tick ordering')
