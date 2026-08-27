@@ -4,6 +4,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -19,9 +20,10 @@
 namespace fallout {
 
 // COOP_NATIVE_BILLBOARD_FPS_V1
+// COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2
 // A second renderer over the SAME live Fallout map/simulation. Nothing is
-// teleported or converted into another game mode. World objects keep their
-// original FIDs and are projected as distance-scaled billboards.
+// teleported or converted into another game mode. In first-person mode every
+// joined player owns one camera viewport following that player's actor.
 enum class LocalCoopCameraMode {
     Isometric,
     FirstPerson,
@@ -34,9 +36,16 @@ struct LocalCoopFpsBillboard {
     int distance = 0;
 };
 
+struct LocalCoopFpsViewport {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
 inline LocalCoopCameraMode gLocalCoopCameraMode = LocalCoopCameraMode::Isometric;
 inline int gLocalCoopFpsWindow = -1;
-inline Uint32 gLocalCoopFpsNextTurnTick = 0;
+inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};
 
 inline bool localCoopFpsActive()
 {
@@ -72,6 +81,18 @@ inline void localCoopFpsToggle()
         : LocalCoopCameraMode::FirstPerson);
 }
 
+inline LocalCoopFpsViewport localCoopFpsViewportForSlot(int slot, int width, int height)
+{
+    int halfW = width / 2;
+    int halfH = height / 2;
+    LocalCoopFpsViewport view;
+    view.x = (slot & 1) != 0 ? halfW : 0;
+    view.y = slot >= 2 ? halfH : 0;
+    view.width = (slot & 1) != 0 ? width - halfW : halfW;
+    view.height = slot >= 2 ? height - halfH : halfH;
+    return view;
+}
+
 inline bool localCoopFpsProject(Object* camera, Object* object, float& depth, float& lateral)
 {
     if (camera == nullptr || object == nullptr || object->tile < 0 || camera->tile < 0) return false;
@@ -101,16 +122,12 @@ inline bool localCoopFpsProject(Object* camera, Object* object, float& depth, fl
     float rdy = static_cast<float>(oy - cy);
     depth = rdx * fdx + rdy * fdy;
     lateral = rdx * (-fdy) + rdy * fdx;
-
-    // Roughly a 100 degree horizontal field of view. The map remains authoritative;
-    // this merely decides which original sprites are visible in the FPS projection.
     return depth > 3.0f && std::fabs(lateral) <= depth * 1.18f;
 }
 
-inline void localCoopFpsCollect(std::vector<LocalCoopFpsBillboard>& out)
+inline void localCoopFpsCollect(Object* camera, std::vector<LocalCoopFpsBillboard>& out)
 {
     out.clear();
-    Object* camera = gLocalCoopPlayers[0].actor;
     if (camera == nullptr) return;
 
     for (Object* object = objectFindFirst(); object != nullptr; object = objectFindNext()) {
@@ -133,7 +150,6 @@ inline void localCoopFpsCollect(std::vector<LocalCoopFpsBillboard>& out)
         float depth = 0.0f;
         float lateral = 0.0f;
         if (!localCoopFpsProject(camera, object, depth, lateral)) continue;
-
         out.push_back({ object, depth, lateral, distance });
     }
 
@@ -142,10 +158,13 @@ inline void localCoopFpsCollect(std::vector<LocalCoopFpsBillboard>& out)
     });
 }
 
-inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard, unsigned char* dest, int width, int height)
+inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
+    unsigned char* dest,
+    int pitch,
+    const LocalCoopFpsViewport& view)
 {
     Object* object = billboard.object;
-    if (object == nullptr || dest == nullptr) return;
+    if (object == nullptr || dest == nullptr || view.width <= 0 || view.height <= 0) return;
 
     CacheEntry* handle = nullptr;
     Art* art = artLock(object->fid, &handle);
@@ -159,46 +178,87 @@ inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard, un
     unsigned char* src = artGetFrameData(art, frame, direction);
 
     if (src != nullptr && srcWidth > 0 && srcHeight > 0) {
-        float distanceScale = 7.5f / static_cast<float>(std::max(1, billboard.distance));
-        int drawHeight = std::clamp(static_cast<int>(srcHeight * distanceScale), 10, height * 3 / 4);
-        int drawWidth = std::max(4, srcWidth * drawHeight / std::max(1, srcHeight));
-        int centerX = width / 2 + static_cast<int>((billboard.lateral / billboard.depth) * width * 0.44f);
+        float distanceScale = 6.0f / static_cast<float>(std::max(1, billboard.distance));
+        int drawHeight = std::clamp(static_cast<int>(srcHeight * distanceScale), 8, view.height * 3 / 4);
+        int drawWidth = std::max(3, srcWidth * drawHeight / std::max(1, srcHeight));
+        int centerX = view.x + view.width / 2
+            + static_cast<int>((billboard.lateral / billboard.depth) * view.width * 0.44f);
         int x = centerX - drawWidth / 2;
-        int y = height / 2 + height / 5 - drawHeight;
+        int y = view.y + view.height / 2 + view.height / 5 - drawHeight;
 
-        if (x >= 0 && y >= 0 && x + drawWidth < width && y + drawHeight < height) {
+        if (x >= view.x && y >= view.y
+            && x + drawWidth < view.x + view.width
+            && y + drawHeight < view.y + view.height) {
             blitBufferToBufferStretchTrans(src, srcWidth, srcHeight, srcWidth,
-                dest + y * width + x, drawWidth, drawHeight, width);
+                dest + y * pitch + x, drawWidth, drawHeight, pitch);
         }
     }
 
     artUnlock(handle);
 }
 
-inline void localCoopFpsProcessLook()
+inline void localCoopFpsProcessLook(int slot)
 {
-    LocalCoopPlayer& p1 = gLocalCoopPlayers[0];
-    if (!localCoopFpsActive() || p1.actor == nullptr) return;
+    if (slot < 0 || slot >= kLocalCoopMaxPlayers) return;
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+    if (!localCoopFpsActive() || player.actor == nullptr || player.uiMode != LocalCoopUiMode::World) return;
 
     int turn = 0;
-    if (p1.controller != nullptr) {
-        int rx = SDL_GameControllerGetAxis(p1.controller, SDL_CONTROLLER_AXIS_RIGHTX);
+    if (player.controller != nullptr) {
+        int rx = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_RIGHTX);
         if (rx > 15000) turn = 1;
         else if (rx < -15000) turn = -1;
     }
 
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    if (keys != nullptr) {
-        if (keys[SDL_SCANCODE_E]) turn = 1;
-        if (keys[SDL_SCANCODE_Q]) turn = -1;
+    // Keyboard look belongs to P1; every controller has its own right-stick camera.
+    if (slot == 0) {
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        if (keys != nullptr) {
+            if (keys[SDL_SCANCODE_E]) turn = 1;
+            if (keys[SDL_SCANCODE_Q]) turn = -1;
+        }
     }
 
     Uint32 now = SDL_GetTicks();
-    if (turn != 0 && static_cast<Sint32>(now - gLocalCoopFpsNextTurnTick) >= 0) {
-        int rotation = (p1.actor->rotation + (turn > 0 ? 1 : ROTATION_COUNT - 1)) % ROTATION_COUNT;
-        objectSetRotation(p1.actor, rotation, nullptr);
-        gLocalCoopFpsNextTurnTick = now + 95;
+    if (turn != 0 && static_cast<Sint32>(now - gLocalCoopFpsNextTurnTick[slot]) >= 0) {
+        int rotation = (player.actor->rotation + (turn > 0 ? 1 : ROTATION_COUNT - 1)) % ROTATION_COUNT;
+        objectSetRotation(player.actor, rotation, nullptr);
+        gLocalCoopFpsNextTurnTick[slot] = now + 95;
     }
+}
+
+inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch, int screenWidth, int screenHeight)
+{
+    LocalCoopFpsViewport view = localCoopFpsViewportForSlot(slot, screenWidth, screenHeight);
+    LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+
+    windowFill(gLocalCoopFpsWindow, view.x, view.y, view.width, view.height, _colorTable[0]);
+    if (!player.connected || !player.humanOwned || player.actor == nullptr) {
+        char label[64];
+        snprintf(label, sizeof(label), "P%d - WAITING FOR PLAYER", slot + 1);
+        windowDrawText(gLocalCoopFpsWindow, label, view.width - 20, view.x + 10, view.y + 14, _colorTable[992]);
+        return;
+    }
+
+    // Each quadrant has its own sky/floor and projects from its own actor.
+    windowFill(gLocalCoopFpsWindow, view.x, view.y, view.width, view.height / 2, _colorTable[21140]);
+    windowFill(gLocalCoopFpsWindow, view.x, view.y + view.height / 2, view.width,
+        view.height - view.height / 2, _colorTable[4228]);
+
+    std::vector<LocalCoopFpsBillboard> billboards;
+    localCoopFpsCollect(player.actor, billboards);
+    for (const auto& billboard : billboards) {
+        localCoopFpsDrawBillboard(billboard, buffer, pitch, view);
+    }
+
+    int cx = view.x + view.width / 2;
+    int cy = view.y + view.height / 2;
+    windowDrawLine(gLocalCoopFpsWindow, cx - 6, cy, cx + 6, cy, _colorTable[32747]);
+    windowDrawLine(gLocalCoopFpsWindow, cx, cy - 6, cx, cy + 6, _colorTable[32747]);
+
+    char label[96];
+    snprintf(label, sizeof(label), "P%d FPS  %s", slot + 1, slot == 0 ? "MAP LEADER" : "FOLLOWER");
+    windowDrawText(gLocalCoopFpsWindow, label, view.width - 20, view.x + 10, view.y + 10, _colorTable[992]);
 }
 
 inline void localCoopFpsTick()
@@ -207,11 +267,6 @@ inline void localCoopFpsTick()
         localCoopFpsDestroyWindow();
         return;
     }
-
-    Object* camera = gLocalCoopPlayers[0].actor;
-    if (camera == nullptr || gLocalCoopPlayers[0].uiMode != LocalCoopUiMode::World) return;
-
-    localCoopFpsProcessLook();
 
     int width = screenGetWidth();
     int height = screenGetVisibleHeight();
@@ -225,20 +280,15 @@ inline void localCoopFpsTick()
     unsigned char* buffer = windowGetBuffer(gLocalCoopFpsWindow);
     if (buffer == nullptr) return;
 
-    // Sky/ceiling and floor. Every map object above this backdrop is drawn from
-    // the original FRM currently owned by the live object.
-    windowFill(gLocalCoopFpsWindow, 0, 0, width, height / 2, _colorTable[21140]);
-    windowFill(gLocalCoopFpsWindow, 0, height / 2, width, height - height / 2, _colorTable[4228]);
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        localCoopFpsProcessLook(slot);
+        localCoopFpsDrawViewport(slot, buffer, width, width, height);
+    }
 
-    std::vector<LocalCoopFpsBillboard> billboards;
-    localCoopFpsCollect(billboards);
-    for (const auto& billboard : billboards) localCoopFpsDrawBillboard(billboard, buffer, width, height);
-
-    int cx = width / 2;
-    int cy = height / 2;
-    windowDrawLine(gLocalCoopFpsWindow, cx - 8, cy, cx + 8, cy, _colorTable[32747]);
-    windowDrawLine(gLocalCoopFpsWindow, cx, cy - 8, cx, cy + 8, _colorTable[32747]);
-    windowDrawText(gLocalCoopFpsWindow, "FPS VIEW  Q/E OR RIGHT STICK: TURN", width - 20, 10, height - 24, _colorTable[992]);
+    int halfW = width / 2;
+    int halfH = height / 2;
+    windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, height - 1, _colorTable[992]);
+    windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
     windowRefresh(gLocalCoopFpsWindow);
 }
 
