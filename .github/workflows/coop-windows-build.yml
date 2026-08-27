@@ -66,6 +66,7 @@ jobs:
           python tools/patch_tileless_group_room_start.py
           python tools/patch_procedural_selfplay_encounters.py
           python tools/patch_unified_living_world.py
+          python tools/patch_encounter_staged_approach.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
@@ -105,6 +106,7 @@ jobs:
             @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_PROCEDURAL_SELFPLAY_ENCOUNTERS_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_STAGED_ENCOUNTER_APPROACH_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
             @{ File = 'src/local_coop_dialog_chatter.h'; Marker = 'COOP_DOS_DIALOG_CHATTER_V1' },
@@ -138,7 +140,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply living world simulation and encounter integration"
+            git commit -m "Apply staged encounter approach movement"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
