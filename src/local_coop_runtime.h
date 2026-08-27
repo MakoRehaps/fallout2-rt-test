@@ -100,7 +100,7 @@ inline void localCoopEnsureHud()
 
 inline void localCoopDrawHud(Uint32 now)
 {
-    if (!localCoopTickReached(now, gLocalCoopNextHudRefreshTick)) {
+    if (static_cast<Sint32>(now - gLocalCoopNextHudRefreshTick) < 0) {
         return;
     }
     gLocalCoopNextHudRefreshTick = now + 100;
