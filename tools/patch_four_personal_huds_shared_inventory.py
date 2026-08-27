@@ -22,6 +22,10 @@ if old not in s:
     raise SystemExit('inventory binding anchor missing')
 s = s.replace(old, '        // Personal co-op bag overlays consume Back per player; stock Inventory is global.\n        bool inventoryDown = false;', 1)
 
+# The old HUD is one full-width strip split into four columns. Personal HUDs
+# replace it, so do not draw both layouts at once.
+s = s.replace('    localCoopDrawHud(now);\n', '    // Personal HUDs are rendered independently by localCoopPersonalUiTick.\n', 1)
+
 old = '    localCoopUpdateSharedCamera();\n'
 if old not in s:
     raise SystemExit('camera anchor missing')
