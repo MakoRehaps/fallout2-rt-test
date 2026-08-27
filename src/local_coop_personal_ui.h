@@ -6,12 +6,14 @@
 #include "critter.h"
 #include "item.h"
 #include "local_coop.h"
+#include "local_coop_iso_cameras.h"
 #include "proto.h"
 #include "window_manager.h"
 
 namespace fallout {
 
 // COOP_FOUR_PERSONAL_HUD_SHARED_BAG_V1
+// COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_HUD_HOOK_V1
 struct LocalCoopPersonalUiState {
     int hudWindow = -1;
     int inventoryWindow = -1;
@@ -148,6 +150,10 @@ inline void localCoopPersonalUiDrawInventory(int slot)
 
 inline void localCoopPersonalUiTick()
 {
+    // Camera presentation is refreshed before HUD windows so the four HUDs and
+    // any personal bag windows remain on top of their respective world views.
+    localCoopIsoCamerasTick();
+
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         auto& player = gLocalCoopPlayers[slot];
         auto& ui = gLocalCoopPersonalUi[slot];
@@ -204,6 +210,7 @@ inline void localCoopPersonalUiTick()
 
 inline void localCoopPersonalUiShutdown()
 {
+    localCoopIsoDestroySplitWindow();
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         auto& ui = gLocalCoopPersonalUi[slot];
         if (ui.hudWindow != -1) windowDestroy(ui.hudWindow);
