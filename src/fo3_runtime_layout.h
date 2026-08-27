@@ -20,9 +20,6 @@
 
 namespace fallout {
 
-// Header-only on purpose: fps_limiter.cc is already compiled on every target,
-// so the FO3 runtime hook needs no new CMake source entry.
-
 namespace fo3rt {
 
 struct WallRun {
@@ -39,6 +36,12 @@ struct DoorPlacement {
     int rotation;
 };
 
+struct AnchorPlacement {
+    int x;
+    int y;
+    std::string role;
+};
+
 static inline int makePid(int type, int id)
 {
     return (type << 24) | (id & 0x00FFFFFF);
@@ -46,9 +49,6 @@ static inline int makePid(int type, int id)
 
 static inline int squareToHexTile(int x, int y)
 {
-    // F3O plans use the classic 100x100 square grid. Runtime objects use the
-    // 200x200 hex grid. Put each planned point near the middle of its 2x2 hex
-    // region. This keeps generated walls aligned with generated square tiles.
     int hx = std::max(0, std::min(HEX_GRID_WIDTH - 1, x * 2 + 1));
     int hy = std::max(0, std::min(HEX_GRID_HEIGHT - 1, y * 2 + 1));
     return hy * HEX_GRID_WIDTH + hx;
@@ -62,56 +62,103 @@ static inline int sideRotation(const char* side)
     return ROTATION_NE;
 }
 
-static inline int findFirstWallPid()
+static inline std::vector<int> preferredMaterials(const std::string& category)
 {
+    if (category == "vault") return { MATERIAL_TYPE_METAL, MATERIAL_TYPE_CEMENT, MATERIAL_TYPE_STONE };
+    if (category == "industrial") return { MATERIAL_TYPE_METAL, MATERIAL_TYPE_CEMENT, MATERIAL_TYPE_STONE };
+    if (category == "urban") return { MATERIAL_TYPE_CEMENT, MATERIAL_TYPE_STONE, MATERIAL_TYPE_METAL, MATERIAL_TYPE_WOOD };
+    if (category == "cave") return { MATERIAL_TYPE_STONE, MATERIAL_TYPE_DIRT, MATERIAL_TYPE_CEMENT };
+    return { MATERIAL_TYPE_WOOD, MATERIAL_TYPE_METAL, MATERIAL_TYPE_DIRT, MATERIAL_TYPE_STONE, MATERIAL_TYPE_CEMENT };
+}
+
+static inline int materialRank(int material, const std::vector<int>& preferred)
+{
+    for (int i = 0; i < static_cast<int>(preferred.size()); i++) {
+        if (preferred[i] == material) return i;
+    }
+    return 100;
+}
+
+static inline int findWallPidForCategory(const std::string& category)
+{
+    std::vector<int> preferred = preferredMaterials(category);
+    int bestPid = -1;
+    int bestRank = 999;
     int maxId = proto_max_id(OBJ_TYPE_WALL);
     for (int id = 1; id <= maxId; id++) {
         int pid = makePid(OBJ_TYPE_WALL, id);
         Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) == 0 && proto != nullptr) {
-            return pid;
+        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) continue;
+        int rank = materialRank(proto->wall.material, preferred);
+        if (rank < bestRank) {
+            bestRank = rank;
+            bestPid = pid;
+            if (rank == 0) break;
         }
     }
-    return -1;
+    return bestPid;
 }
 
-static inline int findFirstDoorPid()
+static inline int findDoorPidForCategory(const std::string& category)
 {
+    std::vector<int> preferred = preferredMaterials(category);
+    int bestPid = -1;
+    int bestRank = 999;
     int maxId = proto_max_id(OBJ_TYPE_SCENERY);
     for (int id = 1; id <= maxId; id++) {
         int pid = makePid(OBJ_TYPE_SCENERY, id);
         Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
-            continue;
-        }
-        if (proto->scenery.type == SCENERY_TYPE_DOOR) {
-            return pid;
+        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) continue;
+        if (proto->scenery.type != SCENERY_TYPE_DOOR) continue;
+        int rank = materialRank(proto->scenery.field_2C, preferred);
+        if (rank < bestRank) {
+            bestRank = rank;
+            bestPid = pid;
+            if (rank == 0) break;
         }
     }
-    return -1;
+    return bestPid;
 }
 
-static inline void spawnObject(int pid, int x, int y, int rotation)
+static inline int findContainerPidForCategory(const std::string& category)
 {
-    if (pid == -1) {
-        return;
+    std::vector<int> preferred = preferredMaterials(category);
+    int bestPid = -1;
+    int bestRank = 999;
+    int maxId = proto_max_id(OBJ_TYPE_ITEM);
+    for (int id = 1; id <= maxId; id++) {
+        int pid = makePid(OBJ_TYPE_ITEM, id);
+        Proto* proto = nullptr;
+        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) continue;
+        if (proto->item.type != ITEM_TYPE_CONTAINER) continue;
+        int rank = materialRank(proto->item.material, preferred);
+        if (rank < bestRank) {
+            bestRank = rank;
+            bestPid = pid;
+            if (rank == 0) break;
+        }
     }
+    return bestPid;
+}
+
+static inline bool spawnObject(int pid, int x, int y, int rotation)
+{
+    if (pid == -1) return false;
 
     Object* object = nullptr;
-    if (objectCreateWithPid(&object, pid) != 0 || object == nullptr) {
-        return;
-    }
+    if (objectCreateWithPid(&object, pid) != 0 || object == nullptr) return false;
 
-    // Generated runtime geometry is reconstructed from the F3O every time the
-    // map is entered. Do not serialize it into SAV files or it would duplicate.
+    // F3O geometry is deterministic and reconstructed on map entry. Keeping it
+    // out of save files prevents duplicate generated objects after reloading.
     object->flags |= OBJECT_NO_SAVE;
 
     int tile = squareToHexTile(x, y);
     if (objectSetLocation(object, tile, 0, nullptr) != 0) {
         objectDestroy(object, nullptr);
-        return;
+        return false;
     }
     objectSetRotation(object, rotation, nullptr);
+    return true;
 }
 
 static inline void loadLayoutForCurrentMap()
@@ -120,13 +167,8 @@ static inline void loadLayoutForCurrentMap()
     strncpy(base, gMapHeader.name, sizeof(base) - 1);
     base[sizeof(base) - 1] = '\0';
     char* dot = strchr(base, '.');
-    if (dot != nullptr) {
-        *dot = '\0';
-    }
-
-    if (strncmp(base, "F3M", 3) != 0) {
-        return;
-    }
+    if (dot != nullptr) *dot = '\0';
+    if (strncmp(base, "F3M", 3) != 0) return;
 
     char path[64];
     snprintf(path, sizeof(path), "MAPS\\%s.F3O", base);
@@ -136,17 +178,25 @@ static inline void loadLayoutForCurrentMap()
         return;
     }
 
+    std::string category = "wasteland";
     std::vector<WallRun> walls;
     std::vector<DoorPlacement> doors;
+    std::vector<AnchorPlacement> anchors;
     std::set<int> doorSquares;
 
     char line[512];
     while (fileReadString(line, sizeof(line), stream) != nullptr) {
         char sid[96];
         char side[32];
+        char word[96];
         int x;
         int y;
         int length;
+
+        if (sscanf(line, "CATEGORY %95s", word) == 1) {
+            category = word;
+            continue;
+        }
 
         if (sscanf(line, "WALL_RUN %95s %31s %d %d %d", sid, side, &x, &y, &length) == 5) {
             WallRun run;
@@ -166,62 +216,64 @@ static inline void loadLayoutForCurrentMap()
             door.rotation = sideRotation(side);
             doors.push_back(door);
             doorSquares.insert(y * SQUARE_GRID_WIDTH + x);
+            continue;
+        }
+
+        if (sscanf(line, "ANCHOR %95s %95s %d %d", sid, word, &x, &y) == 4) {
+            AnchorPlacement anchor;
+            anchor.x = x;
+            anchor.y = y;
+            anchor.role = word;
+            anchors.push_back(anchor);
         }
     }
     fileClose(stream);
 
-    int wallPid = findFirstWallPid();
-    int doorPid = findFirstDoorPid();
+    int wallPid = findWallPidForCategory(category);
+    int doorPid = findDoorPidForCategory(category);
+    int containerPid = findContainerPidForCategory(category);
     int spawnedWalls = 0;
     int spawnedDoors = 0;
-
-    if (wallPid == -1) {
-        debugPrint("\nFO3 runtime: no wall prototype available");
-    }
-    if (doorPid == -1) {
-        debugPrint("\nFO3 runtime: no door prototype available");
-    }
+    int spawnedContainers = 0;
 
     for (const WallRun& run : walls) {
         for (int i = 0; i < run.length; i++) {
             int x = run.x + (run.horizontal ? i : 0);
             int y = run.y + (run.horizontal ? 0 : i);
-            if (x < 0 || x >= SQUARE_GRID_WIDTH || y < 0 || y >= SQUARE_GRID_HEIGHT) {
-                continue;
-            }
-            if (doorSquares.count(y * SQUARE_GRID_WIDTH + x) != 0) {
-                continue;
-            }
-            if (wallPid != -1) {
-                spawnObject(wallPid, x, y, run.rotation);
-                spawnedWalls++;
-            }
+            if (x < 0 || x >= SQUARE_GRID_WIDTH || y < 0 || y >= SQUARE_GRID_HEIGHT) continue;
+            if (doorSquares.count(y * SQUARE_GRID_WIDTH + x) != 0) continue;
+            if (spawnObject(wallPid, x, y, run.rotation)) spawnedWalls++;
         }
     }
 
     for (const DoorPlacement& door : doors) {
-        if (doorPid != -1) {
-            spawnObject(doorPid, door.x, door.y, door.rotation);
-            spawnedDoors++;
+        if (spawnObject(doorPid, door.x, door.y, door.rotation)) spawnedDoors++;
+    }
+
+    for (const AnchorPlacement& anchor : anchors) {
+        if (anchor.role == "loot" && spawnObject(containerPid, anchor.x, anchor.y, ROTATION_NE)) {
+            spawnedContainers++;
         }
     }
 
-    debugPrint("\nFO3 runtime: %s spawned %d walls, %d doors", base, spawnedWalls, spawnedDoors);
+    debugPrint("\nFO3 runtime: %s category=%s walls=%d doors=%d containers=%d wallPid=%08X doorPid=%08X containerPid=%08X",
+        base,
+        category.c_str(),
+        spawnedWalls,
+        spawnedDoors,
+        spawnedContainers,
+        wallPid,
+        doorPid,
+        containerPid);
 }
 
 static inline void tick()
 {
     static std::string lastMap;
-
     std::string current = gMapHeader.name;
-    if (current == lastMap) {
-        return;
-    }
-
+    if (current == lastMap) return;
     lastMap = current;
-    if (!current.empty()) {
-        loadLayoutForCurrentMap();
-    }
+    if (!current.empty()) loadLayoutForCurrentMap();
 }
 
 } // namespace fo3rt
