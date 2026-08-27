@@ -47,6 +47,8 @@ struct LocalCoopRuntimeSlot {
     bool firstAidWasDown = false;
     bool doctorWasDown = false;
     bool pipboyWasDown = false;
+    bool inventoryWasDown = false;
+    bool startWasDown = false;
     bool skilldexWasDown = false;
     bool postgameSwitchWasDown = false;
     bool queuedAttackPending = false;
@@ -55,6 +57,7 @@ struct LocalCoopRuntimeSlot {
     Object* aimTarget = nullptr;
 };
 
+// COOP_FINAL_HOTBINDS_V1
 inline std::array<LocalCoopRuntimeSlot, kLocalCoopMaxPlayers> gLocalCoopRuntimeSlots;
 inline bool gLocalCoopRealtimeCombatActive = false;
 inline bool gLocalCoopRuntimeTickerInstalled = false;
@@ -63,6 +66,102 @@ inline bool gLocalCoopLegacyYieldQueued = false;
 inline Uint32 gLocalCoopNextLegacyYieldTick = 0;
 inline Uint32 gLocalCoopNextCameraStepTick = 0;
 inline int gLocalCoopCameraTargetTile = -1;
+
+// COOP_FOUR_PLAYER_HUD_V1
+inline int gLocalCoopHudWindow = -1;
+inline Uint32 gLocalCoopNextHudRefreshTick = 0;
+
+inline void localCoopDestroyHud()
+{
+    if (gLocalCoopHudWindow != -1) {
+        windowDestroy(gLocalCoopHudWindow);
+        gLocalCoopHudWindow = -1;
+    }
+}
+
+inline void localCoopEnsureHud()
+{
+    int width = screenGetWidth();
+    int y = screenGetHeight() - INTERFACE_BAR_HEIGHT;
+    if (width <= 0 || y < 0) {
+        return;
+    }
+
+    if (gLocalCoopHudWindow == -1) {
+        gLocalCoopHudWindow = windowCreate(0, y, width, INTERFACE_BAR_HEIGHT, _colorTable[0], WINDOW_MOVE_ON_TOP);
+        if (gLocalCoopHudWindow == -1) {
+            return;
+        }
+        if (gInterfaceBarWindow != -1) {
+            interfaceBarHide();
+        }
+    }
+}
+
+inline void localCoopDrawHud(Uint32 now)
+{
+    if (!localCoopTickReached(now, gLocalCoopNextHudRefreshTick)) {
+        return;
+    }
+    gLocalCoopNextHudRefreshTick = now + 100;
+
+    localCoopEnsureHud();
+    if (gLocalCoopHudWindow == -1) {
+        return;
+    }
+
+    int width = screenGetWidth();
+    int panelWidth = std::max(1, width / kLocalCoopMaxPlayers);
+    windowFill(gLocalCoopHudWindow, 0, 0, width, INTERFACE_BAR_HEIGHT, _colorTable[0]);
+
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        int x = slot * panelWidth;
+        int textX = x + 10;
+        int textWidth = std::max(40, panelWidth - 20);
+
+        if (slot > 0) {
+            windowDrawLine(gLocalCoopHudWindow, x, 5, x, INTERFACE_BAR_HEIGHT - 6, _colorTable[992]);
+        }
+
+        char header[64];
+        snprintf(header, sizeof(header), "P%d  %s", slot + 1,
+            player.connected ? "CONNECTED" : (player.slotLocked ? "RESERVED" : "EMPTY"));
+        windowDrawText(gLocalCoopHudWindow, header, textWidth, textX, 8, _colorTable[992]);
+
+        Object* actor = player.actor;
+        if (actor == nullptr || !player.slotLocked) {
+            windowDrawText(gLocalCoopHudWindow, "NO CHARACTER", textWidth, textX, 32, _colorTable[992]);
+            continue;
+        }
+
+        int hp = actor->data.critter.hp;
+        int maxHp = std::max(1, critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS));
+        int apHundredths = gLocalCoopRuntimeSlots[slot].actionPointsHundredths;
+        if (apHundredths < 0) {
+            apHundredths = critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS) * 100;
+        }
+        char stats[96];
+        snprintf(stats, sizeof(stats), "HP %d/%d   AP %.1f", hp, maxHp, apHundredths / 100.0f);
+        windowDrawText(gLocalCoopHudWindow, stats, textWidth, textX, 31, _colorTable[992]);
+
+        Object* item = localCoopGetActiveItem(player);
+        const char* itemName = item != nullptr ? protoGetName(item->pid) : nullptr;
+        if (itemName == nullptr || *itemName == '\0') {
+            itemName = "UNARMED";
+        }
+        const char* hand = localCoopGetActiveHand(player) == HAND_LEFT ? "L" : "R";
+        char equip[160];
+        snprintf(equip, sizeof(equip), "[%s HAND] %s", hand, itemName);
+        windowDrawText(gLocalCoopHudWindow, equip, textWidth, textX, 54, _colorTable[992]);
+
+        if (player.archetype >= 0 && player.archetype < kLocalCoopArchetypeCount) {
+            windowDrawText(gLocalCoopHudWindow, kLocalCoopArchetypeNames[player.archetype], textWidth, textX, 76, _colorTable[992]);
+        }
+    }
+
+    windowRefresh(gLocalCoopHudWindow);
+}
 
 inline bool localCoopTickReached(Uint32 now, Uint32 target)
 {
@@ -564,7 +663,9 @@ inline void localCoopProcessModalMenuInput()
             && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
         bool skilldexDown = player.controller != nullptr
             && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0;
-        bool pipboyDown = backDown && !startDown;
+        bool pipboyDown = player.controller != nullptr
+            && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+        bool inventoryDown = backDown;
         bool canOpen = !modalActive
             && player.connected
             && player.humanOwned
@@ -576,16 +677,28 @@ inline void localCoopProcessModalMenuInput()
             gLocalCoopModalControllerSlot = slot;
             enqueueInputEvent(KEY_LOWERCASE_P);
             modalActive = true;
-            debugPrint("[PHOBOI INPUT] slot=%d source=controller button=back\n", slot);
+            debugPrint("[PHOBOI INPUT] slot=%d source=controller button=dpad-left\n", slot);
+        } else if (canOpen && inventoryDown && !runtime.inventoryWasDown) {
+            gLocalCoopModalControllerSlot = slot;
+            enqueueInputEvent(KEY_LOWERCASE_I);
+            modalActive = true;
+            debugPrint("[COOP INVENTORY] slot=%d source=controller button=back\n", slot);
         } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {
             gLocalCoopModalControllerSlot = slot;
             gLocalCoopSkilldexInvokerSlot = slot;
             enqueueInputEvent(KEY_LOWERCASE_S);
             modalActive = true;
             debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\n", slot);
+        } else if (canOpen && startDown && !runtime.startWasDown) {
+            gLocalCoopModalControllerSlot = slot;
+            enqueueInputEvent(KEY_ESCAPE);
+            modalActive = true;
+            debugPrint("[COOP MENU] slot=%d source=controller button=start\n", slot);
         }
 
         runtime.pipboyWasDown = pipboyDown;
+        runtime.inventoryWasDown = inventoryDown;
+        runtime.startWasDown = startDown;
         runtime.skilldexWasDown = skilldexDown;
     }
 }
@@ -614,7 +727,7 @@ inline bool localCoopUseHealingSkill(LocalCoopPlayer& player, int skill)
         return false;
     }
 
-    Object* target = localCoopHealingTarget(player);
+    Object* target = player.actor;
     if (target == nullptr) {
         return false;
     }
@@ -660,8 +773,7 @@ inline void localCoopProcessCombatInput()
         bool secondaryDown = false;
         bool reloadDown = false;
         bool swapDown = false;
-        bool firstAidDown = false;
-        bool doctorDown = false;
+        bool medicalDown = false;
 
         if (hasController) {
             int rightTrigger = SDL_GameControllerGetAxis(player.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
@@ -669,8 +781,7 @@ inline void localCoopProcessCombatInput()
             secondaryDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
             reloadDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
             swapDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
-            firstAidDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
-            doctorDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
+            medicalDown = SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
         }
 
         if (player.slot == 0) {
@@ -690,16 +801,11 @@ inline void localCoopProcessCombatInput()
         // Phone packets can briefly cross neutral while a touch remains held,
         // producing a second rising edge. Share a short cooldown between both
         // healing skills so modal Fallout skill work cannot be re-entered.
-        if (firstAidDown
-            && !runtime.firstAidWasDown
-            && localCoopTickReached(now, runtime.nextHealingSkillTick)) {
-            runtime.nextHealingSkillTick = now + 1000;
-            localCoopUseHealingSkill(player, SKILL_FIRST_AID);
-        }
-        if (doctorDown
+        if (medicalDown
             && !runtime.doctorWasDown
             && localCoopTickReached(now, runtime.nextHealingSkillTick)) {
             runtime.nextHealingSkillTick = now + 1000;
+            localCoopUseHealingSkill(player, SKILL_FIRST_AID);
             localCoopUseHealingSkill(player, SKILL_DOCTOR);
         }
 
@@ -727,8 +833,8 @@ inline void localCoopProcessCombatInput()
         runtime.reloadWasDown = reloadDown;
         runtime.secondaryWasDown = secondaryDown;
         runtime.swapWasDown = swapDown;
-        runtime.firstAidWasDown = firstAidDown;
-        runtime.doctorWasDown = doctorDown;
+        runtime.firstAidWasDown = false;
+        runtime.doctorWasDown = medicalDown;
     }
 }
 
@@ -785,6 +891,7 @@ inline void localCoopUpdateSharedCamera()
     gLocalCoopCameraTargetTile = targetTile;
 
     Uint32 now = SDL_GetTicks();
+    localCoopDrawHud(now);
     if (!localCoopTickReached(now, gLocalCoopNextCameraStepTick)) {
         return;
     }

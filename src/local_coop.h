@@ -21,6 +21,7 @@
 #include "local_coop_danger.h"
 #include "object.h"
 #include "party_member.h"
+#include "platform_compat.h"
 #include "proto.h"
 #include "proto_types.h"
 #include "stat.h"
@@ -35,7 +36,11 @@ void scriptsRequestWorldMap();
 
 inline constexpr int kLocalCoopMaxPlayers = 4;
 inline constexpr int kLocalCoopControllerDeadzone = 9000;
-inline constexpr int kLocalCoopCameraTetherTiles = 18;
+// COOP_WIDE_LEASH_V1
+// Players can range much farther apart before movement is constrained. Hard
+// teleporting is reserved for true recovery, not ordinary exploration.
+inline constexpr int kLocalCoopCameraTetherTiles = 60;
+inline constexpr int kLocalCoopEmergencyWarpTiles = 120;
 
 enum class LocalCoopUiMode {
     World,
@@ -452,6 +457,82 @@ inline constexpr int kLocalCoopArchetypeStats[kLocalCoopArchetypeCount][PRIMARY_
     { 4, 7, 4, 4, 9, 7, 5 },
 };
 
+// COOP_18_KITS_REPAIR_V1
+struct LocalCoopStarterKitEntry {
+    const char* itemName;
+    int quantity;
+};
+
+inline constexpr int kLocalCoopStarterKitItems = 4;
+inline constexpr LocalCoopStarterKitEntry kLocalCoopStarterKits[kLocalCoopArchetypeCount][kLocalCoopStarterKitItems] = {
+    { { "Sledgehammer", 1 }, { "Leather Jacket", 1 }, { "Stimpak", 2 }, { nullptr, 0 } },
+    { { "10mm Pistol", 1 }, { "10mm JHP", 2 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "Hunting Rifle", 1 }, { ".223 FMJ", 2 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "10mm SMG", 1 }, { "10mm JHP", 2 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "Flamer", 1 }, { "Flamethrower Fuel", 1 }, { "Leather Jacket", 1 }, { nullptr, 0 } },
+    { { "Spear", 1 }, { "Leather Jacket", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "Brass Knuckles", 1 }, { "Leather Jacket", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "10mm Pistol", 1 }, { "10mm JHP", 1 }, { "Rope", 1 }, { "Stimpak", 1 } },
+    { { "Spear", 1 }, { "Rope", 1 }, { "Antidote", 1 }, { "Stimpak", 1 } },
+    { { "10mm Pistol", 1 }, { "Stimpak", 4 }, { "First Aid Kit", 1 }, { "Doctor's Bag", 1 } },
+    { { "10mm Pistol", 1 }, { "Mentats", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "10mm Pistol", 1 }, { "Tool", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "10mm Pistol", 1 }, { "Mentats", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "Knife", 1 }, { "Lockpicks", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "10mm Pistol", 1 }, { "Dynamite", 1 }, { "Stimpak", 1 }, { nullptr, 0 } },
+    { { "Hunting Rifle", 1 }, { ".223 FMJ", 1 }, { "Rope", 1 }, { "Stimpak", 1 } },
+    { { "10mm Pistol", 1 }, { "10mm JHP", 1 }, { "Stimpak", 2 }, { nullptr, 0 } },
+    { { "Laser Pistol", 1 }, { "Small Energy Cell", 2 }, { "Stimpak", 1 }, { nullptr, 0 } },
+};
+
+inline int localCoopFindStarterItemPid(const char* wantedName)
+{
+    if (wantedName == nullptr || *wantedName == '\0') {
+        return -1;
+    }
+    int maxItemId = proto_max_id(OBJ_TYPE_ITEM);
+    for (int id = 0; id <= maxItemId; id++) {
+        int pid = (OBJ_TYPE_ITEM << 24) | id;
+        Proto* proto = nullptr;
+        if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
+            continue;
+        }
+        const char* name = protoGetName(pid);
+        if (name != nullptr && compat_stricmp(name, wantedName) == 0) {
+            return pid;
+        }
+    }
+    return -1;
+}
+
+inline void localCoopGrantStarterKit(int slot, int archetype)
+{
+    if (slot <= 0 || slot >= kLocalCoopMaxPlayers || gDude == nullptr) {
+        return;
+    }
+    archetype = std::max(0, std::min(archetype, kLocalCoopArchetypeCount - 1));
+    for (int index = 0; index < kLocalCoopStarterKitItems; index++) {
+        const LocalCoopStarterKitEntry& entry = kLocalCoopStarterKits[archetype][index];
+        if (entry.itemName == nullptr || entry.quantity <= 0) {
+            continue;
+        }
+        int pid = localCoopFindStarterItemPid(entry.itemName);
+        if (pid == -1) {
+            debugPrint("[COOP KIT] slot=%d archetype=%s item-missing=%s\n", slot, kLocalCoopArchetypeNames[archetype], entry.itemName);
+            continue;
+        }
+        Object* item = nullptr;
+        if (objectCreateWithPid(&item, pid) != 0 || item == nullptr) {
+            continue;
+        }
+        if (itemAdd(gDude, item, entry.quantity) != 0) {
+            objectDestroy(item, nullptr);
+            continue;
+        }
+        debugPrint("[COOP KIT] slot=%d archetype=%s added=%s x%d\n", slot, kLocalCoopArchetypeNames[archetype], entry.itemName, entry.quantity);
+    }
+}
+
 inline bool localCoopApplyPlayerOneArchetype(int archetype, int gender)
 {
     if (gDude == nullptr) {
@@ -517,6 +598,8 @@ inline bool localCoopCreatePlayerActor(int slot)
 
     LocalCoopPlayer& player = gLocalCoopPlayers[slot];
     int archetype = std::max(0, std::min(player.archetype, kLocalCoopArchetypeCount - 1));
+    LocalCoopCharacterSlotState& saved = localCoopCharacterStateGet().slots[slot];
+    bool grantStarterKit = saved.locked == 0;
     int pid = protoConfigureLocalCoopPlayer(
         slot,
         kLocalCoopArchetypeStats[archetype],
@@ -550,8 +633,6 @@ inline bool localCoopCreatePlayerActor(int slot)
     player.slotLocked = true;
     player.archetype = archetype;
 
-    LocalCoopCharacterSlotState& saved =
-        localCoopCharacterStateGet().slots[slot];
     saved.locked = 1;
     saved.archetype = static_cast<uint8_t>(archetype);
     saved.gender = static_cast<uint8_t>(player.gender);
@@ -560,6 +641,10 @@ inline bool localCoopCreatePlayerActor(int slot)
         sizeof(saved.controllerGuid),
         "%s",
         player.controllerGuid);
+
+    if (grantStarterKit) {
+        localCoopGrantStarterKit(slot, archetype);
+    }
 
     debugPrint(
         "[COOP JOIN] slot=%d locked archetype=%s pid=%d tile=%d\n",
@@ -634,7 +719,7 @@ inline void localCoopKeepReservedActorsWithParty()
 
         bool needsWarp = !tileIsValid(actor->tile)
             || actor->elevation != gDude->elevation
-            || tileDistanceBetween(actor->tile, gDude->tile) > kLocalCoopCameraTetherTiles;
+            || tileDistanceBetween(actor->tile, gDude->tile) > kLocalCoopEmergencyWarpTiles;
         if (needsWarp) {
             int spawnTile = localCoopFindSpawnTile(gDude, 3);
             if (spawnTile != -1) {
@@ -679,6 +764,7 @@ inline void localCoopDrawJoinMenu(LocalCoopPlayer& player)
         sizeof(choice),
         "<  %s  >",
         kLocalCoopArchetypeNames[player.archetype]);
+    // COOP_18_ARCHETYPES_MENU_V1
     windowDrawText(player.joinWindow, choice, 380, 20, 82, _colorTable[992]);
     windowDrawText(player.joinWindow, kLocalCoopArchetypeRoles[player.archetype], 380, 20, 106, _colorTable[992]);
 
