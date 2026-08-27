@@ -136,6 +136,15 @@ inline bool localCoopSystemMenuOpen()
 
     gLocalCoopSystemMenuActive = true;
     gLocalCoopSystemMenuSelection = 0;
+
+    // COOP_SYSTEM_MENU_OPEN_LATCH_V1
+    // Start is normally still held during the tick after it opens this window.
+    // Seed the latch from the live device so that same physical press cannot be
+    // interpreted again as an immediate close. A release is required first.
+    LocalCoopPlayer& p1 = gLocalCoopPlayers[0];
+    gLocalCoopSystemMenuStartWasDown = p1.controller != nullptr
+        && SDL_GameControllerGetButton(p1.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+
     localCoopSystemMenuDraw();
     return true;
 }
