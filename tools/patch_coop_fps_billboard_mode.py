@@ -63,3 +63,11 @@ if 'COOP_NATIVE_BILLBOARD_FPS_MENU_V1' not in s:
     menu.write_text(s, encoding='utf-8')
 
 print('wired native billboard FPS camera mode')
+
+# The raycaster is intentionally a second-stage patch: the base FPS patch above
+# remains idempotent, then this adds collision columns, z-occluded billboards and
+# prepares the exact Freedoom 0.13.0 WAD pack for the installer.
+raycast_patch = Path('tools/patch_fps_raycast_freedoom.py')
+if not raycast_patch.exists():
+    raise SystemExit('raycast/Freedoom patch helper missing')
+exec(compile(raycast_patch.read_text(encoding='utf-8'), str(raycast_patch), 'exec'))
