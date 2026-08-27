@@ -65,7 +65,12 @@ def main():
         subway_graph = subway / 'subway_graph.json'
 
     runtime = out / 'runtime'
-    runtime_cmd = [RUNTIME, '--structures', structures / 'structure_plans.json', '--output', runtime]
+    runtime_cmd = [
+        RUNTIME,
+        '--structures', structures / 'structure_plans.json',
+        '--output', runtime,
+        '--maps-dir', maps / 'MAPS',
+    ]
     if subway_graph:
         runtime_cmd += ['--subway', subway_graph]
     run(runtime_cmd)
@@ -79,7 +84,7 @@ def main():
         run([TACTICS, a.tactics, '--output', tactics_manifest])
 
     summary = {
-        'format': 'PhoBoi.Fallout3AutoBuild/3',
+        'format': 'PhoBoi.Fallout3AutoBuild/4',
         'profile': profile.get('id', 'unknown'),
         'seed': a.seed,
         'inputs': {
@@ -95,13 +100,14 @@ def main():
             'structure_plans': str(structures / 'structure_plans.json'),
             'subway_graph': str(subway_graph) if subway_graph else None,
             'runtime_layouts': str(runtime / 'runtime_index.json'),
+            'runtime_sidecars': str(maps / 'MAPS'),
             'tactics_manifest': str(tactics_manifest) if tactics_manifest else None,
         },
-        'engine_next_stage': 'Resolve F3O symbolic walls/doors/anchors to concrete Fallout PIDs/FIDs and instantiate/save them as native MAP objects.'
+        'engine_runtime': 'F3O sidecars are loaded automatically by fallout2-rt-test for generated F3M maps. Walls and doors are instantiated from installed classic prototypes and marked no-save to prevent duplication.',
+        'engine_next_stage': 'Resolve loot/NPC anchors, generated exit grids, and subway map transitions; improve style-aware prototype selection instead of first-compatible prototype.'
     }
     (out / 'AUTO_BUILD_COMPLETE.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
 
-    # Fail the command if the generated set is internally incomplete.
     run([VALIDATE, '--root', out])
 
     print('\n[FO3 AUTO] COMPLETE:', out)
