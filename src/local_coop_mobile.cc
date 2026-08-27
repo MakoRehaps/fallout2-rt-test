@@ -219,18 +219,18 @@ body{min-height:100dvh}
 h1{margin:0 0 14px;font-size:25px}.row{display:flex;gap:8px;margin-top:10px}input,select,button{font:inherit;color:#d7ffd7;background:#102218;border:1px solid #4dbd68;padding:8px}
 input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;margin-top:10px;color:#ffd56a}
 #pad{display:none;position:fixed;inset:0;background:#000;overflow:hidden}
-#video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;image-rendering:auto;z-index:1}
-.top{position:absolute;left:22%;right:22%;top:max(3px,env(safe-area-inset-top));height:22px;text-align:center;font-size:clamp(8px,1.6vw,12px);line-height:22px;z-index:9;color:#eaffea;background:#07100b99;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
-.control-label{display:block;font-size:clamp(5px,1vw,8px);line-height:.95;color:#d6ffdc;font-weight:normal;margin-top:0;white-space:normal;pointer-events:none}
-.stick-label{position:absolute;left:50%;top:7%;transform:translateX(-50%);z-index:2;font-size:clamp(6px,1vw,8px);line-height:1;text-align:center;color:#d7ffd7;background:#07100b88;padding:2px 4px;border-radius:5px;pointer-events:none}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;image-rendering:pixelated;z-index:1;transform-origin:50% 50%;transition:transform .12s ease}\n/* PHOBOI_PHONE_READABILITY_V1 */\n#pad.view-zoom1 #video{transform:scale(1.28)}#pad.view-zoom2 #video{transform:scale(1.62)}
+.top{position:absolute;left:20%;right:20%;top:max(3px,env(safe-area-inset-top));height:28px;text-align:center;font-size:clamp(11px,2vw,16px);line-height:28px;z-index:9;color:#eaffea;background:#07100b99;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.control-label{display:block;font-size:clamp(8px,1.45vw,11px);line-height:1.02;color:#d6ffdc;font-weight:normal;margin-top:0;white-space:normal;pointer-events:none}
+.stick-label{position:absolute;left:50%;top:7%;transform:translateX(-50%);z-index:2;font-size:clamp(9px,1.4vw,12px);line-height:1;text-align:center;color:#d7ffd7;background:#07100b88;padding:2px 4px;border-radius:5px;pointer-events:none}
 .stick{position:absolute;width:clamp(104px,25vh,160px);height:clamp(104px,25vh,160px);border:2px solid #79ff91aa;border-radius:50%;background:#07100b44;bottom:max(8px,env(safe-area-inset-bottom));z-index:7;opacity:.78}
 #ls{left:max(8px,env(safe-area-inset-left))}#rs{right:calc(max(8px,env(safe-area-inset-right)) + clamp(130px,28vh,188px))}.nub{position:absolute;width:36%;height:36%;left:32%;top:32%;border-radius:50%;background:#68dd82bb}
-.btn{position:absolute;border-radius:50%;width:clamp(44px,10vh,64px);height:clamp(44px,10vh,64px);padding:1px;background:#102d19bb;border-color:#79ff91aa;z-index:8;opacity:.86}
+.btn{position:absolute;border-radius:50%;width:clamp(52px,11vh,72px);height:clamp(52px,11vh,72px);padding:1px;background:#102d19bb;border-color:#79ff91aa;z-index:8;opacity:.86}
 #ba{right:max(8px,env(safe-area-inset-right));bottom:clamp(52px,12vh,78px)}
 #bb{right:clamp(56px,13vh,84px);bottom:max(6px,env(safe-area-inset-bottom))}
 #bx{right:clamp(56px,13vh,84px);bottom:clamp(104px,24vh,156px)}
 #by{right:clamp(108px,25vh,164px);bottom:clamp(52px,12vh,78px)}
-.small{position:absolute;width:clamp(46px,8vw,68px);height:clamp(30px,6vh,42px);border-radius:8px;padding:1px;background:#102d19bb;border-color:#79ff91aa;z-index:8;opacity:.86}
+.small{position:absolute;width:clamp(56px,9vw,82px);height:clamp(36px,7vh,48px);font-size:clamp(11px,1.7vw,15px);border-radius:8px;padding:1px;background:#102d19bb;border-color:#79ff91aa;z-index:8;opacity:.86}
 #lb{left:max(6px,env(safe-area-inset-left));top:max(4px,env(safe-area-inset-top))}#lt{left:clamp(58px,9vw,86px);top:max(4px,env(safe-area-inset-top))}#rb{right:clamp(58px,9vw,86px);top:max(4px,env(safe-area-inset-top))}#rt{right:max(6px,env(safe-area-inset-right));top:max(4px,env(safe-area-inset-top))}
 #back{left:calc(50% - 90px);top:max(30px,calc(env(safe-area-inset-top) + 28px))}#start{right:calc(50% - 90px);top:max(30px,calc(env(safe-area-inset-top) + 28px))}#skill{left:calc(50% - 32px);top:max(66px,calc(env(safe-area-inset-top) + 66px));width:64px}
 .dpad{position:absolute;left:calc(max(8px,env(safe-area-inset-left)) + clamp(112px,27vh,172px));bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,34px);grid-template-rows:repeat(3,34px);gap:1px;z-index:8;opacity:.82}
@@ -250,6 +250,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 <button class="small" id="lb">LB<span class="control-label">RUN</span></button><button class="small" id="lt">LT<span class="control-label">HEX AIM</span></button>
 <button class="small" id="rb">RB<span class="control-label">ALT ATTACK</span></button><button class="small" id="rt">RT<span class="control-label">ATTACK</span></button>
 <button class="small" id="back">PHOBOI<span class="control-label">PHONE / PIPBOY</span></button><button class="small" id="start">START<span class="control-label">MENU</span></button><button class="small" id="skill">RS CLICK<span class="control-label">SKILLDEX</span></button>
+<button class="small" id="view" style="left:calc(50% - 41px);top:max(112px,calc(env(safe-area-inset-top) + 108px));width:82px">VIEW<span class="control-label">FIT / 1.3X / 1.6X</span></button>
 <div class="stick" id="ls"><div class="stick-label">LEFT STICK<br>MOVE</div><div class="nub"></div></div><div class="stick" id="rs"><div class="stick-label">RIGHT STICK<br>AIM / CURSOR</div><div class="nub"></div></div>
 <button class="btn" id="ba">A<span class="control-label">USE / TALK / PICKUP</span></button><button class="btn" id="bb">B<span class="control-label">CANCEL / BACK</span></button><button class="btn" id="bx">X<span class="control-label">RELOAD</span></button><button class="btn" id="by">Y<span class="control-label">SWAP HAND</span></button>
 <div class="dpad"><button class="du" id="du">▲<span class="control-label">MENU UP</span></button><button class="dl" id="dl">◀<span class="control-label">FIRST AID</span></button><button class="dr" id="dr">▶<span class="control-label">DOCTOR</span></button><button class="dd" id="dd">▼<span class="control-label">MENU DOWN</span></button></div>
@@ -258,6 +259,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false,seq=0,rtt=0,jitter=0,lastRtt=0,stream=null;
 const $=id=>document.getElementById(id);
 $('pin').value=new URLSearchParams(location.search).get('pin')||'';
+let phoneViewZoom=0;$('view').addEventListener('click',ev=>{ev.preventDefault();phoneViewZoom=(phoneViewZoom+1)%3;$('pad').classList.remove('view-zoom1','view-zoom2');if(phoneViewZoom===1)$('pad').classList.add('view-zoom1');if(phoneViewZoom===2)$('pad').classList.add('view-zoom2');updateStatus()});
 function bindButton(id,bit,axis){
  const e=$(id); const down=ev=>{ev.preventDefault();e.setPointerCapture?.(ev.pointerId);if(axis!==undefined)axes[axis]=32767;else buttons|=(1<<bit);send(true)};
  const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit);send(true)};
@@ -287,7 +289,7 @@ let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttp
 // PHOBOI_LOW_LATENCY_CONTROLS_V1
 function updateStatus(){
  const link=rtt>0?` ${rtt}ms ±${jitter}`:'';
- $('top').textContent=`PLAYER ${slot+1} | CTRL ${controlMode} | VIDEO ${videoMode}${link}`;
+ $('top').textContent=`P${slot+1} | CTRL ${controlMode} | VIDEO ${videoMode} | VIEW ${phoneViewZoom===0?'FIT':phoneViewZoom===1?'1.3X':'1.6X'}${link}`;
 }
 function retryDelay(attempt){return Math.min(5000,500*Math.pow(1.55,Math.min(attempt,6)))}
 function scheduleControl(){if(slot<0||controlTimer)return;controlTimer=setTimeout(()=>{controlTimer=null;openSocket()},retryDelay(controlAttempt++))}

@@ -22,6 +22,7 @@
 #include "kb.h"
 #include "loadsave.h"
 #include "local_coop_staging_room.h"
+#include "local_coop_group_room.h"
 #include "mainmenu.h"
 #include "map.h"
 #include "mouse.h"
@@ -153,25 +154,29 @@ int falloutMain(int argc, char** argv)
 
                     char* mapNameCopy = compat_strdup(mapName != nullptr ? mapName : _mainMap);
 
-                    // COOP_PREOPENING_STAGING_ROOM_HOOK_V1
-                    // Give the party a quiet preparation map before any opening
-                    // movie/story scene. V13ENT is an original Fallout 1 asset
-                    // already present in the mounted data and works as a small
-                    // contained staging space. Walking out consumes staging,
-                    // plays the normal opening sequence once, then loads the real
-                    // requested campaign start map. Fallout 2 keeps its stock
-                    // Elder/Temple opening path.
-                    bool useCoopStaging = unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1;
-                    if (useCoopStaging) {
-                        localCoopBeginStagingRoom(mapNameCopy);
-                        char stagingMap[] = "V13ENT.MAP";
-                        // COOP_STAGING_EPHEMERAL_SAVE_V1
-                        // Never inherit a prior temporary staging save. The prep
-                        // room is a disposable view of an original Fallout map.
-                        _MapDirEraseFile_("MAPS\\", "V13ENT.SAV");
-                        _main_load_new(stagingMap);
-                        // COOP_PREOPENING_STAGING_SAFE_HOOK_V1
-                        localCoopSanitizeStagingRoom();
+                    // COOP_TILELESS_GROUP_ROOM_START_V1
+                    // Unified co-op always begins in Fallout 1. The grouping
+                    // scene is a pure black UI room: no map, no tiles, no critters
+                    // and no V13ENT reuse. Start joins a controller; after release,
+                    // Start again votes READY. Only after all joined players are
+                    // ready do we enter the real Fallout 1 opening/start flow.
+                    if (unifiedCampaignIsEnabled()) {
+                        unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
+                        gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout1;
+                        gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+
+                        if (!localCoopRunTilelessGroupRoom()) {
+                            free(mapNameCopy);
+                            mainMenuWindowInit();
+                            break;
+                        }
+
+                        // Do NOT play MOVIE_ELDER here. That is Fallout 2's elder
+                        // movie and was the cause of the new-game path looking like
+                        // Fallout 2. Load the actual Fallout 1 campaign start; its
+                        // normal Fallout 1 intro/Overseer scripting remains in
+                        // charge from this point onward.
+                        _main_load_new(mapNameCopy);
                     } else {
                         gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                         _main_load_new(mapNameCopy);
