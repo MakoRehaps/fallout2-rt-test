@@ -17,6 +17,7 @@
 
 namespace fallout {
 
+// COOP_TILELESS_GROUP_ROOM_V1
 // COOP_TILELESS_GROUP_ROOM_V2
 // Pure UI scene shown before the real Fallout opening. It deliberately creates
 // no map, no tiles, no scripts, no critters and no world transitions.
