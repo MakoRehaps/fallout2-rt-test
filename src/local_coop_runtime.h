@@ -29,6 +29,7 @@
 #include "tile.h"
 #include "unified_campaign_carryover.h"
 #include "unified_campaign_transition.h"
+#include "unified_living_world.h"
 
 namespace fallout {
 
@@ -1147,6 +1148,11 @@ inline void localCoopRuntimeTick()
         gLocalCoopRuntimeInsideTick = false;
         return;
     }
+
+    // COOP_UNIFIED_LIVING_WORLD_RUNTIME_V1
+    // Advance the offline faction/economy/territory simulation only while the
+    // gameplay world itself is running. Explicit co-op modal pauses freeze it.
+    unifiedLivingRuntimeTick();
 
     // This should never become the player's normal state anymore. Keep the old
     // escape hatch only as a defensive breaker for an obscure legacy caller;

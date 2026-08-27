@@ -50,6 +50,7 @@
 #include "tile.h"
 #include "window_manager.h"
 #include "unified_world_system.h"
+#include "unified_living_world.h"
 
 namespace fallout {
 
@@ -383,7 +384,10 @@ static void coopDirectEncounterBySelfPlay(Encounter* encounter)
 {
     if (encounter == nullptr || encounter->entriesLength <= 0) return;
 
-    int objectiveRoll = randomBetween(0, 6);
+    // COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1
+    // The same hidden encounter game still decides the tactical setup, but the
+    // current cell's persistent event/war/economy state biases its objective.
+    int objectiveRoll = unifiedLivingEncounterObjectiveBias(randomBetween(0, 6));
     CoopEncounterObjective objective = static_cast<CoopEncounterObjective>(objectiveRoll);
 
     // Two simple agents evaluate pressure, cover, morale and objective progress.
@@ -412,6 +416,10 @@ static void coopDirectEncounterBySelfPlay(Encounter* encounter)
     }
 
     int lead = (sideA + progressA) - (sideB + progressB);
+
+    // Feed the hidden setup result back into the persistent cell so repeated
+    // trouble raises conflict/danger and can create later revenge events.
+    unifiedLivingRecordEncounterSetup(lead);
 
     switch (objective) {
     case CoopEncounterObjective::Ambush:
