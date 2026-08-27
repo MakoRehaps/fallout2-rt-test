@@ -2,8 +2,6 @@
 
 #include <SDL.h>
 
-#include "fo3_runtime_layout.h"
-
 namespace fallout {
 
 FpsLimiter::FpsLimiter(unsigned int fps)
@@ -14,9 +12,6 @@ FpsLimiter::FpsLimiter(unsigned int fps)
 
 void FpsLimiter::mark()
 {
-    // Post-map-load heartbeat for generated Fallout 3 layouts. The loader is
-    // edge-triggered on gMapHeader.name, so normal frames are effectively free.
-    fo3RuntimeLayoutTick();
     _ticks = SDL_GetTicks();
 }
 
