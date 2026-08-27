@@ -366,6 +366,68 @@ enum class CoopEncounterObjective {
     Crossfire,
 };
 
+
+// COOP_STAGED_ENCOUNTER_APPROACH_V1
+// Random-encounter groups are staged apart before the stock combat AI takes over.
+// Off-screen history remains abstract; once the map is visible, normal Fallout
+// pathfinding/combat movement is responsible for closing the distance.
+static int gCoopEncounterStagingGroup = 0;
+static int gCoopEncounterActiveStagingGroup = 0;
+
+static void coopEncounterResetStaging()
+{
+    gCoopEncounterStagingGroup = 0;
+    gCoopEncounterActiveStagingGroup = 0;
+}
+
+static int coopEncounterStagingDirection(int group)
+{
+    // Oppose the first two groups, then distribute additional groups around the
+    // remaining map edges so three/four-sided encounters do not pile together.
+    static const int directions[6] = { 0, 3, 1, 4, 2, 5 };
+    return directions[group % 6];
+}
+
+static int coopEncounterStagingDistance(int group)
+{
+    return 16 + (group % 3) * 3;
+}
+
+static int coopEncounterFindStagingCenter(int group, int fallback)
+{
+    int direction = coopEncounterStagingDirection(group);
+    int wanted = coopEncounterStagingDistance(group);
+    for (int distance = wanted; distance >= 9; distance--) {
+        int candidate = tileGetTileInDirection(gDude->tile, direction, distance);
+        if (candidate >= 0 && wmEvalTileNumForPlacement(candidate)) {
+            return candidate;
+        }
+    }
+    return fallback;
+}
+
+static void coopEncounterQueueVisibleApproach(Object* object, int group)
+{
+    if (object == nullptr || PID_TYPE(object->pid) != OBJ_TYPE_CRITTER) {
+        return;
+    }
+
+    // Walk roughly halfway toward the map/player center. Hostile groups will
+    // continue from there using the ordinary combat AI; peaceful generated
+    // groups still visibly enter/move instead of materializing beside a target.
+    int inward = (coopEncounterStagingDirection(group) + 3) % ROTATION_COUNT;
+    int stride = 5 + (group % 3);
+    int destination = tileGetTileInDirection(object->tile, inward, stride);
+    if (destination < 0 || !wmEvalTileNumForPlacement(destination)) {
+        return;
+    }
+
+    if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED) == 0) {
+        animationRegisterMoveToTile(object, destination, object->elevation, -1, 0);
+        reg_anim_end();
+    }
+}
+
 static const char* coopEncounterObjectiveName(CoopEncounterObjective objective)
 {
     switch (objective) {
@@ -3816,6 +3878,8 @@ int wmSetupRandomEncounter()
 {
     MessageListItem messageListItem;
 
+    coopEncounterResetStaging();
+
     if (wmGenData.encounterMapId == -1) {
         return 0;
     }
@@ -3940,6 +4004,8 @@ static int wmSetupCritterObjs(int encounterIndex, Object** critterPtr, int critt
 
     coopDirectEncounterBySelfPlay(encounter);
 
+    gCoopEncounterActiveStagingGroup = gCoopEncounterStagingGroup++;
+
     if (wmSetupRndNextTileNumInit(encounter) == -1) {
         return -1;
     }
@@ -4017,6 +4083,8 @@ static int wmSetupCritterObjs(int encounterIndex, Object** critterPtr, int critt
             int direction = tileGetRotationTo(tile, gDude->tile);
             objectSetRotation(object, direction, nullptr);
 
+            coopEncounterQueueVisibleApproach(object, gCoopEncounterActiveStagingGroup);
+
             for (int itemIndex = 0; itemIndex < encounterEntry->itemsLength; itemIndex++) {
                 EncounterItem* encounterItem = &(encounterEntry->items[itemIndex]);
 
@@ -4079,8 +4147,9 @@ static int wmSetupRndNextTileNumInit(Encounter* encounter)
 
     switch (encounter->position) {
     case ENCOUNTER_FORMATION_TYPE_SURROUNDING:
-        wmRndCenterTiles[0] = gDude->tile;
-        wmRndTileDirs[0] = randomBetween(0, ROTATION_COUNT - 1);
+        wmRndCenterTiles[0] = coopEncounterFindStagingCenter(
+            gCoopEncounterActiveStagingGroup, gDude->tile);
+        wmRndTileDirs[0] = tileGetRotationTo(wmRndCenterTiles[0], gDude->tile);
 
         wmRndOriginalCenterTile = wmRndCenterTiles[0];
 
@@ -4108,6 +4177,14 @@ static int wmSetupRndNextTileNumInit(Encounter* encounter)
                 wmRndCenterTiles[0] = gDude->tile;
                 wmRndCenterTiles[1] = gDude->tile;
             }
+
+            // Stage each encounter group at a different map-side approach.
+            // Keep authored/random start points as a fallback when an edge tile
+            // is unreachable on a particular wilderness layout.
+            int stagedCenter = coopEncounterFindStagingCenter(
+                gCoopEncounterActiveStagingGroup, wmRndCenterTiles[0]);
+            wmRndCenterTiles[0] = stagedCenter;
+            wmRndCenterTiles[1] = stagedCenter;
 
             wmRndTileDirs[0] = tileGetRotationTo(wmRndCenterTiles[0], gDude->tile);
             wmRndTileDirs[1] = tileGetRotationTo(wmRndCenterTiles[1], gDude->tile);
