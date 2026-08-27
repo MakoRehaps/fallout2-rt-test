@@ -1131,6 +1131,7 @@ inline void localCoopRuntimeTick()
     localCoopUpdateP1InputSource();
     localCoopProcessJoinMenus();
     localCoopSystemMenuTick();
+    localCoopAccessibilityTick();
     localCoopRestoreCharactersFromSave();
     localCoopKeepReservedActorsWithParty();
 

@@ -10,6 +10,7 @@
 #include "kb.h"
 #include "loadsave.h"
 #include "local_coop.h"
+#include "local_coop_accessibility.h"
 #include "mouse.h"
 #include "preferences.h"
 #include "svga.h"
@@ -27,6 +28,7 @@ enum class LocalCoopSystemMenuAction {
     PipBoy,
     Skilldex,
     Character,
+    Accessibility,
     Save,
     Load,
     Options,
@@ -50,10 +52,17 @@ inline const char* localCoopSystemMenuLabel(int index)
         "PIP-BOY / MAP",
         "SKILLDEX",
         "CHARACTER / PERKS",
+        "ACCESSIBILITY HIGHLIGHTS",
         "SAVE GAME",
         "LOAD GAME",
         "OPTIONS",
     };
+    // COOP_ACCESSIBILITY_MENU_V1
+    if (index == static_cast<int>(LocalCoopSystemMenuAction::Accessibility)) {
+        return gLocalCoopAccessibilityHighlightsEnabled
+            ? "ACCESSIBILITY HIGHLIGHTS: ON"
+            : "ACCESSIBILITY HIGHLIGHTS: OFF";
+    }
     return index >= 0 && index < static_cast<int>(LocalCoopSystemMenuAction::Count)
         ? labels[index]
         : "";
@@ -64,7 +73,7 @@ inline void localCoopSystemMenuDraw()
     if (gLocalCoopSystemMenuWindow == -1) return;
 
     constexpr int width = 500;
-    constexpr int height = 390;
+    constexpr int height = 430;
     windowFill(gLocalCoopSystemMenuWindow, 0, 0, width, height, _colorTable[0]);
     windowDrawBorder(gLocalCoopSystemMenuWindow);
     windowDrawText(gLocalCoopSystemMenuWindow,
@@ -124,7 +133,7 @@ inline bool localCoopSystemMenuOpen()
     if (gLocalCoopSystemMenuActive) return true;
 
     constexpr int width = 500;
-    constexpr int height = 390;
+    constexpr int height = 430;
     gLocalCoopSystemMenuWindow = windowCreate(
         (screenGetWidth() - width) / 2,
         (screenGetVisibleHeight() - height) / 2,
@@ -179,6 +188,10 @@ inline void localCoopSystemMenuActivate(int index)
         break;
     case LocalCoopSystemMenuAction::Character:
         enqueueInputEvent(KEY_LOWERCASE_C);
+        break;
+    case LocalCoopSystemMenuAction::Accessibility:
+        localCoopAccessibilityToggle();
+        debugPrint("[COOP ACCESSIBILITY] highlights=%s\n", localCoopAccessibilityStatusLabel());
         break;
     case LocalCoopSystemMenuAction::Save:
         lsgSaveGame(LOAD_SAVE_MODE_NORMAL);
