@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply PhoBoi, co-op, quest, lineage, and wilderness fixes
+      - name: Apply PhoBoi, co-op, UI, audio, quest, lineage, and world fixes
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
@@ -35,6 +35,7 @@ jobs:
           python tools/patch_phoboi_video_layout_v4.py
           python tools/patch_phoboi_gamefirst_overlay_v5.py
           python tools/patch_phoboi_low_latency_controls.py
+
           python tools/patch_coop_18_archetypes.py
           python tools/patch_coop_18_kits_repair.py
           python tools/patch_coop_simulation_pause.py
@@ -44,15 +45,23 @@ jobs:
           python tools/patch_coop_hud_and_leash.py
           python tools/patch_coop_full_repair_v2.py
           python tools/patch_coop_p1_global_ui_owner.py
+          python tools/patch_p1_global_ui_toggle.py
+          python tools/patch_p1_hybrid_input_start_toggle.py
+          python tools/patch_coop_system_menu.py
           python tools/patch_coop_melee_hit_unlock.py
+
+          python tools/patch_dialog_dos_chatter.py
+          python tools/patch_unified_original_music.py
+
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
+          python tools/patch_preopening_staging_room.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
 
-          # Do not ship a partial co-op build again. These markers are the
+          # Never ship a partial co-op build. These markers are the current
           # user-visible systems that must exist in the materialized source.
           $required = @(
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_LOW_LATENCY_CONTROLS_V1' },
@@ -60,10 +69,18 @@ jobs:
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_MENU_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_KITS_REPAIR_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_TOGGLE_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_START_TOGGLE_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
+            @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
+            @{ File = 'src/game_sound.cc'; Marker = 'UNIFIED_ORIGINAL_MUSIC_FROM_VFS_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
+            @{ File = 'src/map.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
             @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
           )
           foreach ($check in $required) {
@@ -72,20 +89,43 @@ jobs:
             }
           }
 
-          git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
+          $tracked = @(
+            'src/local_coop_mobile.cc',
+            'src/local_coop.h',
+            'src/local_coop_runtime.h',
+            'src/combat.cc',
+            'src/critter.cc',
+            'src/game_dialog.cc',
+            'src/game_sound.cc',
+            'src/map.cc',
+            'src/tile.cc',
+            'src/worldmap.cc',
+            'src/worldmap.h',
+            'src/scripts.cc',
+            'src/loadsave.cc',
+            'src/loadsave.h',
+            'src/unified_campaign_transition.h',
+            'src/unified_campaign_carryover.h',
+            'src/unified_world_system.h',
+            'src/unified_fallout1_endgame_profile.h',
+            'src/mainmenu.h',
+            'src/main.cc'
+          )
+
+          git diff --quiet -- $tracked
           $sourceChanged = $LASTEXITCODE -ne 0
 
           if (-not $sourceChanged) {
-            Write-Host "PhoBoi/co-op/quest/lineage/wilderness source already current."
+            Write-Host "Full co-op source already current."
           } elseif ("${{ github.event_name }}" -eq "push") {
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
-            git commit -m "Apply complete co-op HUD, controls, kits, world and leash fixes"
+            git add -- $tracked
+            git commit -m "Apply full co-op UI, audio, staging and control fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            Write-Host "Applied complete co-op patches to this build workspace."
+            Write-Host "Applied full co-op patches to this build workspace."
           }
 
           exit 0
@@ -121,9 +161,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
-          Invoke-WebRequest -Uri $url -OutFile 'cloudflared.exe'
-          if (-not (Test-Path 'cloudflared.exe')) { throw 'cloudflared download failed' }
+          $exeUrl = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+          $licenseUrl = 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE'
+          Invoke-WebRequest -Uri $exeUrl -OutFile 'installer\cloudflared.exe'
+          Invoke-WebRequest -Uri $licenseUrl -OutFile 'installer\cloudflared-LICENSE.txt'
+          if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
+          if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
 
       - name: Build full debug beta installer
         if: success()
@@ -132,13 +175,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
-          & $iscc /DBuildConfig=Debug installer\fallout-unified-coop-beta.iss
+          & $iscc installer\UnifiedCoopBeta.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) {
+            throw 'installer output was not produced'
+          }
 
       - name: Upload full debug beta installer
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Fallout-Unified-Coop-Beta-Debug-Setup
-          path: installer/output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
+          path: installer-output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
           retention-days: 7
