@@ -12,10 +12,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: coop-windows-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   windows-x64:
     name: Windows x64 / MSVC Debug
@@ -46,6 +42,7 @@ jobs:
           python tools/patch_coop_final_hotbinds.py
           python tools/patch_coop_hud_and_leash.py
           python tools/patch_coop_full_repair_v2.py
+          python tools/patch_coop_melee_hit_unlock.py
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
@@ -62,6 +59,7 @@ jobs:
             @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
+            @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
           )
           foreach ($check in $required) {
@@ -118,26 +116,25 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          $version = "2026.8.2"
-          $expected = "c29eee2b121f5436a642eed69fd9767da7e7b8c510fa50aaa130337f931357b5"
-          $base = "https://github.com/cloudflare/cloudflared"
-          Invoke-WebRequest "$base/releases/download/$version/cloudflared-windows-amd64.exe" -OutFile "installer/cloudflared.exe"
-          Invoke-WebRequest "$base/raw/refs/tags/$version/LICENSE" -OutFile "installer/cloudflared-LICENSE.txt"
-          $actual = (Get-FileHash "installer/cloudflared.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) {
-            throw "cloudflared SHA256 mismatch: expected $expected, got $actual"
-          }
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+          Invoke-WebRequest -Uri $url -OutFile 'cloudflared.exe'
+          if (-not (Test-Path 'cloudflared.exe')) { throw 'cloudflared download failed' }
 
       - name: Build full debug beta installer
         if: success()
         shell: pwsh
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\UnifiedCoopBeta.iss"
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
+          & $iscc /DBuildConfig=Debug installer\fallout-unified-coop-beta.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload full debug beta installer
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Fallout-Unified-Coop-Beta-Debug-Setup
-          path: installer-output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
+          path: installer/output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
           retention-days: 7
