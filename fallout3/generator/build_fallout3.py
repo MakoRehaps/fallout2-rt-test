@@ -12,6 +12,7 @@ REPO = HERE.parents[1]
 FORGE = REPO / 'tools' / 'fo3_classic_forge' / 'fo3_classic_forge.py'
 CONTROL = HERE / 'control_maps' / 'build_control_maps.py'
 STRUCT = HERE / 'prefabs' / 'plan_structures.py'
+ACTORS = HERE / 'actors' / 'compile_actor_plans.py'
 SUBWAY = HERE / 'subway' / 'build_subway_graph.py'
 SUBWAY_MAPS = HERE / 'subway' / 'generate_subway_maps.py'
 TACTICS = HERE / 'sources' / 'tactics' / 'index_tactics_source.py'
@@ -55,6 +56,10 @@ def main():
     structures = out / 'structures'
     run([STRUCT, '--manifest', manifest, '--output', structures, '--seed', a.seed])
 
+    actors_dir = out / 'actors'; actors_dir.mkdir(parents=True, exist_ok=True)
+    actor_plans = actors_dir / 'actor_plans.json'
+    run([ACTORS, '--scan', a.scan, '--manifest', manifest, '--output', actor_plans])
+
     intermediate = out / 'intermediate'
     f3o_root = intermediate / 'f3o'
     f3o_surface = f3o_root / 'surface'
@@ -97,7 +102,7 @@ def main():
         run([TACTICS, a.tactics, '--output', tactics_manifest])
 
     summary = {
-        'format': 'PhoBoi.Fallout3AutoBuild/7',
+        'format': 'PhoBoi.Fallout3AutoBuild/8',
         'profile': profile.get('id', 'unknown'),
         'seed': a.seed,
         'architecture': 'isolated-content-generator',
@@ -109,6 +114,7 @@ def main():
             'maps_txt_complete': str(maps / 'maps_txt_fragment_complete.txt') if subway_manifest else str(maps / 'maps_txt_fragment.txt'),
             'control_maps': str(control),
             'structure_plans': str(structures / 'structure_plans.json'),
+            'actor_plans': str(actor_plans),
             'subway_graph': str(subway_graph) if subway_graph else None,
             'subway_manifest': str(subway_manifest) if subway_manifest else None,
             'f3o_surface_workspace': str(f3o_surface),
