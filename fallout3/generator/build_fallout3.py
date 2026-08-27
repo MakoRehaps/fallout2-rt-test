@@ -15,6 +15,7 @@ STRUCT = HERE / 'prefabs' / 'plan_structures.py'
 SUBWAY = HERE / 'subway' / 'build_subway_graph.py'
 TACTICS = HERE / 'sources' / 'tactics' / 'index_tactics_source.py'
 RUNTIME = HERE / 'runtime' / 'compile_runtime_layout.py'
+VALIDATE = HERE / 'validate_build.py'
 
 
 def run(args):
@@ -41,7 +42,6 @@ def main():
     profile = json.loads(a.profile.read_text(encoding='utf-8'))
     (out / 'active_profile.json').write_text(json.dumps(profile, indent=2), encoding='utf-8')
 
-    # 1. Generate native classic MAP prototypes from the FO3 xEdit scan.
     maps = out / 'maps'
     forge_cmd = [
         FORGE, '--scan', a.scan, '--fo1', a.fo1, '--fo2', a.fo2,
@@ -51,37 +51,25 @@ def main():
         forge_cmd += ['--limit', a.limit]
     run(forge_cmd)
 
-    # 2. Generate geographic imagery used by later placement passes.
     control = out / 'control_maps'
     run([CONTROL, '--scan', a.scan, '--output', control])
 
-    # 3. Generate deterministic building/structure footprints for every map.
     manifest = maps / 'fo3_world_manifest.json'
     structures = out / 'structures'
     run([STRUCT, '--manifest', manifest, '--output', structures, '--seed', a.seed])
 
-    # 4. Generate the underground metro graph when the active profile permits it.
     subway = out / 'subway'
     subway_graph = None
     if profile.get('subway', {}).get('enabled', True):
         run([SUBWAY, '--manifest', manifest, '--output', subway])
         subway_graph = subway / 'subway_graph.json'
 
-    # 5. Compile structure footprints + subway jobs into per-map engine-facing
-    #    F3O placement programs. These are the direct input to the native object
-    #    resolver/loader stage.
     runtime = out / 'runtime'
-    runtime_cmd = [
-        RUNTIME,
-        '--structures', structures / 'structure_plans.json',
-        '--output', runtime,
-    ]
+    runtime_cmd = [RUNTIME, '--structures', structures / 'structure_plans.json', '--output', runtime]
     if subway_graph:
         runtime_cmd += ['--subway', subway_graph]
     run(runtime_cmd)
 
-    # 6. Optional Tactics DLC source inventory. Tactics is source material only;
-    #    it is never assumed binary-compatible with Fallout 1/2 MAP files.
     tactics_manifest = None
     tactics_weight = float(profile.get('sources', {}).get('tactics', 0.0))
     if a.tactics and tactics_weight > 0.0:
@@ -112,6 +100,10 @@ def main():
         'engine_next_stage': 'Resolve F3O symbolic walls/doors/anchors to concrete Fallout PIDs/FIDs and instantiate/save them as native MAP objects.'
     }
     (out / 'AUTO_BUILD_COMPLETE.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+
+    # Fail the command if the generated set is internally incomplete.
+    run([VALIDATE, '--root', out])
+
     print('\n[FO3 AUTO] COMPLETE:', out)
     return 0
 
