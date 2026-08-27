@@ -50,6 +50,7 @@ struct LocalCoopFpsViewport {
 inline LocalCoopCameraMode gLocalCoopCameraMode = LocalCoopCameraMode::Isometric;
 inline int gLocalCoopFpsWindow = -1;
 inline bool gLocalCoopFpsToggleWasDown = false;
+inline bool gLocalCoopFpsControllerToggleWasDown = false;
 inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};
 
 inline bool localCoopFpsActive()
@@ -299,6 +300,27 @@ inline void localCoopFpsTick()
         localCoopFpsToggle();
     }
     gLocalCoopFpsToggleWasDown = toggleDown;
+
+    // COOP_FPS_CONTROLLER_TOGGLE_V1
+    // L3 is intentionally reserved for camera mode. It was unused by the
+    // co-op control map, and PhoBoi phones expose it as a dedicated FPS / ISO
+    // touchscreen button instead of asking phone users to emulate stick-click.
+    bool controllerToggleDown = false;
+    int controllerToggleSlot = -1;
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!player.connected || player.controller == nullptr) continue;
+        if (SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSTICK) != 0) {
+            controllerToggleDown = true;
+            controllerToggleSlot = slot;
+            break;
+        }
+    }
+    if (controllerToggleDown && !gLocalCoopFpsControllerToggleWasDown) {
+        debugPrint("[COOP CAMERA] controller P%d L3/FPS pressed\n", controllerToggleSlot + 1);
+        localCoopFpsToggle();
+    }
+    gLocalCoopFpsControllerToggleWasDown = controllerToggleDown;
 
     if (!localCoopFpsActive()) {
         localCoopFpsDestroyWindow();

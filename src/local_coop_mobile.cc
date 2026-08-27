@@ -232,7 +232,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 #by{right:clamp(108px,25vh,164px);bottom:clamp(52px,12vh,78px)}
 .small{position:absolute;width:clamp(56px,9vw,82px);height:clamp(36px,7vh,48px);font-size:clamp(11px,1.7vw,15px);border-radius:8px;padding:1px;background:#102d19bb;border-color:#79ff91aa;z-index:8;opacity:.86}
 #lb{left:max(6px,env(safe-area-inset-left));top:max(4px,env(safe-area-inset-top))}#lt{left:clamp(58px,9vw,86px);top:max(4px,env(safe-area-inset-top))}#rb{right:clamp(58px,9vw,86px);top:max(4px,env(safe-area-inset-top))}#rt{right:max(6px,env(safe-area-inset-right));top:max(4px,env(safe-area-inset-top))}
-#back{left:calc(50% - 90px);top:max(30px,calc(env(safe-area-inset-top) + 28px))}#start{right:calc(50% - 90px);top:max(30px,calc(env(safe-area-inset-top) + 28px))}#skill{left:calc(50% - 32px);top:max(66px,calc(env(safe-area-inset-top) + 66px));width:64px}
+#back{left:calc(50% - 104px);top:max(30px,calc(env(safe-area-inset-top) + 28px));width:68px}#fps{left:calc(50% - 34px);top:max(30px,calc(env(safe-area-inset-top) + 28px));width:68px}#start{right:calc(50% - 104px);top:max(30px,calc(env(safe-area-inset-top) + 28px));width:68px}#skill{left:calc(50% - 36px);top:max(72px,calc(env(safe-area-inset-top) + 70px));width:72px}
 .dpad{position:absolute;left:calc(max(8px,env(safe-area-inset-left)) + clamp(112px,27vh,172px));bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(3,34px);grid-template-rows:repeat(3,34px);gap:1px;z-index:8;opacity:.82}
 .dpad button{padding:0;min-width:0;min-height:0;background:#102d19bb;border-color:#79ff91aa}.du{grid-column:2}.dl{grid-column:1;grid-row:2}.dr{grid-column:3;grid-row:2}.dd{grid-column:2;grid-row:3}
 @media (max-height:390px){.stick{width:96px;height:96px}#rs{right:124px}.btn{width:46px;height:46px}#ba{bottom:48px}#bb{right:50px}#bx{right:50px;bottom:96px}#by{right:98px;bottom:48px}.dpad{left:112px;grid-template-columns:repeat(3,30px);grid-template-rows:repeat(3,30px)}.small{height:28px}.control-label{display:none}#skill{top:58px}}
@@ -249,7 +249,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 <!-- PHOBOI_FULL_CONTROL_LABELS_V1 -->
 <button class="small" id="lb">LB<span class="control-label">RUN</span></button><button class="small" id="lt">LT<span class="control-label">HEX AIM</span></button>
 <button class="small" id="rb">RB<span class="control-label">ALT ATTACK</span></button><button class="small" id="rt">RT<span class="control-label">ATTACK</span></button>
-<button class="small" id="back">PHOBOI<span class="control-label">PHONE / PIPBOY</span></button><button class="small" id="start">START<span class="control-label">MENU</span></button><button class="small" id="skill">RS CLICK<span class="control-label">SKILLDEX</span></button>
+<button class="small" id="back">PHOBOI<span class="control-label">PHONE</span></button><button class="small" id="fps">FPS / ISO<span class="control-label">CAMERA</span></button><button class="small" id="start">START<span class="control-label">MENU</span></button><button class="small" id="skill">SKILLS<span class="control-label">SKILLDEX</span></button>
 <button class="small" id="view" style="left:calc(50% - 41px);top:max(112px,calc(env(safe-area-inset-top) + 108px));width:82px">VIEW<span class="control-label">FIT / 1.3X / 1.6X</span></button>
 <div class="stick" id="ls"><div class="stick-label">LEFT STICK<br>MOVE</div><div class="nub"></div></div><div class="stick" id="rs"><div class="stick-label">RIGHT STICK<br>AIM / CURSOR</div><div class="nub"></div></div>
 <button class="btn" id="ba">A<span class="control-label">USE / TALK / PICKUP</span></button><button class="btn" id="bb">B<span class="control-label">CANCEL / BACK</span></button><button class="btn" id="bx">X<span class="control-label">RELOAD</span></button><button class="btn" id="by">Y<span class="control-label">SWAP HAND</span></button>
@@ -265,7 +265,7 @@ function bindButton(id,bit,axis){
  const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit);send(true)};
  e.addEventListener('pointerdown',down);e.addEventListener('pointerup',up);e.addEventListener('pointercancel',up);e.addEventListener('pointerleave',up);
 }
-[['ba',0],['bb',1],['bx',2],['by',3],['back',4],['start',6],['skill',8],['lb',9],['rb',10],['du',11],['dd',12],['dl',13],['dr',14]].forEach(x=>bindButton(x[0],x[1]));
+[['ba',0],['bb',1],['bx',2],['by',3],['back',4],['start',6],['fps',7],['skill',8],['lb',9],['rb',10],['du',11],['dd',12],['dl',13],['dr',14]].forEach(x=>bindButton(x[0],x[1]));
 bindButton('lt',0,4);bindButton('rt',0,5);
 function bindStick(id,ax,ay){
  const e=$(id),n=e.querySelector('.nub');let active=null;
