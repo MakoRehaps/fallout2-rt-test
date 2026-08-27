@@ -47,6 +47,7 @@ jobs:
           python tools/patch_coop_p1_global_ui_owner.py
           python tools/patch_p1_global_ui_toggle.py
           python tools/patch_p1_hybrid_input_start_toggle.py
+          python tools/patch_p1_hybrid_input_repair_v2.py
           python tools/patch_coop_system_menu.py
           python tools/patch_coop_melee_hit_unlock.py
 
@@ -75,6 +76,7 @@ jobs:
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_TOGGLE_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_START_TOGGLE_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_TRIGGER_FIX_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
