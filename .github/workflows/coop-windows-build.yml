@@ -59,12 +59,13 @@ jobs:
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
           python tools/patch_preopening_staging_room.py
+          python tools/patch_staging_room_safe_prep.py
+          python tools/patch_staging_room_music_resume.py
+          python tools/patch_staging_room_ephemeral_save.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
 
-          # Never ship a partial co-op build. These markers are the current
-          # user-visible systems that must exist in the materialized source.
           $required = @(
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_LOW_LATENCY_CONTROLS_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_V1' },
@@ -87,8 +88,13 @@ jobs:
             @{ File = 'src/game_sound.cc'; Marker = 'COOP_NO_VOICE_ACTING_V1' },
             @{ File = 'src/game_sound.cc'; Marker = 'UNIFIED_ORIGINAL_MUSIC_FROM_VFS_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_PREOPENING_STAGING_SAFE_HOOK_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_STAGING_EPHEMERAL_SAVE_V1' },
             @{ File = 'src/map.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
+            @{ File = 'src/map.cc'; Marker = 'COOP_STAGING_MUSIC_RESUME_V1' },
+            @{ File = 'src/map.cc'; Marker = 'COOP_STAGING_EPHEMERAL_SAVE_V1' },
             @{ File = 'src/local_coop_staging_room.h'; Marker = 'COOP_PREOPENING_STAGING_ROOM_V1' },
+            @{ File = 'src/local_coop_staging_room.h'; Marker = 'COOP_PREOPENING_STAGING_SAFE_V1' },
             @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
           )
           foreach ($check in $required) {
@@ -98,31 +104,16 @@ jobs:
           }
 
           $tracked = @(
-            'src/local_coop_mobile.cc',
-            'src/local_coop.h',
-            'src/local_coop_runtime.h',
-            'src/combat.cc',
-            'src/critter.cc',
-            'src/game_dialog.cc',
-            'src/game_sound.cc',
-            'src/map.cc',
-            'src/tile.cc',
-            'src/worldmap.cc',
-            'src/worldmap.h',
-            'src/scripts.cc',
-            'src/loadsave.cc',
-            'src/loadsave.h',
-            'src/unified_campaign_transition.h',
-            'src/unified_campaign_carryover.h',
-            'src/unified_world_system.h',
-            'src/unified_fallout1_endgame_profile.h',
-            'src/mainmenu.h',
-            'src/main.cc'
+            'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
+            'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
+            'src/map.cc', 'src/tile.cc', 'src/worldmap.cc', 'src/worldmap.h', 'src/scripts.cc',
+            'src/loadsave.cc', 'src/loadsave.h', 'src/unified_campaign_transition.h',
+            'src/unified_campaign_carryover.h', 'src/unified_world_system.h',
+            'src/unified_fallout1_endgame_profile.h', 'src/mainmenu.h', 'src/main.cc'
           )
 
           git diff --quiet -- $tracked
           $sourceChanged = $LASTEXITCODE -ne 0
-
           if (-not $sourceChanged) {
             Write-Host "Full co-op source already current."
           } elseif ("${{ github.event_name }}" -eq "push") {
@@ -132,21 +123,16 @@ jobs:
             git commit -m "Apply full co-op UI, audio, staging and control fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } else {
-            Write-Host "Applied full co-op patches to this build workspace."
           }
-
           exit 0
 
       - name: Configure
         shell: pwsh
-        run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build Debug
         shell: pwsh
-        run: |
-          cmake --build build --config Debug --parallel 4
+        run: cmake --build build --config Debug --parallel 4
 
       - name: Upload debug executable and symbols
         if: success()
@@ -161,18 +147,15 @@ jobs:
       - name: Install Inno Setup
         if: success()
         shell: pwsh
-        run: |
-          choco install innosetup --no-progress -y
+        run: choco install innosetup --no-progress -y
 
       - name: Download verified Cloudflare tunnel helper
         if: success()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exeUrl = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
-          $licenseUrl = 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE'
-          Invoke-WebRequest -Uri $exeUrl -OutFile 'installer\cloudflared.exe'
-          Invoke-WebRequest -Uri $licenseUrl -OutFile 'installer\cloudflared-LICENSE.txt'
+          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'installer\cloudflared.exe'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE' -OutFile 'installer\cloudflared-LICENSE.txt'
           if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
           if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
 
@@ -185,9 +168,7 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
           & $iscc installer\UnifiedCoopBeta.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) {
-            throw 'installer output was not produced'
-          }
+          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) { throw 'installer output was not produced' }
 
       - name: Upload full debug beta installer
         if: success()
