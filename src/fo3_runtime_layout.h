@@ -20,9 +20,7 @@
 
 namespace fallout {
 
-namespace fo3rt {
-
-struct WallRun {
+struct Fo3RuntimeWallRun {
     int x;
     int y;
     int length;
@@ -30,19 +28,19 @@ struct WallRun {
     bool horizontal;
 };
 
-struct DoorPlacement {
+struct Fo3RuntimeDoorPlacement {
     int x;
     int y;
     int rotation;
 };
 
-struct AnchorPlacement {
+struct Fo3RuntimeAnchorPlacement {
     int x;
     int y;
     std::string role;
 };
 
-struct ExitPlacement {
+struct Fo3RuntimeExitPlacement {
     int x;
     int y;
     int targetMap;
@@ -51,19 +49,19 @@ struct ExitPlacement {
     int targetRotation;
 };
 
-static inline int makePid(int type, int id)
+static inline int fo3RuntimeMakePid(int type, int id)
 {
     return (type << 24) | (id & 0x00FFFFFF);
 }
 
-static inline int squareToHexTile(int x, int y)
+static inline int fo3RuntimeSquareToHexTile(int x, int y)
 {
     int hx = std::max(0, std::min(HEX_GRID_WIDTH - 1, x * 2 + 1));
     int hy = std::max(0, std::min(HEX_GRID_HEIGHT - 1, y * 2 + 1));
     return hy * HEX_GRID_WIDTH + hx;
 }
 
-static inline int sideRotation(const char* side)
+static inline int fo3RuntimeSideRotation(const char* side)
 {
     if (strcmp(side, "east") == 0) {
         return ROTATION_E;
@@ -80,7 +78,7 @@ static inline int sideRotation(const char* side)
     return ROTATION_NE;
 }
 
-static inline std::vector<int> preferredMaterials(const std::string& category)
+static inline std::vector<int> fo3RuntimePreferredMaterials(const std::string& category)
 {
     if (category == "vault") {
         return { MATERIAL_TYPE_METAL, MATERIAL_TYPE_CEMENT, MATERIAL_TYPE_STONE };
@@ -91,42 +89,53 @@ static inline std::vector<int> preferredMaterials(const std::string& category)
     }
 
     if (category == "urban") {
-        return { MATERIAL_TYPE_CEMENT, MATERIAL_TYPE_STONE, MATERIAL_TYPE_METAL, MATERIAL_TYPE_WOOD };
+        return {
+            MATERIAL_TYPE_CEMENT,
+            MATERIAL_TYPE_STONE,
+            MATERIAL_TYPE_METAL,
+            MATERIAL_TYPE_WOOD,
+        };
     }
 
     if (category == "cave") {
         return { MATERIAL_TYPE_STONE, MATERIAL_TYPE_DIRT, MATERIAL_TYPE_CEMENT };
     }
 
-    return { MATERIAL_TYPE_WOOD, MATERIAL_TYPE_METAL, MATERIAL_TYPE_DIRT, MATERIAL_TYPE_STONE, MATERIAL_TYPE_CEMENT };
+    return {
+        MATERIAL_TYPE_WOOD,
+        MATERIAL_TYPE_METAL,
+        MATERIAL_TYPE_DIRT,
+        MATERIAL_TYPE_STONE,
+        MATERIAL_TYPE_CEMENT,
+    };
 }
 
-static inline int materialRank(int material, const std::vector<int>& preferred)
+static inline int fo3RuntimeMaterialRank(int material, const std::vector<int>& preferred)
 {
-    for (int i = 0; i < static_cast<int>(preferred.size()); i++) {
-        if (preferred[i] == material) {
-            return i;
+    for (int index = 0; index < static_cast<int>(preferred.size()); index++) {
+        if (preferred[index] == material) {
+            return index;
         }
     }
 
     return 100;
 }
 
-static inline int findWallPidForCategory(const std::string& category)
+static inline int fo3RuntimeFindWallPid(const std::string& category)
 {
-    std::vector<int> preferred = preferredMaterials(category);
+    std::vector<int> preferred = fo3RuntimePreferredMaterials(category);
     int bestPid = -1;
     int bestRank = 999;
     int maxId = proto_max_id(OBJ_TYPE_WALL);
 
     for (int id = 1; id <= maxId; id++) {
-        int pid = makePid(OBJ_TYPE_WALL, id);
+        int pid = fo3RuntimeMakePid(OBJ_TYPE_WALL, id);
         Proto* proto = nullptr;
         if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
             continue;
         }
 
-        int rank = materialRank(proto->wall.material, preferred);
+        int rank = fo3RuntimeMaterialRank(proto->wall.material, preferred);
         if (rank < bestRank) {
             bestRank = rank;
             bestPid = pid;
@@ -139,21 +148,23 @@ static inline int findWallPidForCategory(const std::string& category)
     return bestPid;
 }
 
-static inline int findDoorPidForCategory(const std::string& category)
+static inline int fo3RuntimeFindDoorPid(const std::string& category)
 {
-    std::vector<int> preferred = preferredMaterials(category);
+    std::vector<int> preferred = fo3RuntimePreferredMaterials(category);
     int bestPid = -1;
     int bestRank = 999;
     int maxId = proto_max_id(OBJ_TYPE_SCENERY);
 
     for (int id = 1; id <= maxId; id++) {
-        int pid = makePid(OBJ_TYPE_SCENERY, id);
+        int pid = fo3RuntimeMakePid(OBJ_TYPE_SCENERY, id);
         Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) != 0 || proto == nullptr || proto->scenery.type != SCENERY_TYPE_DOOR) {
+        if (protoGetProto(pid, &proto) != 0
+            || proto == nullptr
+            || proto->scenery.type != SCENERY_TYPE_DOOR) {
             continue;
         }
 
-        int rank = materialRank(proto->scenery.field_2C, preferred);
+        int rank = fo3RuntimeMaterialRank(proto->scenery.field_2C, preferred);
         if (rank < bestRank) {
             bestRank = rank;
             bestPid = pid;
@@ -166,21 +177,23 @@ static inline int findDoorPidForCategory(const std::string& category)
     return bestPid;
 }
 
-static inline int findContainerPidForCategory(const std::string& category)
+static inline int fo3RuntimeFindContainerPid(const std::string& category)
 {
-    std::vector<int> preferred = preferredMaterials(category);
+    std::vector<int> preferred = fo3RuntimePreferredMaterials(category);
     int bestPid = -1;
     int bestRank = 999;
     int maxId = proto_max_id(OBJ_TYPE_ITEM);
 
     for (int id = 1; id <= maxId; id++) {
-        int pid = makePid(OBJ_TYPE_ITEM, id);
+        int pid = fo3RuntimeMakePid(OBJ_TYPE_ITEM, id);
         Proto* proto = nullptr;
-        if (protoGetProto(pid, &proto) != 0 || proto == nullptr || proto->item.type != ITEM_TYPE_CONTAINER) {
+        if (protoGetProto(pid, &proto) != 0
+            || proto == nullptr
+            || proto->item.type != ITEM_TYPE_CONTAINER) {
             continue;
         }
 
-        int rank = materialRank(proto->item.material, preferred);
+        int rank = fo3RuntimeMaterialRank(proto->item.material, preferred);
         if (rank < bestRank) {
             bestRank = rank;
             bestPid = pid;
@@ -193,7 +206,12 @@ static inline int findContainerPidForCategory(const std::string& category)
     return bestPid;
 }
 
-static inline bool spawnObject(int pid, int x, int y, int rotation, Object** outObject = nullptr)
+static inline bool fo3RuntimeSpawnObject(
+    int pid,
+    int x,
+    int y,
+    int rotation,
+    Object** outObject = nullptr)
 {
     if (pid == -1) {
         return false;
@@ -206,7 +224,7 @@ static inline bool spawnObject(int pid, int x, int y, int rotation, Object** out
 
     object->flags |= OBJECT_NO_SAVE;
 
-    int tile = squareToHexTile(x, y);
+    int tile = fo3RuntimeSquareToHexTile(x, y);
     if (objectSetLocation(object, tile, 0, nullptr) != 0) {
         objectDestroy(object, nullptr);
         return false;
@@ -220,10 +238,16 @@ static inline bool spawnObject(int pid, int x, int y, int rotation, Object** out
     return true;
 }
 
-static inline bool spawnExit(const ExitPlacement& exit)
+static inline bool fo3RuntimeSpawnExit(const Fo3RuntimeExitPlacement& exit)
 {
     Object* object = nullptr;
-    if (!spawnObject(FIRST_EXIT_GRID_PID, exit.x, exit.y, ROTATION_NE, &object) || object == nullptr) {
+    if (!fo3RuntimeSpawnObject(
+            FIRST_EXIT_GRID_PID,
+            exit.x,
+            exit.y,
+            ROTATION_NE,
+            &object)
+        || object == nullptr) {
         return false;
     }
 
@@ -234,7 +258,7 @@ static inline bool spawnExit(const ExitPlacement& exit)
     return true;
 }
 
-static inline void loadLayoutForCurrentMap()
+static inline void fo3RuntimeLoadCurrentMapLayout()
 {
     char base[16];
     strncpy(base, gMapHeader.name, sizeof(base) - 1);
@@ -259,10 +283,10 @@ static inline void loadLayoutForCurrentMap()
     }
 
     std::string category = "wasteland";
-    std::vector<WallRun> walls;
-    std::vector<DoorPlacement> doors;
-    std::vector<AnchorPlacement> anchors;
-    std::vector<ExitPlacement> exits;
+    std::vector<Fo3RuntimeWallRun> walls;
+    std::vector<Fo3RuntimeDoorPlacement> doors;
+    std::vector<Fo3RuntimeAnchorPlacement> anchors;
+    std::vector<Fo3RuntimeExitPlacement> exits;
     std::set<int> doorSquares;
 
     char line[512];
@@ -279,29 +303,37 @@ static inline void loadLayoutForCurrentMap()
             continue;
         }
 
-        if (sscanf(line, "WALL_RUN %95s %31s %d %d %d", sid, side, &x, &y, &length) == 5) {
-            WallRun run;
+        if (sscanf(
+                line,
+                "WALL_RUN %95s %31s %d %d %d",
+                sid,
+                side,
+                &x,
+                &y,
+                &length)
+            == 5) {
+            Fo3RuntimeWallRun run;
             run.x = x;
             run.y = y;
             run.length = std::max(0, length);
-            run.rotation = sideRotation(side);
+            run.rotation = fo3RuntimeSideRotation(side);
             run.horizontal = strcmp(side, "north") == 0 || strcmp(side, "south") == 0;
             walls.push_back(run);
             continue;
         }
 
         if (sscanf(line, "DOOR %95s %d %d %31s", sid, &x, &y, side) == 4) {
-            DoorPlacement door;
+            Fo3RuntimeDoorPlacement door;
             door.x = x;
             door.y = y;
-            door.rotation = sideRotation(side);
+            door.rotation = fo3RuntimeSideRotation(side);
             doors.push_back(door);
             doorSquares.insert(y * SQUARE_GRID_WIDTH + x);
             continue;
         }
 
         if (sscanf(line, "ANCHOR %95s %95s %d %d", sid, word, &x, &y) == 4) {
-            AnchorPlacement anchor;
+            Fo3RuntimeAnchorPlacement anchor;
             anchor.x = x;
             anchor.y = y;
             anchor.role = word;
@@ -313,15 +345,29 @@ static inline void loadLayoutForCurrentMap()
         int targetTile;
         int targetElevation;
         int targetRotation;
-        if (sscanf(line, "EXIT %31s %d %d %d %d %d %d", side, &x, &y, &targetMap, &targetTile, &targetElevation, &targetRotation) == 7) {
-            if (targetMap >= 0 && hexGridTileIsValid(targetTile) && elevationIsValid(targetElevation)) {
-                ExitPlacement exit;
+        if (sscanf(
+                line,
+                "EXIT %31s %d %d %d %d %d %d",
+                side,
+                &x,
+                &y,
+                &targetMap,
+                &targetTile,
+                &targetElevation,
+                &targetRotation)
+            == 7) {
+            if (targetMap >= 0
+                && hexGridTileIsValid(targetTile)
+                && elevationIsValid(targetElevation)) {
+                Fo3RuntimeExitPlacement exit;
                 exit.x = x;
                 exit.y = y;
                 exit.targetMap = targetMap;
                 exit.targetTile = targetTile;
                 exit.targetElevation = targetElevation;
-                exit.targetRotation = std::max(0, std::min(ROTATION_COUNT - 1, targetRotation));
+                exit.targetRotation = std::max(
+                    0,
+                    std::min(ROTATION_COUNT - 1, targetRotation));
                 exits.push_back(exit);
             }
         }
@@ -329,19 +375,20 @@ static inline void loadLayoutForCurrentMap()
 
     fileClose(stream);
 
-    int wallPid = findWallPidForCategory(category);
-    int doorPid = findDoorPidForCategory(category);
-    int containerPid = findContainerPidForCategory(category);
+    int wallPid = fo3RuntimeFindWallPid(category);
+    int doorPid = fo3RuntimeFindDoorPid(category);
+    int containerPid = fo3RuntimeFindContainerPid(category);
     int spawnedWalls = 0;
     int spawnedDoors = 0;
     int spawnedContainers = 0;
     int spawnedExits = 0;
 
-    for (const WallRun& run : walls) {
-        for (int i = 0; i < run.length; i++) {
-            int x = run.x + (run.horizontal ? i : 0);
-            int y = run.y + (run.horizontal ? 0 : i);
-            if (x < 0 || x >= SQUARE_GRID_WIDTH || y < 0 || y >= SQUARE_GRID_HEIGHT) {
+    for (const Fo3RuntimeWallRun& run : walls) {
+        for (int index = 0; index < run.length; index++) {
+            int x = run.x + (run.horizontal ? index : 0);
+            int y = run.y + (run.horizontal ? 0 : index);
+            if (x < 0 || x >= SQUARE_GRID_WIDTH
+                || y < 0 || y >= SQUARE_GRID_HEIGHT) {
                 continue;
             }
 
@@ -349,31 +396,34 @@ static inline void loadLayoutForCurrentMap()
                 continue;
             }
 
-            if (spawnObject(wallPid, x, y, run.rotation)) {
+            if (fo3RuntimeSpawnObject(wallPid, x, y, run.rotation)) {
                 spawnedWalls++;
             }
         }
     }
 
-    for (const DoorPlacement& door : doors) {
-        if (spawnObject(doorPid, door.x, door.y, door.rotation)) {
+    for (const Fo3RuntimeDoorPlacement& door : doors) {
+        if (fo3RuntimeSpawnObject(doorPid, door.x, door.y, door.rotation)) {
             spawnedDoors++;
         }
     }
 
-    for (const AnchorPlacement& anchor : anchors) {
-        if (anchor.role == "loot" && spawnObject(containerPid, anchor.x, anchor.y, ROTATION_NE)) {
+    for (const Fo3RuntimeAnchorPlacement& anchor : anchors) {
+        if (anchor.role == "loot"
+            && fo3RuntimeSpawnObject(containerPid, anchor.x, anchor.y, ROTATION_NE)) {
             spawnedContainers++;
         }
     }
 
-    for (const ExitPlacement& exit : exits) {
-        if (spawnExit(exit)) {
+    for (const Fo3RuntimeExitPlacement& exit : exits) {
+        if (fo3RuntimeSpawnExit(exit)) {
             spawnedExits++;
         }
     }
 
-    debugPrint("\nFO3 runtime: %s category=%s walls=%d doors=%d containers=%d exits=%d wallPid=%08X doorPid=%08X containerPid=%08X",
+    debugPrint(
+        "\nFO3 runtime: %s category=%s walls=%d doors=%d containers=%d exits=%d "
+        "wallPid=%08X doorPid=%08X containerPid=%08X",
         base,
         category.c_str(),
         spawnedWalls,
@@ -385,7 +435,7 @@ static inline void loadLayoutForCurrentMap()
         containerPid);
 }
 
-static inline void tick()
+static inline void fo3RuntimeLayoutTick()
 {
     static std::string lastMap;
     std::string current = gMapHeader.name;
@@ -395,15 +445,8 @@ static inline void tick()
 
     lastMap = current;
     if (!current.empty()) {
-        loadLayoutForCurrentMap();
+        fo3RuntimeLoadCurrentMapLayout();
     }
-}
-
-} // namespace fo3rt
-
-static inline void fo3RuntimeLayoutTick()
-{
-    fo3rt::tick();
 }
 
 } // namespace fallout
