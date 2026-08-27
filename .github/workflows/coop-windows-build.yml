@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply PhoBoi, co-op, camera, encounter, UI, accessibility, audio, quest, lineage, and world fixes
+      - name: Apply PhoBoi, co-op, camera, living-world, encounter, UI, accessibility, audio, quest, lineage, and world fixes
         shell: pwsh
         run: |
           python tools/patch_phoboi_remote_play.py
@@ -65,6 +65,7 @@ jobs:
           python tools/patch_f1_f2_lineage_transition.py
           python tools/patch_tileless_group_room_start.py
           python tools/patch_procedural_selfplay_encounters.py
+          python tools/patch_unified_living_world.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
@@ -82,9 +83,13 @@ jobs:
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_RUNTIME_V1' },
             @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_V1' },
+            @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_HUD_HOOK_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2' },
+            @{ File = 'src/local_coop_iso_cameras.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_V1' },
+            @{ File = 'src/unified_living_world.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_TOGGLE_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_START_TOGGLE_V1' },
@@ -99,6 +104,7 @@ jobs:
             @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_TILELESS_GROUP_ROOM_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_PROCEDURAL_SELFPLAY_ENCOUNTERS_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
             @{ File = 'src/local_coop_dialog_chatter.h'; Marker = 'COOP_DOS_DIALOG_CHATTER_V1' },
@@ -114,8 +120,9 @@ jobs:
 
           $tracked = @(
             'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
-            'src/local_coop_personal_ui.h', 'src/local_coop_fps.h',
+            'src/local_coop_personal_ui.h', 'src/local_coop_fps.h', 'src/local_coop_iso_cameras.h',
             'src/local_coop_group_room.h', 'src/local_coop_system_menu.h', 'src/local_coop_accessibility.h',
+            'src/unified_living_world.h',
             'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
             'src/map.cc', 'src/tile.cc', 'src/worldmap.cc', 'src/worldmap.h', 'src/scripts.cc',
             'src/loadsave.cc', 'src/loadsave.h', 'src/unified_campaign_transition.h',
@@ -131,7 +138,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply FPS cameras, encounter director and P1 exit authority"
+            git commit -m "Apply living world simulation and encounter integration"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
