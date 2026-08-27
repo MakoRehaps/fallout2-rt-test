@@ -45,6 +45,7 @@ jobs:
           python tools/patch_coop_nearest_clinic.py
           python tools/patch_coop_final_hotbinds.py
           python tools/patch_coop_hud_and_leash.py
+          python tools/patch_coop_full_repair_v2.py
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
