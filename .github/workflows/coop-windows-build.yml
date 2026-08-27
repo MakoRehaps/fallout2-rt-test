@@ -35,6 +35,7 @@ jobs:
           python tools/patch_phoboi_video_layout_v4.py
           python tools/patch_phoboi_gamefirst_overlay_v5.py
           python tools/patch_phoboi_low_latency_controls.py
+          python tools/patch_phoboi_phone_readability.py
 
           python tools/patch_coop_18_archetypes.py
           python tools/patch_coop_18_kits_repair.py
@@ -58,16 +59,14 @@ jobs:
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
-          python tools/patch_preopening_staging_room.py
-          python tools/patch_staging_room_safe_prep.py
-          python tools/patch_staging_room_music_resume.py
-          python tools/patch_staging_room_ephemeral_save.py
+          python tools/patch_tileless_group_room_start.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
 
           $required = @(
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_LOW_LATENCY_CONTROLS_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PHONE_READABILITY_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_MENU_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_18_KITS_REPAIR_V1' },
@@ -82,19 +81,13 @@ jobs:
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_V1' },
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_OPEN_LATCH_V1' },
+            @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_TILELESS_GROUP_ROOM_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
             @{ File = 'src/local_coop_dialog_chatter.h'; Marker = 'COOP_DOS_DIALOG_CHATTER_V1' },
             @{ File = 'src/game_sound.cc'; Marker = 'COOP_NO_VOICE_ACTING_V1' },
             @{ File = 'src/game_sound.cc'; Marker = 'UNIFIED_ORIGINAL_MUSIC_FROM_VFS_V1' },
-            @{ File = 'src/main.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
-            @{ File = 'src/main.cc'; Marker = 'COOP_PREOPENING_STAGING_SAFE_HOOK_V1' },
-            @{ File = 'src/main.cc'; Marker = 'COOP_STAGING_EPHEMERAL_SAVE_V1' },
-            @{ File = 'src/map.cc'; Marker = 'COOP_PREOPENING_STAGING_ROOM_HOOK_V1' },
-            @{ File = 'src/map.cc'; Marker = 'COOP_STAGING_MUSIC_RESUME_V1' },
-            @{ File = 'src/map.cc'; Marker = 'COOP_STAGING_EPHEMERAL_SAVE_V1' },
-            @{ File = 'src/local_coop_staging_room.h'; Marker = 'COOP_PREOPENING_STAGING_ROOM_V1' },
-            @{ File = 'src/local_coop_staging_room.h'; Marker = 'COOP_PREOPENING_STAGING_SAFE_V1' },
             @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
           )
           foreach ($check in $required) {
@@ -105,6 +98,7 @@ jobs:
 
           $tracked = @(
             'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
+            'src/local_coop_group_room.h', 'src/local_coop_system_menu.h',
             'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
             'src/map.cc', 'src/tile.cc', 'src/worldmap.cc', 'src/worldmap.h', 'src/scripts.cc',
             'src/loadsave.cc', 'src/loadsave.h', 'src/unified_campaign_transition.h',
@@ -120,7 +114,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply full co-op UI, audio, staging and control fixes"
+            git commit -m "Apply tileless group room and phone readability fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
