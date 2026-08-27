@@ -43,6 +43,7 @@ jobs:
           python tools/patch_coop_final_hotbinds.py
           python tools/patch_coop_hud_and_leash.py
           python tools/patch_coop_full_repair_v2.py
+          python tools/patch_coop_p1_global_ui_owner.py
           python tools/patch_coop_melee_hit_unlock.py
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
@@ -61,6 +62,7 @@ jobs:
             @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
             @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
             @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
           )
