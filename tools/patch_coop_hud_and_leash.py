@@ -66,7 +66,9 @@ inline void localCoopEnsureHud()
 
 inline void localCoopDrawHud(Uint32 now)
 {
-    if (!localCoopTickReached(now, gLocalCoopNextHudRefreshTick)) {
+    // Wrap-safe tick comparison kept local so this function can live before
+    // localCoopTickReached is declared in the header.
+    if (static_cast<Sint32>(now - gLocalCoopNextHudRefreshTick) < 0) {
         return;
     }
     gLocalCoopNextHudRefreshTick = now + 100;
@@ -113,7 +115,7 @@ inline void localCoopDrawHud(Uint32 now)
 
         Object* item = localCoopGetActiveItem(player);
         const char* itemName = item != nullptr ? protoGetName(item->pid) : nullptr;
-        if (itemName == nullptr || *itemName == '\\0') {
+        if (itemName == nullptr || *itemName == '\0') {
             itemName = "UNARMED";
         }
         const char* hand = localCoopGetActiveHand(player) == HAND_LEFT ? "L" : "R";
@@ -138,7 +140,6 @@ inline void localCoopDrawHud(Uint32 now)
     tick_new = '''    Uint32 now = SDL_GetTicks();
     localCoopDrawHud(now);
 '''
-    # Patch the runtime tick occurrence nearest the bottom by replacing the last match.
     pos = s.rfind(tick_anchor)
     if pos == -1:
         raise SystemExit('runtime tick time anchor missing')
