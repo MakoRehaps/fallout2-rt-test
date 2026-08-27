@@ -21,6 +21,7 @@
 #include "local_coop_fps.h"
 #include "local_coop_personal_ui.h"
 #include "local_coop_system_menu.h"
+#include "mainmenu.h"
 #include "mouse.h"
 #include "object.h"
 #include "perk.h"
@@ -1126,6 +1127,20 @@ inline void localCoopRuntimeTick()
     }
 
     gLocalCoopRuntimeInsideTick = true;
+
+    // COOP_MAIN_MENU_RUNTIME_GATE_V1
+    // The stock Fallout main menu must own its window and input completely.
+    // Do not initialize players, create personal HUDs, hide the stock interface,
+    // process gameplay controller binds, or advance the living world here.
+    // If gameplay returned to the menu, tear down any presentation windows first.
+    if (_main_menu_is_enabled()) {
+        localCoopFpsDestroyWindow();
+        localCoopPersonalUiShutdown();
+        localCoopDestroyHud();
+        if (cursorIsHidden()) mouseShowCursor();
+        gLocalCoopRuntimeInsideTick = false;
+        return;
+    }
 
     if (!gLocalCoopInitialized) {
         localCoopInit();
