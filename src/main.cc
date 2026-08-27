@@ -165,7 +165,13 @@ int falloutMain(int argc, char** argv)
                     if (useCoopStaging) {
                         localCoopBeginStagingRoom(mapNameCopy);
                         char stagingMap[] = "V13ENT.MAP";
+                        // COOP_STAGING_EPHEMERAL_SAVE_V1
+                        // Never inherit a prior temporary staging save. The prep
+                        // room is a disposable view of an original Fallout map.
+                        _MapDirEraseFile_("MAPS\\", "V13ENT.SAV");
                         _main_load_new(stagingMap);
+                        // COOP_PREOPENING_STAGING_SAFE_HOOK_V1
+                        localCoopSanitizeStagingRoom();
                     } else {
                         gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                         _main_load_new(mapNameCopy);

@@ -942,11 +942,25 @@ inline void localCoopUpdateP1InputSource()
         }
     }
 
+    // COOP_P1_HYBRID_INPUT_TRIGGER_FIX_V2
     bool controllerActivity = false;
     if (p1.controller != nullptr) {
-        for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
-            int value = SDL_GameControllerGetAxis(p1.controller, static_cast<SDL_GameControllerAxis>(axis));
+        const SDL_GameControllerAxis stickAxes[] = {
+            SDL_CONTROLLER_AXIS_LEFTX,
+            SDL_CONTROLLER_AXIS_LEFTY,
+            SDL_CONTROLLER_AXIS_RIGHTX,
+            SDL_CONTROLLER_AXIS_RIGHTY,
+        };
+        for (SDL_GameControllerAxis axis : stickAxes) {
+            int value = SDL_GameControllerGetAxis(p1.controller, axis);
             if (std::abs(value) > 9000) { controllerActivity = true; break; }
+        }
+        if (!controllerActivity) {
+            int leftTrigger = SDL_GameControllerGetAxis(p1.controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+            int rightTrigger = SDL_GameControllerGetAxis(p1.controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+            // Trigger rest can be either 0 or SDL_JOYSTICK_AXIS_MIN depending on
+            // backend. Only positive pull values count as controller activity.
+            controllerActivity = leftTrigger > 12000 || rightTrigger > 12000;
         }
         if (!controllerActivity) {
             for (int button = 0; button < SDL_CONTROLLER_BUTTON_MAX; button++) {

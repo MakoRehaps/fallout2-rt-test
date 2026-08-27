@@ -828,6 +828,13 @@ void speechSetVolume(int volume)
         return;
     }
 
+    // COOP_NO_VOICE_ACTING_V1
+    // Keep the original speech streams/lipsync machinery alive for dialogue
+    // timing and talking-head compatibility, but the co-op presentation is
+    // text + synthetic non-verbal chatter only. Never make recorded speech
+    // audible even if an old preferences file requests a non-zero value.
+    volume = 0;
+
     if (volume < VOLUME_MIN || volume > VOLUME_MAX) {
         if (gGameSoundDebugEnabled) {
             debugPrint("Requested speech volume out of range.\n");

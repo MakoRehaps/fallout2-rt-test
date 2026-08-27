@@ -1382,7 +1382,19 @@ int mapHandleTransition()
             strncpy(destination, gLocalCoopStagingDestinationMap, sizeof(destination) - 1);
             destination[sizeof(destination) - 1] = '\0';
             debugPrint("[COOP STAGING] ready; loading campaign start %s\n", destination);
-            return mapLoadByName(destination);
+            int stagingLoadRc = mapLoadByName(destination);
+            // COOP_STAGING_EPHEMERAL_SAVE_V1
+            // mapLoad saves the map being left before reading the destination.
+            // That save contains the hidden staging critters, so discard it now.
+            _MapDirEraseFile_("MAPS\\", "V13ENT.SAV");
+            // COOP_STAGING_MUSIC_RESUME_V1
+            // mapLoadById normally restarts map music, but this named reload is
+            // intentional so the saved start-map filename survives staging.
+            // Restore the original game's map track after the opening movie.
+            if (stagingLoadRc == 0) {
+                wmMapMusicStart();
+            }
+            return stagingLoadRc;
         }
         return 0;
     }
