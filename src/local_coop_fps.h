@@ -11,6 +11,7 @@
 #include "art.h"
 #include "color.h"
 #include "draw.h"
+#include "kb.h"
 #include "local_coop.h"
 #include "local_coop_fps_raycast.h"
 #include "local_coop_fps_weapon.h"
@@ -284,13 +285,17 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
 
 inline void localCoopFpsTick()
 {
-    // COOP_FPS_F9_TOGGLE_V1
-    // Poll SDL directly so this works even when Fallout's normal key queue has
-    // a different meaning for function keys. Rising-edge detection prevents a
-    // held F9 key from flipping the camera mode every frame.
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    bool toggleDown = keys != nullptr && keys[SDL_SCANCODE_F9] != 0;
+    // COOP_FPS_F9_TOGGLE_V2
+    // Use the engine-maintained physical key state. SDL_GetKeyboardState can
+    // remain stale in this runtime because Fallout owns/pumps the input loop.
+    // Keep SDL as a fallback for backends where it is current.
+    bool toggleDown = gPressedPhysicalKeys[SDL_SCANCODE_F9] != 0;
+    if (!toggleDown) {
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        toggleDown = keys != nullptr && keys[SDL_SCANCODE_F9] != 0;
+    }
     if (toggleDown && !gLocalCoopFpsToggleWasDown) {
+        debugPrint("[COOP CAMERA] F9 pressed\n");
         localCoopFpsToggle();
     }
     gLocalCoopFpsToggleWasDown = toggleDown;
