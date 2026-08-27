@@ -14,6 +14,7 @@ CONTROL = HERE / 'control_maps' / 'build_control_maps.py'
 STRUCT = HERE / 'prefabs' / 'plan_structures.py'
 SUBWAY = HERE / 'subway' / 'build_subway_graph.py'
 TACTICS = HERE / 'sources' / 'tactics' / 'index_tactics_source.py'
+RUNTIME = HERE / 'runtime' / 'compile_runtime_layout.py'
 
 
 def run(args):
@@ -66,7 +67,20 @@ def main():
         run([SUBWAY, '--manifest', manifest, '--output', subway])
         subway_graph = subway / 'subway_graph.json'
 
-    # 5. Optional Tactics DLC source inventory. Tactics is source material only;
+    # 5. Compile structure footprints + subway jobs into per-map engine-facing
+    #    F3O placement programs. These are the direct input to the native object
+    #    resolver/loader stage.
+    runtime = out / 'runtime'
+    runtime_cmd = [
+        RUNTIME,
+        '--structures', structures / 'structure_plans.json',
+        '--output', runtime,
+    ]
+    if subway_graph:
+        runtime_cmd += ['--subway', subway_graph]
+    run(runtime_cmd)
+
+    # 6. Optional Tactics DLC source inventory. Tactics is source material only;
     #    it is never assumed binary-compatible with Fallout 1/2 MAP files.
     tactics_manifest = None
     tactics_weight = float(profile.get('sources', {}).get('tactics', 0.0))
@@ -77,7 +91,7 @@ def main():
         run([TACTICS, a.tactics, '--output', tactics_manifest])
 
     summary = {
-        'format': 'PhoBoi.Fallout3AutoBuild/2',
+        'format': 'PhoBoi.Fallout3AutoBuild/3',
         'profile': profile.get('id', 'unknown'),
         'seed': a.seed,
         'inputs': {
@@ -92,9 +106,10 @@ def main():
             'control_maps': str(control),
             'structure_plans': str(structures / 'structure_plans.json'),
             'subway_graph': str(subway_graph) if subway_graph else None,
+            'runtime_layouts': str(runtime / 'runtime_index.json'),
             'tactics_manifest': str(tactics_manifest) if tactics_manifest else None,
         },
-        'engine_next_stage': 'Native MAP object writer: walls, doors, scenery, blockers, exits, containers and NPC anchors.'
+        'engine_next_stage': 'Resolve F3O symbolic walls/doors/anchors to concrete Fallout PIDs/FIDs and instantiate/save them as native MAP objects.'
     }
     (out / 'AUTO_BUILD_COMPLETE.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print('\n[FO3 AUTO] COMPLETE:', out)
