@@ -1,10 +1,53 @@
 from pathlib import Path
+import hashlib
+import shutil
+import urllib.request
+import zipfile
+
+FREEDOOM_URL = 'https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip'
+# Exact SHA-256 of the freedoom-0.13.0.zip supplied for this project.
+FREEDOOM_SHA256 = '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59'
+
+
+def prepare_freedoom_assets():
+    out = Path('installer/freedoom')
+    wad2 = out / 'freedoom2.wad'
+    wad1 = out / 'freedoom1.wad'
+    license_file = out / 'COPYING.txt'
+    if wad2.exists() and wad1.exists() and license_file.exists():
+        print('Freedoom 0.13 FPS assets already prepared')
+        return
+
+    out.mkdir(parents=True, exist_ok=True)
+    archive = Path('installer/freedoom-0.13.0.zip')
+    if not archive.exists():
+        print('downloading exact Freedoom 0.13.0 pack used by the FPS renderer')
+        urllib.request.urlretrieve(FREEDOOM_URL, archive)
+
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest().lower()
+    if digest != FREEDOOM_SHA256:
+        raise SystemExit(f'Freedoom archive SHA256 mismatch: {digest}')
+
+    wanted = {
+        'freedoom-0.13.0/freedoom1.wad': wad1,
+        'freedoom-0.13.0/freedoom2.wad': wad2,
+        'freedoom-0.13.0/COPYING.txt': license_file,
+    }
+    with zipfile.ZipFile(archive, 'r') as zf:
+        for member, destination in wanted.items():
+            with zf.open(member) as src, destination.open('wb') as dst:
+                shutil.copyfileobj(src, dst)
+
+    print('prepared Freedoom 0.13.0 WADs + BSD license for installer')
+
+
+prepare_freedoom_assets()
 
 path = Path('src/local_coop_fps.h')
 text = path.read_text(encoding='utf-8')
 marker = 'COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1'
 if marker in text:
-    print('raycast/Freedoom FPS patch already applied')
+    print('raycast/Freedoom FPS source patch already applied')
     raise SystemExit(0)
 
 needle = '#include "local_coop.h"\n'
