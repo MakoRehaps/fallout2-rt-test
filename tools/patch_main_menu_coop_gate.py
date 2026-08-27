@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Kept as a standalone idempotent patch so every installer rebuild can enforce
+# that gameplay-only co-op presentation never owns the stock Fallout main menu.
 path = Path('src/local_coop_runtime.h')
 text = path.read_text(encoding='utf-8')
 marker = 'COOP_MAIN_MENU_RUNTIME_GATE_V1'
