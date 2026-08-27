@@ -53,6 +53,8 @@ jobs:
           python tools/patch_coop_system_menu.py
           python tools/patch_coop_accessibility_highlights.py
           python tools/patch_coop_fps_billboard_mode.py
+          python tools/patch_fps_raycast_freedoom.py
+          python tools/patch_fps_freedoom_weapons.py
           python tools/patch_p1_exit_grid_authority.py
           python tools/patch_coop_melee_hit_unlock.py
 
@@ -89,6 +91,10 @@ jobs:
             @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_HUD_HOOK_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_RUNTIME_V1' },
+            @{ File = 'src/local_coop_fps_raycast.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_V1' },
+            @{ File = 'src/local_coop_fps_weapon.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_V1' },
             @{ File = 'src/local_coop_iso_cameras.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_V1' },
             @{ File = 'src/unified_living_world.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
@@ -122,7 +128,7 @@ jobs:
 
           $tracked = @(
             'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
-            'src/local_coop_personal_ui.h', 'src/local_coop_fps.h', 'src/local_coop_iso_cameras.h',
+            'src/local_coop_personal_ui.h', 'src/local_coop_fps.h', 'src/local_coop_fps_raycast.h', 'src/local_coop_fps_weapon.h', 'src/local_coop_iso_cameras.h',
             'src/local_coop_group_room.h', 'src/local_coop_system_menu.h', 'src/local_coop_accessibility.h',
             'src/unified_living_world.h',
             'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
@@ -140,7 +146,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply staged encounter approach movement"
+            git commit -m "Apply raycast FPS and Freedoom weapon view models"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -178,6 +184,24 @@ jobs:
           Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE' -OutFile 'installer\cloudflared-LICENSE.txt'
           if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
           if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
+
+      - name: Prepare Freedoom 0.13.0 FPS assets
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = 'freedoom-0.13.0.zip'
+          Invoke-WebRequest -Uri 'https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip' -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59') {
+            throw "Freedoom archive checksum mismatch: $hash"
+          }
+          Expand-Archive -Path $zip -DestinationPath freedoom-stage -Force
+          New-Item -ItemType Directory -Force -Path 'installer\freedoom' | Out-Null
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\freedoom1.wad' 'installer\freedoom\freedoom1.wad' -Force
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\COPYING.txt' 'installer\freedoom\COPYING.txt' -Force
+          if (-not (Test-Path 'installer\freedoom\freedoom1.wad')) { throw 'Freedoom WAD preparation failed' }
+          if (-not (Test-Path 'installer\freedoom\COPYING.txt')) { throw 'Freedoom license preparation failed' }
 
       - name: Build full debug beta installer
         if: success()
