@@ -39,16 +39,35 @@ jobs:
           python tools/patch_phoboi_video_layout_v4.py
           python tools/patch_phoboi_gamefirst_overlay_v5.py
           python tools/patch_coop_18_archetypes.py
+          python tools/patch_coop_18_kits_repair.py
           python tools/patch_coop_simulation_pause.py
           python tools/patch_coop_downed_medical.py
           python tools/patch_coop_nearest_clinic.py
           python tools/patch_coop_final_hotbinds.py
+          python tools/patch_coop_hud_and_leash.py
           python tools/patch_quest_profile_isolation.py
           python tools/patch_postgame_campaign_resume.py
           python tools/patch_f1_f2_lineage_transition.py
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
+
+          # Do not ship a partial co-op build again. These markers are the
+          # user-visible systems that must exist in the materialized source.
+          $required = @(
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_MENU_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_KITS_REPAIR_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
+            @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
+          )
+          foreach ($check in $required) {
+            if (-not (Select-String -Path $check.File -Pattern $check.Marker -Quiet)) {
+              throw "Required co-op patch missing: $($check.Marker) in $($check.File)"
+            }
+          }
 
           git diff --quiet -- src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
           $sourceChanged = $LASTEXITCODE -ne 0
@@ -59,15 +78,13 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src/local_coop_mobile.cc src/local_coop.h src/local_coop_runtime.h src/combat.cc src/critter.cc src/map.cc src/tile.cc src/worldmap.cc src/worldmap.h src/scripts.cc src/loadsave.cc src/loadsave.h src/unified_campaign_transition.h src/unified_campaign_carryover.h src/unified_world_system.h src/unified_fallout1_endgame_profile.h src/mainmenu.h src/main.cc
-            git commit -m "Apply PhoBoi mobile, co-op medical, quest, lineage, and wilderness fixes"
+            git commit -m "Apply complete co-op HUD, controls, kits, world and leash fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            Write-Host "Applied PhoBoi/co-op/quest/lineage/wilderness patches to this build workspace."
+            Write-Host "Applied complete co-op patches to this build workspace."
           }
 
-          # git diff --quiet deliberately returns 1 when patches changed files.
-          # Do not let that expected status fail the workflow step.
           exit 0
 
       - name: Configure
