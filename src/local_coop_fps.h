@@ -48,6 +48,7 @@ struct LocalCoopFpsViewport {
 
 inline LocalCoopCameraMode gLocalCoopCameraMode = LocalCoopCameraMode::Isometric;
 inline int gLocalCoopFpsWindow = -1;
+inline bool gLocalCoopFpsToggleWasDown = false;
 inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};
 
 inline bool localCoopFpsActive()
@@ -283,6 +284,17 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
 
 inline void localCoopFpsTick()
 {
+    // COOP_FPS_F9_TOGGLE_V1
+    // Poll SDL directly so this works even when Fallout's normal key queue has
+    // a different meaning for function keys. Rising-edge detection prevents a
+    // held F9 key from flipping the camera mode every frame.
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    bool toggleDown = keys != nullptr && keys[SDL_SCANCODE_F9] != 0;
+    if (toggleDown && !gLocalCoopFpsToggleWasDown) {
+        localCoopFpsToggle();
+    }
+    gLocalCoopFpsToggleWasDown = toggleDown;
+
     if (!localCoopFpsActive()) {
         localCoopFpsDestroyWindow();
         return;
