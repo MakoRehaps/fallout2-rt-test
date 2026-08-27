@@ -259,8 +259,8 @@ let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false,seq=0,r
 const $=id=>document.getElementById(id);
 $('pin').value=new URLSearchParams(location.search).get('pin')||'';
 function bindButton(id,bit,axis){
- const e=$(id); const down=ev=>{ev.preventDefault();e.setPointerCapture?.(ev.pointerId);if(axis!==undefined)axes[axis]=32767;else buttons|=(1<<bit)};
- const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit)};
+ const e=$(id); const down=ev=>{ev.preventDefault();e.setPointerCapture?.(ev.pointerId);if(axis!==undefined)axes[axis]=32767;else buttons|=(1<<bit);send(true)};
+ const up=ev=>{ev.preventDefault();if(axis!==undefined)axes[axis]=-32768;else buttons&=~(1<<bit);send(true)};
  e.addEventListener('pointerdown',down);e.addEventListener('pointerup',up);e.addEventListener('pointercancel',up);e.addEventListener('pointerleave',up);
 }
 [['ba',0],['bb',1],['bx',2],['by',3],['back',4],['start',6],['skill',8],['lb',9],['rb',10],['du',11],['dd',12],['dl',13],['dr',14]].forEach(x=>bindButton(x[0],x[1]));
@@ -269,10 +269,10 @@ function bindStick(id,ax,ay){
  const e=$(id),n=e.querySelector('.nub');let active=null;
  function move(ev){if(active!==ev.pointerId)return;ev.preventDefault();const r=e.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
   let x=(ev.clientX-cx)/(r.width*.5),y=(ev.clientY-cy)/(r.height*.5),m=Math.hypot(x,y);if(m>1){x/=m;y/=m}
-  axes[ax]=Math.round(x*32767);axes[ay]=Math.round(y*32767);n.style.transform=`translate(${x*r.width*.28}px,${y*r.height*.28}px)`;
+  axes[ax]=Math.round(x*32767);axes[ay]=Math.round(y*32767);n.style.transform=`translate(${x*r.width*.28}px,${y*r.height*.28}px)`;send(true);
  }
  e.addEventListener('pointerdown',ev=>{active=ev.pointerId;e.setPointerCapture(ev.pointerId);move(ev)});
- e.addEventListener('pointermove',move);function end(ev){if(active!==ev.pointerId)return;active=null;axes[ax]=axes[ay]=0;n.style.transform=''}
+ e.addEventListener('pointermove',move);function end(ev){if(active!==ev.pointerId)return;active=null;axes[ax]=axes[ay]=0;n.style.transform='';send(true)}
  e.addEventListener('pointerup',end);e.addEventListener('pointercancel',end);
 }
 bindStick('ls',0,1);bindStick('rs',2,3);
@@ -283,7 +283,8 @@ $('connect').onclick=async()=>{try{const body=new URLSearchParams({slot:$('slot'
  if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});
 }catch(e){$('msg').textContent=e.message}};
 let ws=null,controlTimer=null,controlAttempt=0,controlMode='STARTING';
-let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttpSent=0;
+let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttpSent=0,decodeBusy=false,pendingFrame=null;
+// PHOBOI_LOW_LATENCY_CONTROLS_V1
 function updateStatus(){
  const link=rtt>0?` ${rtt}ms ±${jitter}`:'';
  $('top').textContent=`PLAYER ${slot+1} | CTRL ${controlMode} | VIDEO ${videoMode}${link}`;
@@ -325,15 +326,23 @@ function openStream(){
  const scheme=location.protocol==='https:'?'wss':'ws';videoMode='CONNECTING';updateStatus();
  const sock=new WebSocket(`${scheme}://${location.host}/stream?slot=${slot}&token=${token}`);stream=sock;sock.binaryType='arraybuffer';
  sock.onopen=()=>{if(stream!==sock)return;streamAttempt=0;lastFrameAt=performance.now();videoMode='WAIT';updateStatus()};
- sock.onmessage=e=>{if(stream===sock)inflateFrame(e.data).catch(()=>{videoMode='DECODE';updateStatus()})};
+ sock.onmessage=e=>{
+  if(stream!==sock)return;
+  if(decodeBusy){pendingFrame=e.data;return}
+  const decode=async data=>{decodeBusy=true;try{await inflateFrame(data)}catch(_){videoMode='DECODE';updateStatus()}finally{decodeBusy=false;if(pendingFrame){const latest=pendingFrame;pendingFrame=null;decode(latest)}}};
+  decode(e.data);
+ };
  sock.onerror=()=>{};
  sock.onclose=()=>{if(stream===sock)stream=null;videoMode='RETRY';updateStatus();scheduleStream()};
 }
-async function send(){
+async function send(immediate=false){
  if(slot<0)return;
  const stamp=performance.now();
  const packet=[++seq,stamp,Math.round(rtt),Math.round(jitter),axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
- if(ws&&ws.readyState===WebSocket.OPEN){try{ws.send(packet);controlMode='WS'}catch(e){}return}
+ if(ws&&ws.readyState===WebSocket.OPEN){
+  if(ws.bufferedAmount>1024)return;
+  try{ws.send(packet);controlMode='WS'}catch(e){}return
+ }
  // HTTP fallback stays responsive without flooding Cloudflare with ~60 POST/s.
  if(stamp-lastHttpSent<50||sending)return;lastHttpSent=stamp;sending=true;controlMode='HTTP';updateStatus();
  try{
@@ -869,21 +878,21 @@ void mobileCaptureStreamFrame(uint64_t now)
     }
     if (!any) return;
 
-    int width = 480;
-    int height = 270;
-    int fps = 12;
-    if (worstRtt <= 45 && worstJitter <= 12 && worstInterval <= 24) {
-        width = 960; height = 540; fps = 24;
-    } else if (worstRtt <= 80 && worstJitter <= 20 && worstInterval <= 28) {
-        width = 960; height = 540; fps = 24;
-    } else if (worstRtt <= 140 && worstJitter <= 35 && worstInterval <= 40) {
-        width = 640; height = 360; fps = 20;
-    } else if (worstRtt <= 220 && worstJitter <= 60 && worstInterval <= 65) {
+    int width = 320;
+    int height = 180;
+    int fps = 8;
+    // Controls always win over picture quality. zlib RGBA is intentionally
+    // capped well below the old 960x540@24 mode to avoid tunnel bufferbloat.
+    if (worstRtt <= 55 && worstJitter <= 15 && worstInterval <= 26) {
+        width = 640; height = 360; fps = 15;
+    } else if (worstRtt <= 110 && worstJitter <= 30 && worstInterval <= 40) {
         width = 480; height = 270; fps = 12;
-    } else if (worstRtt <= 350 && worstJitter <= 100 && worstInterval <= 110) {
-        width = 400; height = 225; fps = 8;
+    } else if (worstRtt <= 180 && worstJitter <= 55 && worstInterval <= 70) {
+        width = 400; height = 225; fps = 10;
+    } else if (worstRtt <= 300 && worstJitter <= 100 && worstInterval <= 120) {
+        width = 320; height = 180; fps = 6;
     } else {
-        width = 320; height = 180; fps = 5;
+        width = 256; height = 144; fps = 4;
     }
 
     uint64_t previous = gMobileLastStreamCapture.load();
