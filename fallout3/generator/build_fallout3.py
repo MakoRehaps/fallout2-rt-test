@@ -15,7 +15,7 @@ STRUCT = HERE / 'prefabs' / 'plan_structures.py'
 SUBWAY = HERE / 'subway' / 'build_subway_graph.py'
 SUBWAY_MAPS = HERE / 'subway' / 'generate_subway_maps.py'
 TACTICS = HERE / 'sources' / 'tactics' / 'index_tactics_source.py'
-RUNTIME = HERE / 'runtime' / 'compile_runtime_layout.py'
+F3O = HERE / 'runtime' / 'compile_runtime_layout.py'
 VALIDATE = HERE / 'validate_build.py'
 
 
@@ -26,11 +26,11 @@ def run(args):
 
 
 def main():
-    p = argparse.ArgumentParser(description='One-command Fallout 3 -> classic Fallout build pipeline')
+    p = argparse.ArgumentParser(description='One-command isolated Fallout 3 -> classic Fallout content build')
     p.add_argument('--scan', required=True, type=Path)
     p.add_argument('--fo1', required=True, type=Path)
     p.add_argument('--fo2', required=True, type=Path)
-    p.add_argument('--tactics', type=Path, help='Optional Fallout Tactics folder/ZIP for DLC source indexing')
+    p.add_argument('--tactics', type=Path)
     p.add_argument('--profile', type=Path, default=HERE / 'dlc' / 'base_fo3.json')
     p.add_argument('--output', type=Path, default=Path('FO3_GENERATED'))
     p.add_argument('--limit', type=int, default=0)
@@ -55,6 +55,11 @@ def main():
     structures = out / 'structures'
     run([STRUCT, '--manifest', manifest, '--output', structures, '--seed', a.seed])
 
+    intermediate = out / 'intermediate'
+    f3o_root = intermediate / 'f3o'
+    f3o_surface = f3o_root / 'surface'
+    f3o_subway = f3o_root / 'subway'
+
     subway = out / 'subway'; subway_graph = None; subway_manifest = None
     if profile.get('subway', {}).get('enabled', True):
         run([SUBWAY, '--manifest', manifest, '--output', subway])
@@ -66,6 +71,7 @@ def main():
             '--fo1', a.fo1,
             '--fo2', a.fo2,
             '--maps-dir', maps / 'MAPS',
+            '--f3o-dir', f3o_subway,
             '--output', subway,
             '--seed', a.seed,
         ])
@@ -78,11 +84,10 @@ def main():
         if subway_fragment.exists(): complete += subway_fragment.read_text(encoding='utf-8')
         (maps / 'maps_txt_fragment_complete.txt').write_text(complete, encoding='utf-8')
 
-    runtime = out / 'runtime'
-    runtime_cmd = [RUNTIME, '--structures', structures / 'structure_plans.json', '--world-graph', world_graph, '--output', runtime, '--maps-dir', maps / 'MAPS']
-    if subway_graph: runtime_cmd += ['--subway', subway_graph]
-    if subway_manifest: runtime_cmd += ['--subway-build', subway_manifest]
-    run(runtime_cmd)
+    f3o_cmd = [F3O, '--structures', structures / 'structure_plans.json', '--world-graph', world_graph, '--output', f3o_surface]
+    if subway_graph: f3o_cmd += ['--subway', subway_graph]
+    if subway_manifest: f3o_cmd += ['--subway-build', subway_manifest]
+    run(f3o_cmd)
 
     tactics_manifest = None
     tactics_weight = float(profile.get('sources', {}).get('tactics', 0.0))
@@ -92,9 +97,10 @@ def main():
         run([TACTICS, a.tactics, '--output', tactics_manifest])
 
     summary = {
-        'format': 'PhoBoi.Fallout3AutoBuild/6',
+        'format': 'PhoBoi.Fallout3AutoBuild/7',
         'profile': profile.get('id', 'unknown'),
         'seed': a.seed,
+        'architecture': 'isolated-content-generator',
         'inputs': {'scan': str(a.scan), 'fo1': str(a.fo1), 'fo2': str(a.fo2), 'tactics': str(a.tactics) if a.tactics else None},
         'outputs': {
             'maps': str(maps),
@@ -105,12 +111,12 @@ def main():
             'structure_plans': str(structures / 'structure_plans.json'),
             'subway_graph': str(subway_graph) if subway_graph else None,
             'subway_manifest': str(subway_manifest) if subway_manifest else None,
-            'runtime_layouts': str(runtime / 'runtime_index.json'),
-            'runtime_sidecars': str(maps / 'MAPS'),
+            'f3o_surface_workspace': str(f3o_surface),
+            'f3o_subway_workspace': str(f3o_subway) if subway_manifest else None,
             'tactics_manifest': str(tactics_manifest) if tactics_manifest else None,
         },
-        'engine_runtime': 'Generated F3M surface and F3U underground maps load F3O sidecars. Runtime geometry resolves category-aware walls/doors/containers and creates exit-grid transitions for both the surface graph and metro network.',
-        'engine_next_stage': 'Resolve FO3 actor/NPC anchors and placed scenery, add station-specific architecture, then replace inherited classic MAP object tails with clean generated native object sections.'
+        'engine_runtime': 'None. Fallout 3 generator intermediates are not loaded by the core engine and are not copied into the playable MAPS directory.',
+        'engine_next_stage': 'Compile F3O/actor/scenery plans into clean native MAP object sections so generated content remains data-only at play time.'
     }
     (out / 'AUTO_BUILD_COMPLETE.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     run([VALIDATE, '--root', out])
