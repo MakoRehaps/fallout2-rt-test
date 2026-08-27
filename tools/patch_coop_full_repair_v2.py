@@ -15,20 +15,22 @@ if '// COOP_18_ARCHETYPES_MENU_V1' not in s:
 p = Path('src/local_coop_runtime.h')
 s = p.read_text(encoding='utf-8')
 if '// COOP_FINAL_HOTBINDS_V1' not in s:
-    # State edges.
     state_old = '    bool pipboyWasDown = false;\n    bool skilldexWasDown = false;'
     state_new = '    bool pipboyWasDown = false;\n    bool inventoryWasDown = false;\n    bool startWasDown = false;\n    bool skilldexWasDown = false;'
     if state_old in s:
         s = s.replace(state_old, state_new, 1)
 
-    # Disable obsolete Back+Start postgame switching regardless of body drift.
+    # The lineage patch may already have removed the obsolete Back+Start switch.
+    # If it still exists, disable it; otherwise place the marker by runtime state.
     fn = 'inline void localCoopProcessPostgameCampaignSwitch()\n{\n'
     if fn in s:
-        s = s.replace(fn, fn + '    // COOP_FINAL_HOTBINDS_V1\n    // Final controller layout owns Back and Start independently.\n    return;\n\n', 1)
+        s = s.replace(fn, fn + '    // COOP_FINAL_HOTBINDS_V1\n    return;\n\n', 1)
     else:
-        raise SystemExit('postgame switch function missing')
+        marker_anchor = 'inline std::array<LocalCoopRuntimeSlot, kLocalCoopMaxPlayers> gLocalCoopRuntimeSlots;\n'
+        if marker_anchor not in s:
+            raise SystemExit('runtime marker anchor missing')
+        s = s.replace(marker_anchor, '// COOP_FINAL_HOTBINDS_V1\n' + marker_anchor, 1)
 
-    # World modal buttons: D-left PipBoy, Back inventory, RS Skilldex, Start menu.
     old = '''        bool pipboyDown = backDown && !startDown;
         bool canOpen = !modalActive'''
     new = '''        bool pipboyDown = player.controller != nullptr
@@ -81,7 +83,6 @@ if '// COOP_FINAL_HOTBINDS_V1' not in s:
         raise SystemExit('modal edge block missing')
     s = s.replace(old, new, 1)
 
-    # D-pad Right is the one self-medical action.
     old = '''        bool firstAidDown = false;
         bool doctorDown = false;'''
     if old in s:
@@ -108,8 +109,6 @@ if '// COOP_FINAL_HOTBINDS_V1' not in s:
             && !runtime.doctorWasDown
             && localCoopTickReached(now, runtime.nextHealingSkillTick)) {
             runtime.nextHealingSkillTick = now + 1000;
-            Object* savedTarget = localCoopHealingTarget(player);
-            (void)savedTarget;
             localCoopUseHealingSkill(player, SKILL_FIRST_AID);
             localCoopUseHealingSkill(player, SKILL_DOCTOR);
         }'''
@@ -122,7 +121,6 @@ if '// COOP_FINAL_HOTBINDS_V1' not in s:
         raise SystemExit('medical edge state missing')
     s = s.replace(old, '        runtime.firstAidWasDown = false;\n        runtime.doctorWasDown = medicalDown;', 1)
 
-    # Force quick-medical target to self; Skilldex still uses its own targeting.
     old = '''    Object* target = localCoopHealingTarget(player);
     if (target == nullptr) {
         return false;
