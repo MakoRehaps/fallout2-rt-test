@@ -4794,7 +4794,21 @@ void _apply_damage(Attack* attack, bool animated)
         }
 
         scriptSetObjects(defender->sid, attack->attacker, attack->weapon);
-        _damage_object(defender, attack->defenderDamage, animated, attack->defender != attack->oops, attacker);
+
+        // COOP_MELEE_HIT_UNLOCK_V1
+        // In realtime co-op a normal melee hit reaction must not become a
+        // prioritized animation lock. Human players remain responsive after
+        // ordinary hits; genuine knockdown/knockout or physical knockback still
+        // uses Fallout's animated damage path and therefore keeps its impact.
+        bool defenderHardReaction = (attack->defenderFlags & (DAM_DEAD | DAM_KNOCKED_OUT | DAM_KNOCKED_DOWN)) != 0
+            || attack->defenderKnockback > 0;
+        bool defenderAnimated = animated;
+        if (gLocalCoopInitialized
+            && localCoopActorIsHumanOwned(defender)
+            && !defenderHardReaction) {
+            defenderAnimated = false;
+        }
+        _damage_object(defender, attack->defenderDamage, defenderAnimated, attack->defender != attack->oops, attacker);
 
         if (defenderIsCritter) {
             _combatai_notify_onlookers(defender);
