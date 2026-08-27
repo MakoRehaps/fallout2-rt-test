@@ -24,6 +24,8 @@ Source: "..\build\Debug\fallout2-ce.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\Debug\fallout2-ce.pdb"; DestDir: "{app}"; Flags: ignoreversion
 Source: "cloudflared.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "cloudflared-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "freedoom\freedoom1.wad"; DestDir: "{app}\freedoom"; Flags: ignoreversion
+Source: "freedoom\COPYING.txt"; DestDir: "{app}\freedoom"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Fallout Unified Co-op Beta Debug"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--unified --fallout1-root=""{app}\GameData\Fallout1"" --fallout2-root=""{app}\GameData\Fallout2"" ""[debug]mode=log"" ""[debug]show_load_info=1"""; WorkingDir: "{app}"
@@ -170,8 +172,6 @@ begin
     exit;
   end;
 
-  { Loose files are copied last so an owned installation's mods and official
-    loose overrides retain higher priority than patch and base DAT contents. }
   Result := CopyTreeWithRobocopy(DataDir, AddBackslash(DestRoot) + 'data');
 end;
 
@@ -197,7 +197,6 @@ var
 begin
   DataRoot := AddBackslash(GameRoot) + 'data';
 
-  { Base content first, critter assets second, then the official patch layer. }
   Result := ExtractDat(AddBackslash(GameRoot) + 'master.dat', DataRoot, F1Root, F2Root);
   if not Result then exit;
   Result := ExtractDat(AddBackslash(GameRoot) + 'critter.dat', DataRoot, F1Root, F2Root);
@@ -237,9 +236,6 @@ begin
   EndDeathPath := AddBackslash(F1Dest) + 'data\enddeath.txt';
   ForceDirectories(AddBackslash(F1Dest) + 'data');
 
-  { Fallout 2 CE treats a missing enddeath.txt as fatal during startup. Fallout 1
-    does not use Fallout 2's death-ending table. Keep the file parseable but empty
-    until the Fallout 1 ending/death system is ported properly. }
   EndDeathText := '# Fallout 1 compatibility stub - no Fallout 2 death ending entries' + #13#10;
   Result := SaveStringToFile(EndDeathPath, EndDeathText, False);
 end;
@@ -328,5 +324,5 @@ begin
   if not VerifyExtractedMaps(F1Dest, F2Dest) then
     RaiseException('DAT extraction completed but required maps were not found (V13ENT.MAP / ARTEMPLE.MAP).');
 
-  WizardForm.StatusLabel.Caption := 'Full Debug build and unpacked Fallout 1 + Fallout 2 data installed.';
+  WizardForm.StatusLabel.Caption := 'Full Debug build, FPS assets, and unpacked Fallout data installed.';
 end;
