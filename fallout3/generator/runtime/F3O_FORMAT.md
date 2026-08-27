@@ -1,8 +1,8 @@
-# F3O runtime placement format
+# F3O generator placement format
 
-`F3O` is the generated-object intermediate format used by the Fallout 3 classic generator and consumed directly by `src/fo3_runtime_layout.h`.
+`F3O` is an intermediate generated-object format used only by the isolated Fallout 3 classic generation pipeline.
 
-The generator decides **what** should exist and **where**. The engine resolves symbolic roles against the installed Fallout prototype data, so the generator does not need to hardcode one particular Fallout 2 PID set.
+It is **not a core-engine runtime dependency** and it is not loaded by the normal `fallout2-rt-test` engine. The generator uses F3O to describe what should exist and where while later compilation stages resolve those symbolic requests into deliberately generated native classic Fallout map/object data.
 
 Example:
 
@@ -24,32 +24,27 @@ EXIT east 98 50 214 20100 0 4 target=F3M0014
 
 Commands:
 
-- `CATEGORY`: style/material family used by the runtime prototype resolver.
+- `CATEGORY`: style/material family requested by the generator-side asset resolver.
 - `STRUCTURE`: generated building/compound footprint metadata.
-- `WALL_RUN`: connected run of classic wall objects.
-- `DOOR`: doorway position; the runtime selects an installed door scenery prototype.
+- `WALL_RUN`: connected run of classic wall objects to compile into the final map.
+- `DOOR`: doorway position and orientation.
 - `ANCHOR center`: general-purpose structure center.
-- `ANCHOR loot`: becomes a compatible item-container object.
-- `ANCHOR npc`: reserved for the FO3 actor-semantic resolver.
-- `EXIT`: creates an engine exit-grid object. Fields are `side x y destination_map destination_hex destination_elevation destination_rotation`; a trailing `target=<map name>` is human-readable/debug metadata.
+- `ANCHOR loot`: container/loot placement candidate.
+- `ANCHOR npc`: actor/quest placement candidate.
+- `EXIT`: requested classic exit-grid transition. Fields are `side x y destination_map destination_hex destination_elevation destination_rotation`; a trailing `target=<map name>` is debug metadata.
 
 ## Coordinate spaces
 
-`WALL_RUN`, `DOOR`, `ANCHOR`, and the local `EXIT x y` coordinates use the generator's 100x100 square-grid space. The runtime converts these positions into the classic 200x200 hex grid.
+`WALL_RUN`, `DOOR`, `ANCHOR`, and local `EXIT x y` coordinates use the generator's 100x100 square-grid space. The native object writer converts these positions into the classic 200x200 hex grid when building final map object records.
 
 `EXIT destination_hex` is already a classic hex tile number. Generated maps currently use `20100` as the default arrival hex, elevation `0`.
 
-## Runtime persistence
+## Isolation rule
 
-Generated F3O objects are marked `OBJECT_NO_SAVE`. They are reconstructed once when an `F3Mxxxx.MAP` becomes active, which prevents generated walls, doors, containers, and exits from duplicating inside savegames.
+The Fallout 3 conversion layer must remain removable from the main engine. After generation/compilation is complete, the game should need only normal classic Fallout-compatible data files. No frame-loop hook, global engine subsystem, mandatory FO3 source-data reader, or F3O loader belongs in `src/`.
 
-## Resolver behavior
+This keeps the Fallout 3 conversion as an asset-production/content compiler rather than turning the base engine into a Fallout 3-specific runtime.
 
-The current engine resolver examines loaded prototype metadata directly:
+## Resolver direction
 
-- wall material for generated wall runs;
-- scenery subtype/material for doors;
-- item subtype/material for loot containers;
-- the built-in exit-grid PID range for map transitions.
-
-Category preferences currently distinguish `vault`, `industrial`, `urban`, `cave`, and `wasteland`. Later passes can add finer FO1/FO2/Tactics style families without changing F3O geometry.
+Prototype/style resolution is performed on the generator/compiler side. Category preferences distinguish `vault`, `industrial`, `urban`, `cave`, and `wasteland`; later passes can add finer FO1/FO2/Tactics families without changing the core engine.
