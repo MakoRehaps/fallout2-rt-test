@@ -72,6 +72,7 @@ jobs:
           python tools/patch_no_mountain_maps.py
           python tools/patch_wilderness_four_side_pool.py
           python tools/patch_zoom_scroll_bounds.py
+          python tools/patch_coop_spawn_and_fps_layout.py
 
           $required = @(
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_LOW_LATENCY_CONTROLS_V1' },
@@ -82,17 +83,23 @@ jobs:
             @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_P1_EXIT_GRID_AUTHORITY_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_PREJOINED_LIVE_SPAWN_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PREJOIN_LIVE_SPAWN_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FPS_SINGLE_LATE_TICK_V1' },
             @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_V1' },
             @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_HUD_HOOK_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1' },
             @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_RUNTIME_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_DYNAMIC_ACTIVE_LAYOUT_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_DRAW_ACTIVE_ONLY_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_POST_DRAW_DIAGNOSTICS_V1' },
             @{ File = 'src/local_coop_fps_raycast.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_V1' },
             @{ File = 'src/local_coop_fps_weapon.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_V1' },
             @{ File = 'src/local_coop_iso_cameras.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_V1' },
@@ -109,7 +116,9 @@ jobs:
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_MENU_V1' },
             @{ File = 'src/local_coop_accessibility.h'; Marker = 'COOP_ACCESSIBILITY_HIGHLIGHTS_V1' },
             @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_TILELESS_GROUP_ROOM_V1' },
+            @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_READY_ROOM_PREJOIN_TRANSFER_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_FPS_SINGLE_LATE_TICK_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_PROCEDURAL_SELFPLAY_ENCOUNTERS_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1' },
             @{ File = 'src/worldmap.cc'; Marker = 'COOP_STAGED_ENCOUNTER_APPROACH_V1' },
