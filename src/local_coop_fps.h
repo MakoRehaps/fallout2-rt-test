@@ -55,6 +55,15 @@ inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};
 // COOP_FPS_RENDER_DIAGNOSTICS_V1
 inline Uint32 gLocalCoopFpsNextDiagnosticTick = 0;
 inline bool gLocalCoopFpsLoggedFirstFrame = false;
+// COOP_FPS_DEEP_DIAGNOSTICS_V2
+inline int gLocalCoopFpsObjectsScanned = 0;
+inline int gLocalCoopFpsObjectsProjected = 0;
+inline int gLocalCoopFpsArtLockFailures = 0;
+inline int gLocalCoopFpsBillboardsOccluded = 0;
+inline int gLocalCoopFpsBillboardsClipped = 0;
+inline int gLocalCoopFpsBillboardsDrawn = 0;
+inline bool gLocalCoopFpsLoggedBufferFailure = false;
+inline bool gLocalCoopFpsLoggedActiveEntry = false;
 
 inline bool localCoopFpsActive()
 {
@@ -151,9 +160,12 @@ inline bool localCoopFpsProject(Object* camera, Object* object, float& depth, fl
 inline void localCoopFpsCollect(Object* camera, std::vector<LocalCoopFpsBillboard>& out)
 {
     out.clear();
+    gLocalCoopFpsObjectsScanned = 0;
+    gLocalCoopFpsObjectsProjected = 0;
     if (camera == nullptr) return;
 
     for (Object* object = objectFindFirst(); object != nullptr; object = objectFindNext()) {
+        gLocalCoopFpsObjectsScanned++;
         if (object == camera
             || object->elevation != camera->elevation
             || object->tile < 0
@@ -173,6 +185,7 @@ inline void localCoopFpsCollect(Object* camera, std::vector<LocalCoopFpsBillboar
         float depth = 0.0f;
         float lateral = 0.0f;
         if (!localCoopFpsProject(camera, object, depth, lateral)) continue;
+        gLocalCoopFpsObjectsProjected++;
         out.push_back({ object, depth, lateral, distance });
     }
 
@@ -192,7 +205,10 @@ inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
 
     CacheEntry* handle = nullptr;
     Art* art = artLock(object->fid, &handle);
-    if (art == nullptr) return;
+    if (art == nullptr) {
+        gLocalCoopFpsArtLockFailures++;
+        return;
+    }
 
     int direction = std::clamp(object->rotation, 0, ROTATION_COUNT - 1);
     int frameCount = std::max(1, artGetFrameCount(art));
@@ -210,6 +226,7 @@ inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
         int localColumn = centerX - view.x;
         if (localColumn >= 0 && localColumn < static_cast<int>(wallDepth.size())
             && billboard.depth > wallDepth[static_cast<size_t>(localColumn)] + 6.0f) {
+            gLocalCoopFpsBillboardsOccluded++;
             artUnlock(handle);
             return;
         }
@@ -221,6 +238,9 @@ inline void localCoopFpsDrawBillboard(const LocalCoopFpsBillboard& billboard,
             && y + drawHeight < view.y + view.height) {
             blitBufferToBufferStretchTrans(src, srcWidth, srcHeight, srcWidth,
                 dest + y * pitch + x, drawWidth, drawHeight, pitch);
+            gLocalCoopFpsBillboardsDrawn++;
+        } else {
+            gLocalCoopFpsBillboardsClipped++;
         }
     }
 
@@ -281,12 +301,19 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
         player.actor, buffer, pitch, view.x, view.y, view.width, view.height);
 
     std::vector<LocalCoopFpsBillboard> billboards;
+    gLocalCoopFpsArtLockFailures = 0;
+    gLocalCoopFpsBillboardsOccluded = 0;
+    gLocalCoopFpsBillboardsClipped = 0;
+    gLocalCoopFpsBillboardsDrawn = 0;
     localCoopFpsCollect(player.actor, billboards);
     Uint32 diagNow = SDL_GetTicks();
     if (slot == 0 && static_cast<Sint32>(diagNow - gLocalCoopFpsNextDiagnosticTick) >= 0) {
-        debugPrint("[COOP FPS] P1 actor tile=%d elev=%d rot=%d viewport=%dx%d walls=%d billboards=%d\n",
+        debugPrint("[COOP FPS STAGE] render P1 tile=%d elev=%d rot=%d viewport=%dx%d rays=%d rayHits=%d scanned=%d projected=%d billboards=%d drawn=%d occluded=%d clipped=%d artFail=%d freedoom=%d\n",
             player.actor->tile, player.actor->elevation, player.actor->rotation,
-            view.width, view.height, static_cast<int>(wallDepth.size()), static_cast<int>(billboards.size()));
+            view.width, view.height, static_cast<int>(wallDepth.size()), gLocalCoopFpsRayHitColumns,
+            gLocalCoopFpsObjectsScanned, gLocalCoopFpsObjectsProjected, static_cast<int>(billboards.size()),
+            gLocalCoopFpsBillboardsDrawn, gLocalCoopFpsBillboardsOccluded, gLocalCoopFpsBillboardsClipped,
+            gLocalCoopFpsArtLockFailures, gLocalCoopFreedoomTextureReady ? 1 : 0);
         gLocalCoopFpsNextDiagnosticTick = diagNow + 1000;
     }
     for (const auto& billboard : billboards) {
@@ -349,13 +376,21 @@ inline void localCoopFpsTick()
     gLocalCoopFpsControllerToggleWasDown = controllerToggleDown;
 
     if (!localCoopFpsActive()) {
+        gLocalCoopFpsLoggedActiveEntry = false;
         localCoopFpsDestroyWindow();
         return;
+    }
+    if (!gLocalCoopFpsLoggedActiveEntry) {
+        debugPrint("[COOP FPS STAGE] 1 active mode entered\n");
+        gLocalCoopFpsLoggedActiveEntry = true;
     }
 
     int width = screenGetWidth();
     int height = screenGetVisibleHeight();
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0) {
+        debugPrint("[COOP FPS STAGE] ERROR invalid screen size=%dx%d\n", width, height);
+        return;
+    }
 
     if (gLocalCoopFpsWindow == -1) {
         gLocalCoopFpsWindow = windowCreate(0, 0, width, height, _colorTable[0], WINDOW_MOVE_ON_TOP);
@@ -363,11 +398,18 @@ inline void localCoopFpsTick()
             debugPrint("[COOP FPS] ERROR windowCreate failed size=%dx%d\n", width, height);
             return;
         }
-        debugPrint("[COOP FPS] window created id=%d size=%dx%d\n", gLocalCoopFpsWindow, width, height);
+        debugPrint("[COOP FPS STAGE] 2 window created id=%d size=%dx%d\n", gLocalCoopFpsWindow, width, height);
     }
 
     unsigned char* buffer = windowGetBuffer(gLocalCoopFpsWindow);
-    if (buffer == nullptr) return;
+    if (buffer == nullptr) {
+        if (!gLocalCoopFpsLoggedBufferFailure) {
+            debugPrint("[COOP FPS STAGE] ERROR window buffer null id=%d\n", gLocalCoopFpsWindow);
+            gLocalCoopFpsLoggedBufferFailure = true;
+        }
+        return;
+    }
+    gLocalCoopFpsLoggedBufferFailure = false;
 
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         localCoopFpsProcessLook(slot);
@@ -380,7 +422,7 @@ inline void localCoopFpsTick()
     windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
     windowRefresh(gLocalCoopFpsWindow);
     if (!gLocalCoopFpsLoggedFirstFrame) {
-        debugPrint("[COOP FPS] first rendered frame refreshed successfully\n");
+        debugPrint("[COOP FPS STAGE] 6 first rendered frame refreshed successfully window=%d\n", gLocalCoopFpsWindow);
         gLocalCoopFpsLoggedFirstFrame = true;
     }
 }

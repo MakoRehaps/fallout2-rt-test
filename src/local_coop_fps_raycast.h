@@ -23,6 +23,9 @@ namespace fallout {
 inline bool gLocalCoopFreedoomTriedLoad = false;
 inline bool gLocalCoopFreedoomTextureReady = false;
 inline std::array<unsigned char, 64 * 64> gLocalCoopFreedoomFlat {};
+// COOP_FPS_RAYCAST_DIAGNOSTICS_V2
+inline int gLocalCoopFpsRayHitColumns = 0;
+inline int gLocalCoopFpsRayLastBlockerFid = -1;
 
 struct LocalCoopWadDirEntry {
     int32_t filePos;
@@ -172,6 +175,8 @@ inline std::vector<float> localCoopFpsRaycastWalls(Object* camera,
     int viewHeight)
 {
     std::vector<float> depth(static_cast<size_t>(std::max(0, viewWidth)), 1000000.0f);
+    gLocalCoopFpsRayHitColumns = 0;
+    gLocalCoopFpsRayLastBlockerFid = -1;
     if (camera == nullptr || dest == nullptr || viewWidth <= 0 || viewHeight <= 0 || !tileIsValid(camera->tile)) {
         return depth;
     }
@@ -221,6 +226,8 @@ inline std::vector<float> localCoopFpsRaycastWalls(Object* camera,
         }
 
         if (hitObject == nullptr || hitDistance <= 0.0f) continue;
+        gLocalCoopFpsRayHitColumns++;
+        gLocalCoopFpsRayLastBlockerFid = hitObject->fid;
         depth[static_cast<size_t>(column)] = hitDistance;
 
         float tileDistance = std::max(0.5f, hitDistance / std::max(8.0f, forwardLength));
