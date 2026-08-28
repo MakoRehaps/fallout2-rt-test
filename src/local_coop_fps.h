@@ -52,6 +52,9 @@ inline int gLocalCoopFpsWindow = -1;
 inline bool gLocalCoopFpsToggleWasDown = false;
 inline bool gLocalCoopFpsControllerToggleWasDown = false;
 inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};
+// COOP_FPS_RENDER_DIAGNOSTICS_V1
+inline Uint32 gLocalCoopFpsNextDiagnosticTick = 0;
+inline bool gLocalCoopFpsLoggedFirstFrame = false;
 
 inline bool localCoopFpsActive()
 {
@@ -89,6 +92,20 @@ inline void localCoopFpsToggle()
 
 inline LocalCoopFpsViewport localCoopFpsViewportForSlot(int slot, int width, int height)
 {
+    // COOP_FPS_SINGLE_PLAYER_FULLSCREEN_V1
+    int activeHumans = 0;
+    for (int i = 0; i < kLocalCoopMaxPlayers; i++) {
+        const LocalCoopPlayer& p = gLocalCoopPlayers[i];
+        if (p.connected && p.humanOwned && p.actor != nullptr) activeHumans++;
+    }
+    if (activeHumans <= 1 && slot == 0) {
+        LocalCoopFpsViewport full;
+        full.x = 0;
+        full.y = 0;
+        full.width = width;
+        full.height = height;
+        return full;
+    }
     int halfW = width / 2;
     int halfH = height / 2;
     LocalCoopFpsViewport view;
@@ -265,6 +282,13 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
 
     std::vector<LocalCoopFpsBillboard> billboards;
     localCoopFpsCollect(player.actor, billboards);
+    Uint32 diagNow = SDL_GetTicks();
+    if (slot == 0 && static_cast<Sint32>(diagNow - gLocalCoopFpsNextDiagnosticTick) >= 0) {
+        debugPrint("[COOP FPS] P1 actor tile=%d elev=%d rot=%d viewport=%dx%d walls=%d billboards=%d\n",
+            player.actor->tile, player.actor->elevation, player.actor->rotation,
+            view.width, view.height, static_cast<int>(wallDepth.size()), static_cast<int>(billboards.size()));
+        gLocalCoopFpsNextDiagnosticTick = diagNow + 1000;
+    }
     for (const auto& billboard : billboards) {
         localCoopFpsDrawBillboard(billboard, buffer, pitch, view, wallDepth);
     }
@@ -335,7 +359,11 @@ inline void localCoopFpsTick()
 
     if (gLocalCoopFpsWindow == -1) {
         gLocalCoopFpsWindow = windowCreate(0, 0, width, height, _colorTable[0], WINDOW_MOVE_ON_TOP);
-        if (gLocalCoopFpsWindow == -1) return;
+        if (gLocalCoopFpsWindow == -1) {
+            debugPrint("[COOP FPS] ERROR windowCreate failed size=%dx%d\n", width, height);
+            return;
+        }
+        debugPrint("[COOP FPS] window created id=%d size=%dx%d\n", gLocalCoopFpsWindow, width, height);
     }
 
     unsigned char* buffer = windowGetBuffer(gLocalCoopFpsWindow);
@@ -351,6 +379,10 @@ inline void localCoopFpsTick()
     windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, height - 1, _colorTable[992]);
     windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
     windowRefresh(gLocalCoopFpsWindow);
+    if (!gLocalCoopFpsLoggedFirstFrame) {
+        debugPrint("[COOP FPS] first rendered frame refreshed successfully\n");
+        gLocalCoopFpsLoggedFirstFrame = true;
+    }
 }
 
 } // namespace fallout

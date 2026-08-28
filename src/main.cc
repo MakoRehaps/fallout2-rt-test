@@ -461,6 +461,12 @@ static void mainLoop()
             _game_user_wants_to_quit = 2;
         }
 
+        // COOP_FPS_LATE_RENDER_HOOK_V1
+        // Draw FPS last so later map/interface refreshes cannot cover it.
+        if (localCoopFpsActive()) {
+            localCoopFpsTick();
+        }
+
         renderPresent();
         sharedFpsLimiter.throttle();
     }
