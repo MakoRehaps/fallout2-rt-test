@@ -305,6 +305,8 @@ inline void localCoopFpsTick()
     // L3 is intentionally reserved for camera mode. It was unused by the
     // co-op control map, and PhoBoi phones expose it as a dedicated FPS / ISO
     // touchscreen button instead of asking phone users to emulate stick-click.
+    // COOP_FPS_CONTROLLER_UPDATE_HARDEN_V1
+    SDL_GameControllerUpdate();
     bool controllerToggleDown = false;
     int controllerToggleSlot = -1;
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {

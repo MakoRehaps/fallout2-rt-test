@@ -427,6 +427,14 @@ static void mainLoop()
 
         int keyCode = inputGetInput();
 
+        // COOP_FPS_KEYCODE_HARD_HOOK_V1
+        if (keyCode == KEY_F9) {
+            debugPrint("[COOP CAMERA] mainLoop KEY_F9 hard hook\n");
+            localCoopFpsToggle();
+            // Prevent the physical-state path from toggling a second time this frame.
+            gLocalCoopFpsToggleWasDown = true;
+        }
+
         // COOP_RUNTIME_MAINLOOP_HOOK_V1
         // Drive the co-op runtime directly from the live Fallout gameplay loop.
         // The ticker remains useful inside stock modal loops, but it cannot be
