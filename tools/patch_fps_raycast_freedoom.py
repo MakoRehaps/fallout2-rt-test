@@ -43,6 +43,13 @@ def prepare_freedoom_assets():
 
 prepare_freedoom_assets()
 
+# Always run staged runtime diagnostics, even when the raycast source marker is
+# already present. This gives each installer build proof for every FPS stage.
+deep_diag = Path('tools/patch_fps_deep_diagnostics.py')
+if not deep_diag.exists():
+    raise SystemExit('deep FPS diagnostics helper missing')
+exec(compile(deep_diag.read_text(encoding='utf-8'), str(deep_diag), 'exec'))
+
 path = Path('src/local_coop_fps.h')
 text = path.read_text(encoding='utf-8')
 marker = 'COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1'
