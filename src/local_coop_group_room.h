@@ -70,6 +70,9 @@ inline bool localCoopRunTilelessGroupRoom()
     std::array<bool, kLocalCoopMaxPlayers> rightWasDown {};
 
     joined[0] = true;
+    // COOP_READY_ROOM_PREJOIN_TRANSFER_V1
+    gLocalCoopPrejoinedSlots.fill(false);
+    gLocalCoopPrejoinedSlots[0] = true;
 
     static const char* kTutorialPages[][6] = {
         {
@@ -242,6 +245,7 @@ inline bool localCoopRunTilelessGroupRoom()
                 if (startEdge && !joined[slot]) {
                     joined[slot] = true;
                     ready[slot] = false;
+                    gLocalCoopPrejoinedSlots[slot] = true;
                     dirty = true;
                     debugPrint("[COOP GROUP] slot=%d joined during guide\n", slot);
                 }
@@ -252,6 +256,7 @@ inline bool localCoopRunTilelessGroupRoom()
                 if (!joined[slot]) {
                     joined[slot] = true;
                     ready[slot] = false;
+                    gLocalCoopPrejoinedSlots[slot] = true;
                     dirty = true;
                     debugPrint("[COOP GROUP] slot=%d joined\n", slot);
                 } else {
@@ -303,6 +308,11 @@ inline bool localCoopRunTilelessGroupRoom()
             }
 
             if (joinedCount > 0 && readyCount == joinedCount) {
+                for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+                    gLocalCoopPrejoinedSlots[slot] = joined[slot];
+                }
+                debugPrint("[COOP PREJOIN] ready-room transfer p1=%d p2=%d p3=%d p4=%d\n",
+                    joined[0] ? 1 : 0, joined[1] ? 1 : 0, joined[2] ? 1 : 0, joined[3] ? 1 : 0);
                 accepted = true;
                 break;
             }

@@ -462,10 +462,10 @@ static void mainLoop()
         }
 
         // COOP_FPS_LATE_RENDER_HOOK_V1
-        // Draw FPS last so later map/interface refreshes cannot cover it.
-        if (localCoopFpsActive()) {
-            localCoopFpsTick();
-        }
+        // COOP_FPS_SINGLE_LATE_TICK_V1
+        // Run once, unconditionally: this processes L3/FPS input even while
+        // isometric, then draws FPS last so the stock world cannot cover it.
+        localCoopFpsTick();
 
         renderPresent();
         sharedFpsLimiter.throttle();

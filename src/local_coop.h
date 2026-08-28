@@ -91,6 +91,10 @@ struct LocalCoopPlayer {
 };
 
 inline std::array<LocalCoopPlayer, kLocalCoopMaxPlayers> gLocalCoopPlayers;
+// COOP_PREJOINED_LIVE_SPAWN_V1
+// The tileless ready room cannot create critters because no map exists yet.
+// Remember which slots joined and materialize them on the first live map tick.
+inline std::array<bool, kLocalCoopMaxPlayers> gLocalCoopPrejoinedSlots {};
 inline bool gLocalCoopInitialized = false;
 inline uint32_t gLocalCoopAppliedCharacterStateRevision = 0xFFFFFFFF;
 inline int gLocalCoopModalControllerSlot = -1;
@@ -658,6 +662,33 @@ inline bool localCoopCreatePlayerActor(int slot)
         pid,
         spawnTile);
     return true;
+}
+
+inline void localCoopSpawnPrejoinedPlayers()
+{
+    if (gDude == nullptr || !tileIsValid(gDude->tile)) {
+        return;
+    }
+
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; ++slot) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!gLocalCoopPrejoinedSlots[slot]
+            || !player.connected
+            || player.controller == nullptr
+            || player.actor != nullptr) {
+            continue;
+        }
+
+        debugPrint("[COOP PREJOIN] slot=%d spawning on live map\n", slot);
+        if (localCoopCreatePlayerActor(slot)) {
+            gLocalCoopPrejoinedSlots[slot] = false;
+            debugPrint("[COOP PREJOIN] slot=%d live actor ready id=%d tile=%d\n",
+                slot, player.actor != nullptr ? player.actor->id : -1,
+                player.actor != nullptr ? player.actor->tile : -1);
+        } else {
+            debugPrint("[COOP PREJOIN] slot=%d spawn attempt failed; retrying next tick\n", slot);
+        }
+    }
 }
 
 inline void localCoopRestoreCharactersFromSave()

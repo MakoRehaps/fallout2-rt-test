@@ -1154,6 +1154,8 @@ inline void localCoopRuntimeTick()
     localCoopSystemMenuTick();
     localCoopAccessibilityTick();
     localCoopRestoreCharactersFromSave();
+    // COOP_PREJOIN_LIVE_SPAWN_RUNTIME_V1
+    localCoopSpawnPrejoinedPlayers();
     localCoopKeepReservedActorsWithParty();
 
     // COOP_EXPLICIT_SIMULATION_PAUSE_RUNTIME_V1
@@ -1193,7 +1195,8 @@ inline void localCoopRuntimeTick()
 
     // COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1
     localCoopUpdateSharedCamera();
-    localCoopFpsTick();
+    // COOP_FPS_SINGLE_LATE_TICK_V1
+    // FPS input/render runs once from main.cc immediately before present.
     // Personal HUDs draw after FPS so all four remain readable.
     localCoopPersonalUiTick();
     localCoopSweepSharedInventory();

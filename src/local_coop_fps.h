@@ -101,27 +101,56 @@ inline void localCoopFpsToggle()
 
 inline LocalCoopFpsViewport localCoopFpsViewportForSlot(int slot, int width, int height)
 {
-    // COOP_FPS_SINGLE_PLAYER_FULLSCREEN_V1
-    int activeHumans = 0;
-    for (int i = 0; i < kLocalCoopMaxPlayers; i++) {
+    // COOP_FPS_DYNAMIC_ACTIVE_LAYOUT_V1
+    int activeSlots[kLocalCoopMaxPlayers] = { -1, -1, -1, -1 };
+    int activeCount = 0;
+    int rank = -1;
+    for (int i = 0; i < kLocalCoopMaxPlayers; ++i) {
         const LocalCoopPlayer& p = gLocalCoopPlayers[i];
-        if (p.connected && p.humanOwned && p.actor != nullptr) activeHumans++;
+        if (p.connected && p.humanOwned && p.actor != nullptr) {
+            activeSlots[activeCount] = i;
+            if (i == slot) rank = activeCount;
+            ++activeCount;
+        }
     }
-    if (activeHumans <= 1 && slot == 0) {
-        LocalCoopFpsViewport full;
-        full.x = 0;
-        full.y = 0;
-        full.width = width;
-        full.height = height;
-        return full;
+
+    LocalCoopFpsViewport view;
+    if (rank < 0 || activeCount <= 0) return view;
+
+    if (activeCount == 1) {
+        view = { 0, 0, width, height };
+        return view;
     }
+
     int halfW = width / 2;
     int halfH = height / 2;
-    LocalCoopFpsViewport view;
-    view.x = (slot & 1) != 0 ? halfW : 0;
-    view.y = slot >= 2 ? halfH : 0;
-    view.width = (slot & 1) != 0 ? width - halfW : halfW;
-    view.height = slot >= 2 ? height - halfH : halfH;
+    if (activeCount == 2) {
+        view.x = rank == 0 ? 0 : halfW;
+        view.y = 0;
+        view.width = rank == 0 ? halfW : width - halfW;
+        view.height = height;
+        return view;
+    }
+
+    if (activeCount == 3) {
+        if (rank < 2) {
+            view.x = rank == 0 ? 0 : halfW;
+            view.y = 0;
+            view.width = rank == 0 ? halfW : width - halfW;
+            view.height = halfH;
+        } else {
+            view.x = 0;
+            view.y = halfH;
+            view.width = width;
+            view.height = height - halfH;
+        }
+        return view;
+    }
+
+    view.x = (rank & 1) != 0 ? halfW : 0;
+    view.y = rank >= 2 ? halfH : 0;
+    view.width = (rank & 1) != 0 ? width - halfW : halfW;
+    view.height = rank >= 2 ? height - halfH : halfH;
     return view;
 }
 
@@ -306,6 +335,11 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
     gLocalCoopFpsBillboardsClipped = 0;
     gLocalCoopFpsBillboardsDrawn = 0;
     localCoopFpsCollect(player.actor, billboards);
+    for (const auto& billboard : billboards) {
+        localCoopFpsDrawBillboard(billboard, buffer, pitch, view, wallDepth);
+    }
+
+    // COOP_FPS_POST_DRAW_DIAGNOSTICS_V1
     Uint32 diagNow = SDL_GetTicks();
     if (slot == 0 && static_cast<Sint32>(diagNow - gLocalCoopFpsNextDiagnosticTick) >= 0) {
         debugPrint("[COOP FPS STAGE] render P1 tile=%d elev=%d rot=%d viewport=%dx%d rays=%d rayHits=%d scanned=%d projected=%d billboards=%d drawn=%d occluded=%d clipped=%d artFail=%d freedoom=%d\n",
@@ -315,9 +349,6 @@ inline void localCoopFpsDrawViewport(int slot, unsigned char* buffer, int pitch,
             gLocalCoopFpsBillboardsDrawn, gLocalCoopFpsBillboardsOccluded, gLocalCoopFpsBillboardsClipped,
             gLocalCoopFpsArtLockFailures, gLocalCoopFreedoomTextureReady ? 1 : 0);
         gLocalCoopFpsNextDiagnosticTick = diagNow + 1000;
-    }
-    for (const auto& billboard : billboards) {
-        localCoopFpsDrawBillboard(billboard, buffer, pitch, view, wallDepth);
     }
 
     // COOP_FREEDOOM_FIRST_PERSON_WEAPONS_RUNTIME_V1
@@ -411,15 +442,33 @@ inline void localCoopFpsTick()
     }
     gLocalCoopFpsLoggedBufferFailure = false;
 
+    // COOP_FPS_DRAW_ACTIVE_ONLY_V1
+    int activeCount = 0;
+    for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+        const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (player.connected && player.humanOwned && player.actor != nullptr) ++activeCount;
+    }
+
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!player.connected || !player.humanOwned || player.actor == nullptr) continue;
         localCoopFpsProcessLook(slot);
         localCoopFpsDrawViewport(slot, buffer, width, width, height);
     }
 
+    // Separators match the dynamic layout and never carve empty WAITING boxes
+    // over an active player's view.
     int halfW = width / 2;
     int halfH = height / 2;
-    windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, height - 1, _colorTable[992]);
-    windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
+    if (activeCount == 2) {
+        windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, height - 1, _colorTable[992]);
+    } else if (activeCount == 3) {
+        windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, halfH - 1, _colorTable[992]);
+        windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
+    } else if (activeCount >= 4) {
+        windowDrawLine(gLocalCoopFpsWindow, halfW, 0, halfW, height - 1, _colorTable[992]);
+        windowDrawLine(gLocalCoopFpsWindow, 0, halfH, width - 1, halfH, _colorTable[992]);
+    }
     windowRefresh(gLocalCoopFpsWindow);
     if (!gLocalCoopFpsLoggedFirstFrame) {
         debugPrint("[COOP FPS STAGE] 6 first rendered frame refreshed successfully window=%d\n", gLocalCoopFpsWindow);
