@@ -63,6 +63,22 @@ if 'COOP_FPS_KEYCODE_HARD_HOOK_V1' not in ms:
         '        }\n', 1)
     main_changed = True
 
+# The early runtime tick is required for controls/simulation, but Fallout can
+# redraw the normal world later in the same frame. Render the FPS overlay again
+# immediately before present so first-person is always the final visible layer.
+if 'COOP_FPS_LATE_RENDER_HOOK_V1' not in ms:
+    present_anchor = '        renderPresent();\n'
+    if present_anchor not in ms:
+        raise SystemExit('main renderPresent anchor missing')
+    ms = ms.replace(present_anchor,
+        '        // COOP_FPS_LATE_RENDER_HOOK_V1\n'
+        '        // Draw FPS last so later map/interface refreshes cannot cover it.\n'
+        '        if (localCoopFpsActive()) {\n'
+        '            localCoopFpsTick();\n'
+        '        }\n\n'
+        + present_anchor, 1)
+    main_changed = True
+
 if main_changed:
     main.write_text(ms, encoding='utf-8')
 
@@ -70,6 +86,7 @@ if main_changed:
 # Fallout input paths do not leave SDL's cached GameController button state fresh.
 fps = Path('src/local_coop_fps.h')
 fs = fps.read_text(encoding='utf-8')
+fps_changed = False
 if 'COOP_FPS_CONTROLLER_UPDATE_HARDEN_V1' not in fs:
     controller_anchor = '    bool controllerToggleDown = false;\n'
     if controller_anchor not in fs:
@@ -78,6 +95,77 @@ if 'COOP_FPS_CONTROLLER_UPDATE_HARDEN_V1' not in fs:
         '    // COOP_FPS_CONTROLLER_UPDATE_HARDEN_V1\n'
         '    SDL_GameControllerUpdate();\n'
         + controller_anchor, 1)
+    fps_changed = True
+
+# One local player should get a true full-screen FPS view instead of the P1
+# quadrant. Two-four players retain the split-screen layout.
+if 'COOP_FPS_SINGLE_PLAYER_FULLSCREEN_V1' not in fs:
+    viewport_anchor = 'inline LocalCoopFpsViewport localCoopFpsViewportForSlot(int slot, int width, int height)\n{\n'
+    if viewport_anchor not in fs:
+        raise SystemExit('FPS viewport function anchor missing')
+    fs = fs.replace(viewport_anchor, viewport_anchor +
+        '    // COOP_FPS_SINGLE_PLAYER_FULLSCREEN_V1\n'
+        '    int activeHumans = 0;\n'
+        '    for (int i = 0; i < kLocalCoopMaxPlayers; i++) {\n'
+        '        const LocalCoopPlayer& p = gLocalCoopPlayers[i];\n'
+        '        if (p.connected && p.humanOwned && p.actor != nullptr) activeHumans++;\n'
+        '    }\n'
+        '    if (activeHumans <= 1 && slot == 0) {\n'
+        '        LocalCoopFpsViewport full;\n'
+        '        full.x = 0;\n'
+        '        full.y = 0;\n'
+        '        full.width = width;\n'
+        '        full.height = height;\n'
+        '        return full;\n'
+        '    }\n', 1)
+    fps_changed = True
+
+# Add runtime proof points so a user log tells us whether the window, actor,
+# raycaster and billboards actually reached the screen.
+if 'COOP_FPS_RENDER_DIAGNOSTICS_V1' not in fs:
+    globals_anchor = 'inline std::array<Uint32, kLocalCoopMaxPlayers> gLocalCoopFpsNextTurnTick {};\n'
+    if globals_anchor not in fs:
+        raise SystemExit('FPS diagnostics global anchor missing')
+    fs = fs.replace(globals_anchor, globals_anchor +
+        '// COOP_FPS_RENDER_DIAGNOSTICS_V1\n'
+        'inline Uint32 gLocalCoopFpsNextDiagnosticTick = 0;\n'
+        'inline bool gLocalCoopFpsLoggedFirstFrame = false;\n', 1)
+
+    collect_anchor = '    localCoopFpsCollect(player.actor, billboards);\n'
+    if collect_anchor not in fs:
+        raise SystemExit('FPS billboard collect anchor missing')
+    fs = fs.replace(collect_anchor, collect_anchor +
+        '    Uint32 diagNow = SDL_GetTicks();\n'
+        '    if (slot == 0 && static_cast<Sint32>(diagNow - gLocalCoopFpsNextDiagnosticTick) >= 0) {\n'
+        '        debugPrint("[COOP FPS] P1 actor tile=%d elev=%d rot=%d viewport=%dx%d walls=%d billboards=%d\\n",\n'
+        '            player.actor->tile, player.actor->elevation, player.actor->rotation,\n'
+        '            view.width, view.height, static_cast<int>(wallDepth.size()), static_cast<int>(billboards.size()));\n'
+        '        gLocalCoopFpsNextDiagnosticTick = diagNow + 1000;\n'
+        '    }\n', 1)
+
+    create_anchor = '        gLocalCoopFpsWindow = windowCreate(0, 0, width, height, _colorTable[0], WINDOW_MOVE_ON_TOP);\n        if (gLocalCoopFpsWindow == -1) return;\n'
+    if create_anchor not in fs:
+        raise SystemExit('FPS window creation anchor missing')
+    fs = fs.replace(create_anchor,
+        '        gLocalCoopFpsWindow = windowCreate(0, 0, width, height, _colorTable[0], WINDOW_MOVE_ON_TOP);\n'
+        '        if (gLocalCoopFpsWindow == -1) {\n'
+        '            debugPrint("[COOP FPS] ERROR windowCreate failed size=%dx%d\\n", width, height);\n'
+        '            return;\n'
+        '        }\n'
+        '        debugPrint("[COOP FPS] window created id=%d size=%dx%d\\n", gLocalCoopFpsWindow, width, height);\n', 1)
+
+    refresh_anchor = '    windowRefresh(gLocalCoopFpsWindow);\n'
+    if refresh_anchor not in fs:
+        raise SystemExit('FPS window refresh anchor missing')
+    fs = fs.replace(refresh_anchor,
+        '    windowRefresh(gLocalCoopFpsWindow);\n'
+        '    if (!gLocalCoopFpsLoggedFirstFrame) {\n'
+        '        debugPrint("[COOP FPS] first rendered frame refreshed successfully\\n");\n'
+        '        gLocalCoopFpsLoggedFirstFrame = true;\n'
+        '    }\n', 1)
+    fps_changed = True
+
+if fps_changed:
     fps.write_text(fs, encoding='utf-8')
 
 menu = Path('src/local_coop_system_menu.h')
@@ -121,7 +209,7 @@ if 'COOP_NATIVE_BILLBOARD_FPS_MENU_V1' not in s:
 
     menu.write_text(s, encoding='utf-8')
 
-print('wired native billboard FPS camera mode with hard gameplay hook')
+print('wired native billboard FPS camera mode with hard gameplay + late render hook + diagnostics')
 
 # The raycaster is intentionally a second-stage patch: the base FPS patch above
 # remains idempotent, then this adds collision columns, z-occluded billboards and
