@@ -23,6 +23,7 @@
 #include "loadsave.h"
 #include "local_coop_staging_room.h"
 #include "local_coop_group_room.h"
+#include "local_coop_runtime.h"
 #include "mainmenu.h"
 #include "map.h"
 #include "mouse.h"
@@ -425,6 +426,13 @@ static void mainLoop()
         sharedFpsLimiter.mark();
 
         int keyCode = inputGetInput();
+
+        // COOP_RUNTIME_MAINLOOP_HOOK_V1
+        // Drive the co-op runtime directly from the live Fallout gameplay loop.
+        // The ticker remains useful inside stock modal loops, but it cannot be
+        // responsible for bootstrapping itself. This guarantees controller,
+        // keyboard, phone, HUD, AI and FPS/ISO camera processing every frame.
+        localCoopRuntimeTick();
 
         // SFALL: MainLoopHook.
         sfall_gl_scr_process_main();
