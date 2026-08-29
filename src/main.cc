@@ -178,6 +178,20 @@ int falloutMain(int argc, char** argv)
                         // normal Fallout 1 intro/Overseer scripting remains in
                         // charge from this point onward.
                         _main_load_new(mapNameCopy);
+
+                        // COOP_POSTLOAD_PREJOIN_SPAWN_V1
+                        // The ready-room vote is authoritative. Spawn P2-P4 immediately
+                        // after the first real map finishes loading instead of waiting for
+                        // the gameplay ticker. This removes the handoff gap seen in logs
+                        // where p2=1 transfers successfully but no live actor is ever made.
+                        localCoopMobileTick();
+                        localCoopRefreshControllers();
+                        debugPrint("[COOP PREJOIN] post-load handoff p1=%d p2=%d p3=%d p4=%d\n",
+                            gLocalCoopPrejoinedSlots[0] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[1] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[2] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[3] ? 1 : 0);
+                        localCoopSpawnPrejoinedPlayers();
                     } else {
                         gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                         _main_load_new(mapNameCopy);
