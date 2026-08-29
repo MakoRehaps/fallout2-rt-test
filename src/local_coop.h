@@ -672,14 +672,17 @@ inline void localCoopSpawnPrejoinedPlayers()
 
     for (int slot = 1; slot < kLocalCoopMaxPlayers; ++slot) {
         LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-        if (!gLocalCoopPrejoinedSlots[slot]
-            || !player.connected
-            || player.controller == nullptr
-            || player.actor != nullptr) {
+        // COOP_PREJOIN_AUTHORITATIVE_SPAWN_V2
+        // The ready vote is the authority for whether this slot exists. Do not
+        // require the controller pointer to still be attached on the exact first
+        // live-map frame; phone/USB devices can reconnect a frame later. Create
+        // the reserved actor now and let normal connection logic unhide/control it.
+        if (!gLocalCoopPrejoinedSlots[slot] || player.actor != nullptr) {
             continue;
         }
 
-        debugPrint("[COOP PREJOIN] slot=%d spawning on live map\n", slot);
+        debugPrint("[COOP PREJOIN] slot=%d spawning on live map connected=%d controller=%p locked=%d\n",
+            slot, player.connected ? 1 : 0, static_cast<void*>(player.controller), player.slotLocked ? 1 : 0);
         if (localCoopCreatePlayerActor(slot)) {
             gLocalCoopPrejoinedSlots[slot] = false;
             debugPrint("[COOP PREJOIN] slot=%d live actor ready id=%d tile=%d\n",

@@ -19,6 +19,7 @@
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
 #include "local_coop_fps.h"
+#include "local_coop_mobile.h"
 #include "local_coop_personal_ui.h"
 #include "local_coop_system_menu.h"
 #include "mainmenu.h"
@@ -1148,6 +1149,11 @@ inline void localCoopRuntimeTick()
 
     localCoopRealtimeAiInstall();
     localCoopRuntimeEnsureTicker();
+    // COOP_RUNTIME_MOBILE_BEFORE_SPAWN_V1
+    // Materialize claimed phone slots before controller polling and before the
+    // ready-room handoff creates P2-P4 actors. This removes the one-frame/race
+    // dependency between the web controller server and live-map spawning.
+    localCoopMobileTick();
     localCoopPollControllers();
     localCoopUpdateP1InputSource();
     localCoopProcessJoinMenus();

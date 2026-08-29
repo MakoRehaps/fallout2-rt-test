@@ -10,6 +10,7 @@
 #include "color.h"
 #include "input.h"
 #include "local_coop.h"
+#include "local_coop_mobile.h"
 #include "mouse.h"
 #include "svga.h"
 #include "text_font.h"
@@ -206,6 +207,11 @@ inline bool localCoopRunTilelessGroupRoom()
     while (_game_user_wants_to_quit == 0) {
         sharedFpsLimiter.mark();
         inputGetInput();
+        // COOP_READY_ROOM_MOBILE_TICK_V1
+        // Keep phone claims materialized as SDL virtual controllers while the
+        // pre-game room is open; otherwise a phone can claim a slot on the web
+        // page without the ready room ever seeing the controller.
+        localCoopMobileTick();
         localCoopRefreshControllers();
 
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
