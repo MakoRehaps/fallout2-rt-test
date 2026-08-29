@@ -1003,6 +1003,7 @@ inline void localCoopUpdateSharedCamera()
     int maximumX = -0x7FFFFFFF;
     int maximumY = -0x7FFFFFFF;
     int count = 0;
+    int soleActorTile = -1;
 
     // Frame the extents rather than averaging positions. An average is pulled
     // toward a three-player cluster and can strand the fourth player at an edge;
@@ -1025,6 +1026,7 @@ inline void localCoopUpdateSharedCamera()
             minimumY = std::min(minimumY, y);
             maximumX = std::max(maximumX, x);
             maximumY = std::max(maximumY, y);
+            soleActorTile = actor->tile;
             count++;
         }
     }
@@ -1034,9 +1036,18 @@ inline void localCoopUpdateSharedCamera()
         return;
     }
 
-    int targetX = minimumX + (maximumX - minimumX) / 2;
-    int targetY = minimumY + (maximumY - minimumY) / 2;
-    int targetTile = tileFromScreenXY(targetX, targetY, elevation, true);
+    // COOP_SINGLE_PLAYER_CAMERA_FOLLOW_V1
+    // With only one visible human, follow that actor's exact tile just like the
+    // stock game. Converting tile -> screen -> tile for a one-player bounding
+    // box can resolve to a neighbouring/unchanged hex and leaves the camera
+    // apparently stuck while the player walks away. Multi-player still uses
+    // the shared bounding-box midpoint below.
+    int targetTile = soleActorTile;
+    if (count > 1) {
+        int targetX = minimumX + (maximumX - minimumX) / 2;
+        int targetY = minimumY + (maximumY - minimumY) / 2;
+        targetTile = tileFromScreenXY(targetX, targetY, elevation, true);
+    }
     if (!tileIsValid(targetTile)) {
         return;
     }
@@ -1045,6 +1056,17 @@ inline void localCoopUpdateSharedCamera()
     Uint32 now = SDL_GetTicks();
     // Personal HUDs are rendered independently by localCoopPersonalUiTick.
     if (!localCoopTickReached(now, gLocalCoopNextCameraStepTick)) {
+        return;
+    }
+
+    // A lone player should feel like normal Fallout, not a delayed co-op
+    // midpoint camera. Center directly on the actor every camera tick.
+    if (count == 1) {
+        if (targetTile != gCenterTile) {
+            tileSetCenter(targetTile,
+                TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
+        }
+        gLocalCoopNextCameraStepTick = now + 16;
         return;
     }
 
