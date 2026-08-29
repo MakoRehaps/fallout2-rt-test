@@ -101,6 +101,20 @@ inline void localCoopFpsToggle()
 
 inline LocalCoopFpsViewport localCoopFpsViewportForSlot(int slot, int width, int height)
 {
+    // COOP_FPS_SINGLE_PLAYER_FULLSCREEN_V1
+    int activeHumans = 0;
+    for (int i = 0; i < kLocalCoopMaxPlayers; i++) {
+        const LocalCoopPlayer& p = gLocalCoopPlayers[i];
+        if (p.connected && p.humanOwned && p.actor != nullptr) activeHumans++;
+    }
+    if (activeHumans <= 1 && slot == 0) {
+        LocalCoopFpsViewport full;
+        full.x = 0;
+        full.y = 0;
+        full.width = width;
+        full.height = height;
+        return full;
+    }
     // COOP_FPS_DYNAMIC_ACTIVE_LAYOUT_V1
     int activeSlots[kLocalCoopMaxPlayers] = { -1, -1, -1, -1 };
     int activeCount = 0;
