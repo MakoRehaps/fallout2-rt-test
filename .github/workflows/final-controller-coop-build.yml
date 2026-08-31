@@ -30,8 +30,10 @@ jobs:
           python tools/patch_regular_coop_cleanup.py
           python tools/patch_controller_owned_menus.py
 
-          # PhoBoi: never hard-lock controls behind orientation, and provide a
-          # raw RGBA stream fallback for mobile browsers without DecompressionStream.
+          # PhoBoi: never hard-lock controls behind orientation, keep the game
+          # feed full-screen under a transparent touch-controller HUD, and
+          # provide a raw RGBA stream fallback for mobile browsers without
+          # DecompressionStream.
           python tools/patch_phoboi_landscape_gate.py
           python tools/patch_phoboi_video_fallback.py
 
@@ -80,6 +82,8 @@ jobs:
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NO_LANDSCAPE_GATE_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_RAW_VIDEO_FALLBACK_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' },
