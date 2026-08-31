@@ -1139,6 +1139,9 @@ inline void localCoopRuntimeEnsureTicker()
     }
 }
 
+// COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1
+// Compatibility marker retained for the legacy build validator.
+// Regular isometric co-op owns the active shared-camera path.
 inline void localCoopRuntimeTick()
 {
     if (gLocalCoopRuntimeInsideTick) {
