@@ -439,7 +439,12 @@ static void mainLoop()
     while (_game_user_wants_to_quit == 0) {
         sharedFpsLimiter.mark();
 
-        int keyCode = inputGetInput();
+        // COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1
+        // Pump platform events so controllers/phones/hotplug remain live, but
+        // discard legacy keyboard/mouse gameplay commands for P1.
+        int legacyKeyCode = inputGetInput();
+        int keyCode = -1;
+        (void)legacyKeyCode;
 
         // COOP_REGULAR_ISOMETRIC_ONLY_V1
         // FPS is parked while regular co-op is stabilized. F9 is intentionally

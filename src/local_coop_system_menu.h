@@ -20,6 +20,8 @@
 namespace fallout {
 
 // COOP_SYSTEM_MENU_V1
+// COOP_CONTROLLER_ONLY_SYSTEM_MENU_V1
+// COOP_NATIVE_BILLBOARD_FPS_MENU_V1 compatibility marker; FPS action removed.
 // New P1-owned co-op menu shell. It replaces the stock Escape/start-menu entry
 // point while preserving the game's proven inventory/Pip-Boy/character/save
 // backends underneath, so quests and script-driven menus stay compatible.
@@ -30,7 +32,6 @@ enum class LocalCoopSystemMenuAction {
     Skilldex,
     Character,
     Accessibility,
-    CameraMode,
     Save,
     Load,
     Options,
@@ -44,7 +45,6 @@ inline bool gLocalCoopSystemMenuDownWasDown = false;
 inline bool gLocalCoopSystemMenuConfirmWasDown = false;
 inline bool gLocalCoopSystemMenuCancelWasDown = false;
 inline bool gLocalCoopSystemMenuStartWasDown = false;
-inline bool gLocalCoopSystemMenuMouseWasDown = false;
 
 inline const char* localCoopSystemMenuLabel(int index)
 {
@@ -55,15 +55,10 @@ inline const char* localCoopSystemMenuLabel(int index)
         "SKILLDEX",
         "CHARACTER / PERKS",
         "ACCESSIBILITY HIGHLIGHTS",
-        "CAMERA MODE",
         "SAVE GAME",
         "LOAD GAME",
         "OPTIONS",
     };
-    // COOP_NATIVE_BILLBOARD_FPS_MENU_V1
-    if (index == static_cast<int>(LocalCoopSystemMenuAction::CameraMode)) {
-        return localCoopFpsActive() ? "CAMERA: FIRST PERSON" : "CAMERA: ISOMETRIC";
-    }
     // COOP_ACCESSIBILITY_MENU_V1
     if (index == static_cast<int>(LocalCoopSystemMenuAction::Accessibility)) {
         return gLocalCoopAccessibilityHighlightsEnabled
@@ -112,7 +107,7 @@ inline void localCoopSystemMenuDraw()
     }
 
     windowDrawText(gLocalCoopSystemMenuWindow,
-        "D-PAD/ARROWS OR MOUSE  |  A/ENTER SELECT  |  B/START/ESC CLOSE",
+        "D-PAD / LEFT STICK  |  A SELECT  |  B / START CLOSE",
         width - 48,
         24,
         height - 28,
@@ -132,7 +127,6 @@ inline void localCoopSystemMenuClose()
     gLocalCoopSystemMenuConfirmWasDown = false;
     gLocalCoopSystemMenuCancelWasDown = false;
     gLocalCoopSystemMenuStartWasDown = false;
-    gLocalCoopSystemMenuMouseWasDown = false;
 }
 
 inline bool localCoopSystemMenuOpen()
@@ -152,6 +146,7 @@ inline bool localCoopSystemMenuOpen()
 
     gLocalCoopSystemMenuActive = true;
     gLocalCoopSystemMenuSelection = 0;
+    mouseHideCursor();
 
     // COOP_SYSTEM_MENU_OPEN_LATCH_V1
     // Start is normally still held during the tick after it opens this window.
@@ -200,9 +195,6 @@ inline void localCoopSystemMenuActivate(int index)
         localCoopAccessibilityToggle();
         debugPrint("[COOP ACCESSIBILITY] highlights=%s\n", localCoopAccessibilityStatusLabel());
         break;
-    case LocalCoopSystemMenuAction::CameraMode:
-        localCoopFpsToggle();
-        break;
     case LocalCoopSystemMenuAction::Save:
         lsgSaveGame(LOAD_SAVE_MODE_NORMAL);
         break;
@@ -235,12 +227,10 @@ inline void localCoopSystemMenuTick()
         start = SDL_GameControllerGetButton(p1.controller, SDL_CONTROLLER_BUTTON_START) != 0;
     }
 
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    if (keys != nullptr) {
-        up = up || keys[SDL_SCANCODE_UP] != 0 || keys[SDL_SCANCODE_W] != 0;
-        down = down || keys[SDL_SCANCODE_DOWN] != 0 || keys[SDL_SCANCODE_S] != 0;
-        confirm = confirm || keys[SDL_SCANCODE_RETURN] != 0 || keys[SDL_SCANCODE_SPACE] != 0;
-        cancel = cancel || keys[SDL_SCANCODE_ESCAPE] != 0;
+    if (p1.controller != nullptr) {
+        int stickY = SDL_GameControllerGetAxis(p1.controller, SDL_CONTROLLER_AXIS_LEFTY);
+        up = up || stickY < -16000;
+        down = down || stickY > 16000;
     }
 
     bool redraw = false;
@@ -252,24 +242,6 @@ inline void localCoopSystemMenuTick()
     if (down && !gLocalCoopSystemMenuDownWasDown) {
         gLocalCoopSystemMenuSelection = (gLocalCoopSystemMenuSelection + 1) % count;
         redraw = true;
-    }
-
-    int mx = 0;
-    int my = 0;
-    mouseGetPositionInWindow(gLocalCoopSystemMenuWindow, &mx, &my);
-    bool mouseDown = (mouse_get_last_buttons() & MOUSE_STATE_LEFT_BUTTON_DOWN) != 0;
-    constexpr int firstY = 86;
-    constexpr int rowHeight = 34;
-    if (mx >= 24 && mx < 476 && my >= firstY && my < firstY + count * rowHeight) {
-        int hover = (my - firstY) / rowHeight;
-        if (hover >= 0 && hover < count && hover != gLocalCoopSystemMenuSelection) {
-            gLocalCoopSystemMenuSelection = hover;
-            redraw = true;
-        }
-        if (mouseDown && !gLocalCoopSystemMenuMouseWasDown) {
-            localCoopSystemMenuActivate(gLocalCoopSystemMenuSelection);
-            return;
-        }
     }
 
     if ((cancel && !gLocalCoopSystemMenuCancelWasDown)
@@ -288,7 +260,6 @@ inline void localCoopSystemMenuTick()
     gLocalCoopSystemMenuConfirmWasDown = confirm;
     gLocalCoopSystemMenuCancelWasDown = cancel;
     gLocalCoopSystemMenuStartWasDown = start;
-    gLocalCoopSystemMenuMouseWasDown = mouseDown;
 }
 
 } // namespace fallout
