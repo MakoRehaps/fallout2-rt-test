@@ -84,14 +84,16 @@ if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
         s = s.replace(include_anchor, '#include "proto.h"\n' + include_anchor, 1)
 
     # The unified encounter-context helper appears before the private encounter
-    # table globals. Forward-declare the classifier there, then define it next to
+    # table globals. Forward-declare helpers there, then define them next to
     # wmRndEncounterPick where those globals are already declared.
     declaration_anchor = 'static int wmRndEncounterPick();\n'
     if declaration_anchor not in s:
         raise SystemExit('worldmap encounter prototype anchor not found')
     s = s.replace(
         declaration_anchor,
-        declaration_anchor + 'static int coopWorldEncounterPickedPopulation();\n',
+        declaration_anchor
+        + 'static int coopWorldEncounterPickedPopulation();\n'
+        + 'static void coopWorldEncounterRestorePickedCounter();\n',
         1)
 
     old = '''    if (wmRndEncounterPick() == -1) {
@@ -128,6 +130,9 @@ if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
         || (ecology == UnifiedWorldSystemPopulation::HumanActivity && picked == 2)
         || ecology == UnifiedWorldSystemPopulation::MixedDanger;
     if (!allowed) {
+        // wmRndEncounterPick decrements finite encounter counters immediately.
+        // Put the counter back because a filtered encounter never actually ran.
+        coopWorldEncounterRestorePickedCounter();
         debugPrint("[WORLD ECOLOGY] filtered encounter class=%d cellClass=%d x=%d y=%d\n",
             picked, static_cast<int>(ecology),
             travel.currentCellX[gameIndex], travel.currentCellY[gameIndex]);
@@ -211,6 +216,25 @@ static int coopWorldEncounterPickedPopulation()
     if (wildlife > 0 && activity == 0) return 1;
     if (activity > 0 && wildlife == 0) return 2;
     return 3;
+}
+
+static void coopWorldEncounterRestorePickedCounter()
+{
+    if (wmGenData.encounterTableId < 0
+        || wmGenData.encounterTableId >= wmMaxEncounterInfoTables) {
+        return;
+    }
+
+    EncounterTable& table = wmEncounterTableList[wmGenData.encounterTableId];
+    if (wmGenData.encounterEntryId < 0
+        || wmGenData.encounterEntryId >= table.entriesLength) {
+        return;
+    }
+
+    EncounterTableEntry& tableEntry = table.entries[wmGenData.encounterEntryId];
+    if (tableEntry.counter >= 0) {
+        tableEntry.counter++;
+    }
 }
 
 '''
