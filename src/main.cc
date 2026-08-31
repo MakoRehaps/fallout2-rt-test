@@ -441,12 +441,11 @@ static void mainLoop()
 
         int keyCode = inputGetInput();
 
-        // COOP_FPS_KEYCODE_HARD_HOOK_V1
+        // COOP_REGULAR_ISOMETRIC_ONLY_V1
+        // FPS is parked while regular co-op is stabilized. F9 is intentionally
+        // ignored here; legacy FPS code remains compiled only for compatibility.
         if (keyCode == KEY_F9) {
-            debugPrint("[COOP CAMERA] mainLoop KEY_F9 hard hook\n");
-            localCoopFpsToggle();
-            // Prevent the physical-state path from toggling a second time this frame.
-            gLocalCoopFpsToggleWasDown = true;
+            keyCode = -1;
         }
 
         // COOP_RUNTIME_MAINLOOP_HOOK_V1
@@ -484,9 +483,8 @@ static void mainLoop()
 
         // COOP_FPS_LATE_RENDER_HOOK_V1
         // COOP_FPS_SINGLE_LATE_TICK_V1
-        // Run once, unconditionally: this processes L3/FPS input even while
-        // isometric, then draws FPS last so the stock world cannot cover it.
-        localCoopFpsTick();
+        // COOP_REGULAR_ISOMETRIC_ONLY_V1: deliberately no localCoopFpsTick().
+        // This disables L3/phone/FPS activation and rendering in regular co-op.
 
         renderPresent();
         sharedFpsLimiter.throttle();

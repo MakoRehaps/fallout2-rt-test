@@ -134,6 +134,7 @@ inline UnifiedWorldSystemState gUnifiedWorldSystemPendingState {};
 inline bool gUnifiedWorldSystemStateInitialized = false;
 inline bool gUnifiedWorldSystemPendingStateValid = false;
 
+// COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1
 // COOP_FOUR_SIDE_WILDERNESS_POOL_V1
 // Physical world travel only chooses generic wilderness/encounter layouts here.
 // Authored destinations (towns, caves, vaults, quest maps, forts/holds) are not
@@ -850,8 +851,18 @@ inline bool unifiedWorldSystemTraverseRoad(
     if (chainMatches) {
         int nextDepth = static_cast<int>(active.depth) + delta;
         if (nextDepth >= 0 && nextDepth < active.length) {
-            active.depth = static_cast<uint8_t>(nextDepth);
-            active.currentMapIdx = active.maps[nextDepth];
+            // COOP_CHAIN_NO_REPEAT_V1
+            // Skip duplicate/remapped stages instead of reloading the same map.
+            int step = delta > 0 ? 1 : -1;
+            while (nextDepth >= 0 && nextDepth < active.length
+                && unifiedWorldSystemSafeTemplateMap(game, active.maps[nextDepth]) == currentMapIdx) {
+                nextDepth += step;
+            }
+            if (nextDepth < 0 || nextDepth >= active.length) {
+                active.valid = 0;
+            } else {
+                active.depth = static_cast<uint8_t>(nextDepth);
+                active.currentMapIdx = unifiedWorldSystemSafeTemplateMap(game, active.maps[nextDepth]);
             UnifiedWorldSystemCellState* cell =
                 unifiedWorldSystemGetCell(game, active.cellX, active.cellY);
             if (cell != nullptr) {
@@ -877,7 +888,8 @@ inline bool unifiedWorldSystemTraverseRoad(
                 active.currentMapIdx,
                 static_cast<int>(direction),
                 gameTime);
-            return true;
+                return true;
+            }
         }
     }
 

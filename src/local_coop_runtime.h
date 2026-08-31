@@ -705,78 +705,28 @@ inline void localCoopProcessModalMenuInput()
             && !localCoopDangerBlocksMapExit();
         // COOP_P1_GLOBAL_UI_OWNER_V1
         // COOP_P1_GLOBAL_UI_TOGGLE_V1
-        // Inventory and Pip-Boy/map are global modal screens, so only P1 owns
-        // their open/close toggle. A phone packet can momentarily cross neutral,
-        // so a simple rising-edge test is not enough: after every toggle require
-        // a real release held for 140 ms before the button is armed again. This
-        // prevents one physical tap from closing and immediately reopening.
-        if (slot == 0) {
-            if (!pipboyDown) {
-                if (runtime.pipboyReleaseStartedTick == 0) runtime.pipboyReleaseStartedTick = now;
-                if (!runtime.pipboyToggleArmed
-                    && static_cast<Sint32>(now - runtime.pipboyReleaseStartedTick) >= 140) {
-                    runtime.pipboyToggleArmed = true;
-                }
-            } else {
-                runtime.pipboyReleaseStartedTick = 0;
-            }
-
-            if (!inventoryDown) {
-                if (runtime.inventoryReleaseStartedTick == 0) runtime.inventoryReleaseStartedTick = now;
-                if (!runtime.inventoryToggleArmed
-                    && static_cast<Sint32>(now - runtime.inventoryReleaseStartedTick) >= 140) {
-                    runtime.inventoryToggleArmed = true;
-                }
-            } else {
-                runtime.inventoryReleaseStartedTick = 0;
-            }
-
-            if (!startDown) {
-                if (runtime.startReleaseStartedTick == 0) runtime.startReleaseStartedTick = now;
-                if (!runtime.startToggleArmed
-                    && static_cast<Sint32>(now - runtime.startReleaseStartedTick) >= 140) {
-                    runtime.startToggleArmed = true;
-                }
-            } else {
-                runtime.startReleaseStartedTick = 0;
-            }
-        }
-
+        // COOP_PIPBOY_EDGE_TOGGLE_V2
+        // P1 owns the stock global Pip-Boy. Use the physical D-pad-left edge
+        // directly; no delayed re-arm timer survives across modal transitions.
         bool canOwnGlobalUi = canOpen && slot == 0;
-        bool p1PipboyToggle = slot == 0 && pipboyDown && runtime.pipboyToggleArmed;
-        bool p1InventoryToggle = slot == 0 && inventoryDown && runtime.inventoryToggleArmed;
+        bool p1PipboyEdge = slot == 0 && pipboyDown && !runtime.pipboyWasDown;
 
-        if (p1PipboyToggle && pipboyModalActive) {
-            runtime.pipboyToggleArmed = false;
+        if (p1PipboyEdge && pipboyModalActive) {
             gLocalCoopModalControllerSlot = 0;
             enqueueInputEvent(KEY_ESCAPE);
             debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=close\n");
-        } else if (p1InventoryToggle && inventoryModalActive) {
-            runtime.inventoryToggleArmed = false;
-            gLocalCoopModalControllerSlot = 0;
-            enqueueInputEvent(KEY_ESCAPE);
-            debugPrint("[COOP INVENTORY] slot=0 global-ui=inventory action=close\n");
-        } else if (canOwnGlobalUi && p1PipboyToggle) {
-            runtime.pipboyToggleArmed = false;
+        } else if (canOwnGlobalUi && p1PipboyEdge) {
             gLocalCoopModalControllerSlot = 0;
             enqueueInputEvent(KEY_LOWERCASE_P);
             modalActive = true;
             debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=open\n");
-        } else if (canOwnGlobalUi && p1InventoryToggle) {
-            runtime.inventoryToggleArmed = false;
-            gLocalCoopModalControllerSlot = 0;
-            enqueueInputEvent(KEY_LOWERCASE_I);
-            modalActive = true;
-            debugPrint("[COOP INVENTORY] slot=0 global-ui=inventory action=open\n");
         } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {
             gLocalCoopModalControllerSlot = slot;
             gLocalCoopSkilldexInvokerSlot = slot;
             enqueueInputEvent(KEY_LOWERCASE_S);
             modalActive = true;
             debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\n", slot);
-        } else if (canOpen && slot == 0 && startDown && runtime.startToggleArmed) {
-            // COOP_SYSTEM_MENU_RUNTIME_V1
-            runtime.startToggleArmed = false;
+        } else if (canOpen && slot == 0 && startDown && !runtime.startWasDown) {
             gLocalCoopModalControllerSlot = 0;
             localCoopSystemMenuOpen();
             modalActive = true;
