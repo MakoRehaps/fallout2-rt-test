@@ -30,13 +30,15 @@ jobs:
           python tools/patch_regular_coop_cleanup.py
           python tools/patch_controller_owned_menus.py
 
-          # PhoBoi: never hard-lock controls behind orientation, keep the game
-          # feed full-screen under a transparent touch-controller HUD, provide
-          # a raw RGBA stream fallback, and scale the logical landscape canvas
-          # to each phone's actual VisualViewport instead of the host PC size.
+          # PhoBoi: orientation-safe transparent controller, browser fallback,
+          # per-device viewport scaling, readable text/video, independent local
+          # zoom, and character-owned slots that survive phone/network loss.
           python tools/patch_phoboi_landscape_gate.py
           python tools/patch_phoboi_video_fallback.py
           python tools/patch_phoboi_adaptive_phone_viewport.py
+          python tools/patch_phoboi_text_readability.py
+          python tools/patch_phoboi_per_user_zoom.py
+          python tools/patch_phoboi_character_rejoin.py
 
           # The physical world grid owns a persistent ecology class. Quiet cells
           # stay empty, wildlife is common, human activity is uncommon, and the
@@ -101,7 +103,17 @@ jobs:
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_RAW_VIDEO_FALLBACK_V1' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_ADAPTIVE_PHONE_VIEWPORT_V1' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_VISUAL_VIEWPORT_SCALE_V1' },
-            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_READABLE_STREAM_LADDER_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_READABLE_STREAM_LADDER_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NATIVE_TEXT_STREAM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_TEXT_READABILITY_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PER_USER_ZOOM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PER_USER_ZOOM_STATUS_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_REJOIN_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_RESUME_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_WS_RECLAIM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_STREAM_RECLAIM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PERSISTENT_REJOIN_TOKEN_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PERSISTENT_REJOIN_RESTORE_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_F1_NO_RAVINE_POOL_V1' },
