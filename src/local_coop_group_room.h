@@ -187,11 +187,15 @@ inline bool localCoopRunTilelessGroupRoom()
                 if (slot == 0 && player.controller == nullptr && joined[slot] && !ready[slot]) {
                     state = "JOINED - ENTER OR START TO READY";
                 }
-                std::snprintf(line, sizeof(line), "PLAYER %d   %s", slot + 1, state);
+                const char* archetype = (player.archetype >= 0 && player.archetype < kLocalCoopArchetypeCount)
+                    ? kLocalCoopArchetypeNames[player.archetype]
+                    : "UNKNOWN";
+                std::snprintf(line, sizeof(line), "PLAYER %d   %s   CLASS: %s", slot + 1, state, archetype);
                 windowDrawText(win, line, width - 72, 38, 126 + slot * 54,
                     ready[slot] ? _colorTable[32747] : _colorTable[992]);
             }
 
+            windowDrawText(win, "JOINED + NOT READY: D-PAD LEFT/RIGHT = CHOOSE CLASS", width - 48, 24, height - 78, _colorTable[32747]);
             windowDrawText(win, "ALL JOINED PLAYERS MUST VOTE READY", width - 48, 24, height - 54, _colorTable[992]);
             windowDrawText(win, "ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
         }
@@ -258,17 +262,34 @@ inline bool localCoopRunTilelessGroupRoom()
                 tutorialAdvance = tutorialAdvance || aEdge;
                 tutorialPrevious = tutorialPrevious || leftEdge;
                 tutorialNext = tutorialNext || rightEdge;
-            } else if (startEdge || (slot == 0 && enterDown && !enterWasDown)) {
-                if (!joined[slot]) {
-                    joined[slot] = true;
-                    ready[slot] = false;
-                    gLocalCoopPrejoinedSlots[slot] = true;
+            } else {
+                // COOP_READY_ROOM_ARCHETYPE_SELECT_V1
+                // A joined player chooses their own class before locking READY.
+                // This is deliberately per-slot, so P2-P4 do not inherit the
+                // default BRUISER archetype just because they joined in the room.
+                if (joined[slot] && !ready[slot] && leftEdge) {
+                    player.archetype = (player.archetype + kLocalCoopArchetypeCount - 1) % kLocalCoopArchetypeCount;
                     dirty = true;
-                    debugPrint("[COOP GROUP] slot=%d joined\n", slot);
-                } else {
-                    ready[slot] = !ready[slot];
+                    debugPrint("[COOP GROUP] slot=%d class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
+                }
+                if (joined[slot] && !ready[slot] && rightEdge) {
+                    player.archetype = (player.archetype + 1) % kLocalCoopArchetypeCount;
                     dirty = true;
-                    debugPrint("[COOP GROUP] slot=%d ready=%d\n", slot, ready[slot] ? 1 : 0);
+                    debugPrint("[COOP GROUP] slot=%d class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
+                }
+
+                if (startEdge || (slot == 0 && enterDown && !enterWasDown)) {
+                    if (!joined[slot]) {
+                        joined[slot] = true;
+                        ready[slot] = false;
+                        gLocalCoopPrejoinedSlots[slot] = true;
+                        dirty = true;
+                        debugPrint("[COOP GROUP] slot=%d joined class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
+                    } else {
+                        ready[slot] = !ready[slot];
+                        dirty = true;
+                        debugPrint("[COOP GROUP] slot=%d ready=%d class=%s\n", slot, ready[slot] ? 1 : 0, kLocalCoopArchetypeNames[player.archetype]);
+                    }
                 }
             }
 
