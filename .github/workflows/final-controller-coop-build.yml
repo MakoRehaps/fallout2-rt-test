@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply final regular co-op and controller menu ownership
+      - name: Apply final regular co-op, controller ownership, and phone fixes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -29,6 +29,10 @@ jobs:
           # legacy FPS hooks, so the final compiled source must win over them.
           python tools/patch_regular_coop_cleanup.py
           python tools/patch_controller_owned_menus.py
+
+          # Phone browsers can keep reporting portrait while fullscreen and
+          # orientation state settle. Never let the rotate hint disable input.
+          python tools/patch_phoboi_landscape_gate.py
 
           # Keep the compatibility marker used by the older validator without
           # changing the newer P1 controller-owned runtime behavior.
@@ -48,6 +52,7 @@ jobs:
             @{ File = 'src/main.cc'; Marker = 'COOP_REGULAR_ISOMETRIC_ONLY_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' }
           )
@@ -60,7 +65,7 @@ jobs:
           # Fallout main/in-game UI and gameplay are controller-owned. The
           # separate VPN/remote co-op setup remains keyboard-capable.
           Write-Host 'Final controller co-op source validation passed.'
-          git diff --stat -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
+          git diff --stat -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/local_coop_mobile.cc src/unified_world_system.h
 
           # Do NOT commit/push from the build. Multiple materializer workflows can
           # advance this branch concurrently; the validated workspace is exactly
