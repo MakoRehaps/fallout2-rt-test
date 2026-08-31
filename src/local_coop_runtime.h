@@ -705,6 +705,7 @@ inline void localCoopProcessModalMenuInput()
             && !localCoopDangerBlocksMapExit();
         // COOP_P1_GLOBAL_UI_OWNER_V1
         // COOP_P1_GLOBAL_UI_TOGGLE_V1
+        // COOP_SYSTEM_MENU_RUNTIME_V1
         // COOP_PIPBOY_EDGE_TOGGLE_V2
         // P1 owns the stock global Pip-Boy. Use the physical D-pad-left edge
         // directly; no delayed re-arm timer survives across modal transitions.
