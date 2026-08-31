@@ -1217,8 +1217,9 @@ inline void localCoopRuntimeTick()
         interfaceRenderActionPoints(-1, -1);
     }
 
-    // COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1
-    localCoopUpdateSharedCamera();
+    // COOP_CAMERA_LATE_FRAME_OWNER_V1
+    // Camera is updated from mainLoop after movement/scripts/map requests.
+    // Updating it here lets later stock processing overwrite our center every frame.
     // COOP_FPS_SINGLE_LATE_TICK_V1
     // FPS input/render runs once from main.cc immediately before present.
     // Personal HUDs draw after FPS so all four remain readable.

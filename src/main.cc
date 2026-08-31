@@ -475,6 +475,13 @@ static void mainLoop()
             _game_user_wants_to_quit = 2;
         }
 
+        // COOP_CAMERA_LATE_FRAME_OWNER_V1
+        // The shared camera must be the LAST isometric camera writer in the frame.
+        // gameHandleKey, scriptsHandleRequests and mapHandleTransition can all move
+        // actors or recenter the stock camera, so following before them is overwritten.
+        // One player follows P1; 2-4 players use the same Ascent-style group framing.
+        localCoopUpdateSharedCamera();
+
         // COOP_FPS_LATE_RENDER_HOOK_V1
         // COOP_FPS_SINGLE_LATE_TICK_V1
         // Run once, unconditionally: this processes L3/FPS input even while
