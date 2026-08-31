@@ -20,6 +20,7 @@ namespace fallout {
 
 // COOP_TILELESS_GROUP_ROOM_V1
 // COOP_TILELESS_GROUP_ROOM_V2
+// COOP_UNIFORM_READY_ROOM_FLOW_V1
 // Pure UI scene shown before the real Fallout opening. It deliberately creates
 // no map, no tiles, no scripts, no critters and no world transitions.
 //
@@ -180,13 +181,10 @@ inline bool localCoopRunTilelessGroupRoom()
                 const char* state = ready[slot]
                     ? "READY"
                     : joined[slot]
-                        ? "JOINED - PRESS START TO READY"
+                        ? "CHOOSE CLASS - THEN READY"
                         : player.connected
                             ? "PRESS START TO JOIN"
-                            : "WAITING FOR CONTROLLER / PHONE";
-                if (slot == 0 && player.controller == nullptr && joined[slot] && !ready[slot]) {
-                    state = "JOINED - ENTER OR START TO READY";
-                }
+                            : (slot == 0 ? "PRESS ENTER OR START TO JOIN" : "WAITING FOR CONTROLLER / PHONE");
                 const char* archetype = (player.archetype >= 0 && player.archetype < kLocalCoopArchetypeCount)
                     ? kLocalCoopArchetypeNames[player.archetype]
                     : "UNKNOWN";
@@ -195,8 +193,8 @@ inline bool localCoopRunTilelessGroupRoom()
                     ready[slot] ? _colorTable[32747] : _colorTable[992]);
             }
 
-            windowDrawText(win, "JOINED + NOT READY: D-PAD LEFT/RIGHT = CHOOSE CLASS", width - 48, 24, height - 78, _colorTable[32747]);
-            windowDrawText(win, "ALL JOINED PLAYERS MUST VOTE READY", width - 48, 24, height - 54, _colorTable[992]);
+            windowDrawText(win, "EVERY PLAYER: LEFT/RIGHT = CLASS   START = READY", width - 48, 24, height - 78, _colorTable[32747]);
+            windowDrawText(win, "P1 KEYBOARD FALLBACK: ARROWS = CLASS   ENTER = READY", width - 48, 24, height - 54, _colorTable[992]);
             windowDrawText(win, "ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
         }
 
@@ -267,12 +265,18 @@ inline bool localCoopRunTilelessGroupRoom()
                 // A joined player chooses their own class before locking READY.
                 // This is deliberately per-slot, so P2-P4 do not inherit the
                 // default BRUISER archetype just because they joined in the room.
-                if (joined[slot] && !ready[slot] && leftEdge) {
+                // COOP_UNIFORM_READY_ROOM_V1
+                // All four slots use the same JOIN -> CLASS -> READY flow. P1's
+                // keyboard arrows/Enter are only a fallback for a keyboard-only
+                // host; controller/phone behavior is identical for every slot.
+                bool classLeftEdge = leftEdge || (slot == 0 && keyLeft && !keyLeftWasDown);
+                bool classRightEdge = rightEdge || (slot == 0 && keyRight && !keyRightWasDown);
+                if (joined[slot] && !ready[slot] && classLeftEdge) {
                     player.archetype = (player.archetype + kLocalCoopArchetypeCount - 1) % kLocalCoopArchetypeCount;
                     dirty = true;
                     debugPrint("[COOP GROUP] slot=%d class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
                 }
-                if (joined[slot] && !ready[slot] && rightEdge) {
+                if (joined[slot] && !ready[slot] && classRightEdge) {
                     player.archetype = (player.archetype + 1) % kLocalCoopArchetypeCount;
                     dirty = true;
                     debugPrint("[COOP GROUP] slot=%d class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
