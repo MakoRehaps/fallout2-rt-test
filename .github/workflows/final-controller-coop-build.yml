@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows-x64:
@@ -30,9 +30,8 @@ jobs:
           python tools/patch_regular_coop_cleanup.py
           python tools/patch_controller_owned_menus.py
 
-          # The regular cleanup intentionally replaces the old menu dispatch
-          # block. Keep this compatibility marker because the old validator
-          # still checks it, while the actual runtime is the newer edge-toggle.
+          # Keep the compatibility marker used by the older validator without
+          # changing the newer P1 controller-owned runtime behavior.
           $runtime = 'src/local_coop_runtime.h'
           $text = Get-Content $runtime -Raw
           if ($text -notmatch 'COOP_SYSTEM_MENU_RUNTIME_V1') {
@@ -58,19 +57,14 @@ jobs:
             }
           }
 
-          # Source scope is deliberately limited to Fallout main/in-game UI and
-          # gameplay. PhoBoi/VPN/remote setup files are not modified here, so
-          # keyboard entry remains available for connection/session setup.
+          # Fallout main/in-game UI and gameplay are controller-owned. The
+          # separate VPN/remote co-op setup remains keyboard-capable.
+          Write-Host 'Final controller co-op source validation passed.'
+          git diff --stat -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
 
-          git diff --quiet -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
-          if ($LASTEXITCODE -ne 0) {
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
-            git commit -m 'Materialize controller-owned Fallout menus and gameplay input'
-            git push origin HEAD:fix/no-debug-no-data-copy
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          # Do NOT commit/push from the build. Multiple materializer workflows can
+          # advance this branch concurrently; the validated workspace is exactly
+          # what must be compiled, and avoiding a push removes that CI race.
 
       - name: Configure
         shell: pwsh
