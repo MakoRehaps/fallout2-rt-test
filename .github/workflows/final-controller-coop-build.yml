@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply final regular co-op, controller ownership, phone, ecology, and UI fixes
+      - name: Apply final regular co-op, controller ownership, phone, ecology, medical, and UI fixes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -42,12 +42,19 @@ jobs:
           # Pip-Boy shows the class for the selected cell.
           python tools/patch_worldmap_ecology.py
 
-          # Final regression pass must run LAST. It replaces legacy key-queued
-          # menu actions with controller-native backends, keeps P1 Pip-Boy only,
-          # preserves the shared bag, hides the live mouse reticle, restores a
-          # real Exit Game action, and removes F1 ravine road maps including old
-          # persisted 56-64 cells/chains.
+          # Final regression pass replaces legacy key-queued menu actions with
+          # controller-native backends, keeps P1 Pip-Boy only, preserves the
+          # shared bag, hides the live mouse reticle, restores a real Exit Game
+          # action, and removes F1 ravine road maps including old persisted
+          # 56-64 cells/chains.
           python tools/patch_controller_ui_world_regressions.py
+
+          # Death is a co-op downed/rescue state, never stock game-over. Teammate
+          # Doctor use can revive within 60 seconds; bleedout or -100 HP sends
+          # the whole party to the geographically closest medical settlement.
+          # Treatment consumes available shared caps and persists unpaid cost as
+          # medical debt in the existing save-compatible roster byte.
+          python tools/patch_coop_downed_medical.py
 
           # Escape is intentionally the only live-game keyboard exception: it
           # exits the application cleanly. VPN/co-op setup retains its broader
@@ -78,6 +85,10 @@ jobs:
             @{ File = 'src/main.cc'; Marker = 'COOP_NO_GAMEPLAY_MOUSE_RETICLE_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_REGULAR_ISOMETRIC_ONLY_V1' },
+            @{ File = 'src/combat.cc'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/critter.cc'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_CLOSEST_DOCTOR_RESCUE_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_DIRECT_PIPBOY_HOTKEY_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
@@ -101,7 +112,7 @@ jobs:
 
           Write-Host 'Final controller co-op source validation passed.'
           git diff --check
-          git diff --stat -- src/main.cc src/mainmenu.cc src/local_coop.h src/local_coop_runtime.h src/local_coop_system_menu.h src/local_coop_mobile.cc src/unified_world_system.h src/worldmap.cc src/pipboy.cc
+          git diff --stat -- src/main.cc src/mainmenu.cc src/combat.cc src/critter.cc src/local_coop.h src/local_coop_runtime.h src/local_coop_system_menu.h src/local_coop_mobile.cc src/unified_world_system.h src/worldmap.cc src/pipboy.cc
 
       - name: Configure
         shell: pwsh
