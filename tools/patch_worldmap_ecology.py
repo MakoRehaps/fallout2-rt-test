@@ -76,6 +76,24 @@ else:
 p = Path('src/worldmap.cc')
 s = p.read_text(encoding='utf-8')
 if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
+    # The classifier uses critter prototype kill types.
+    include_anchor = '#include "proto_instance.h"\n'
+    if '#include "proto.h"\n' not in s:
+        if include_anchor not in s:
+            raise SystemExit('worldmap proto include anchor not found')
+        s = s.replace(include_anchor, '#include "proto.h"\n' + include_anchor, 1)
+
+    # The unified encounter-context helper appears before the private encounter
+    # table globals. Forward-declare the classifier there, then define it next to
+    # wmRndEncounterPick where those globals are already declared.
+    declaration_anchor = 'static int wmRndEncounterPick();\n'
+    if declaration_anchor not in s:
+        raise SystemExit('worldmap encounter prototype anchor not found')
+    s = s.replace(
+        declaration_anchor,
+        declaration_anchor + 'static int coopWorldEncounterPickedPopulation();\n',
+        1)
+
     old = '''    if (wmRndEncounterPick() == -1) {
         wmGenData.encounterMapId = -1;
         wmGenData.encounterTableId = -1;
@@ -104,58 +122,7 @@ if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
         return;
     }
 
-    // Classify the encounter picked by Fallout's own table using kill types.
-    // Creature kill types count as wildlife; people, ghouls, super mutants,
-    // robots and unknown scripted groups count as human/activity. Mixed groups
-    // are reserved for the small MIXED DANGER portion of the grid.
-    auto pickedPopulation = []() -> int {
-        if (wmGenData.encounterTableId < 0
-            || wmGenData.encounterTableId >= wmMaxEncounterInfoTables) return 3;
-        EncounterTable& table = wmEncounterTableList[wmGenData.encounterTableId];
-        if (wmGenData.encounterEntryId < 0
-            || wmGenData.encounterEntryId >= table.entriesLength) return 3;
-        EncounterTableEntry& tableEntry = table.entries[wmGenData.encounterEntryId];
-        if ((tableEntry.flags & ENCOUNTER_ENTRY_SPECIAL) != 0) return 4;
-
-        int wildlife = 0;
-        int activity = 0;
-        for (int sub = 0; sub < tableEntry.subEntiesLength; sub++) {
-            int encounterIndex = tableEntry.subEntries[sub].encounterIndex;
-            if (encounterIndex < 0 || encounterIndex >= wmMaxEncBaseTypes) continue;
-            Encounter& encounter = wmEncBaseTypeList[encounterIndex];
-            for (int entryIndex = 0; entryIndex < encounter.entriesLength; entryIndex++) {
-                int pid = encounter.entries[entryIndex].pid;
-                if (pid < 0 || PID_TYPE(pid) != OBJ_TYPE_CRITTER) continue;
-                Proto* proto = nullptr;
-                if (protoGetProto(pid, &proto) != 0 || proto == nullptr) continue;
-                int killType = proto->critter.data.killType;
-                switch (killType) {
-                case KILL_TYPE_BRAHMIN:
-                case KILL_TYPE_RADSCORPION:
-                case KILL_TYPE_RAT:
-                case KILL_TYPE_FLOATER:
-                case KILL_TYPE_CENTAUR:
-                case KILL_TYPE_DOG:
-                case KILL_TYPE_MANTIS:
-                case KILL_TYPE_DEATH_CLAW:
-                case KILL_TYPE_PLANT:
-                case KILL_TYPE_GECKO:
-                case KILL_TYPE_ALIEN:
-                case KILL_TYPE_GIANT_ANT:
-                    wildlife++;
-                    break;
-                default:
-                    activity++;
-                    break;
-                }
-            }
-        }
-        if (wildlife > 0 && activity == 0) return 1;
-        if (activity > 0 && wildlife == 0) return 2;
-        return 3;
-    };
-
-    int picked = pickedPopulation();
+    int picked = coopWorldEncounterPickedPopulation();
     bool allowed = picked == 4
         || (ecology == UnifiedWorldSystemPopulation::Wildlife && picked == 1)
         || (ecology == UnifiedWorldSystemPopulation::HumanActivity && picked == 2)
@@ -171,6 +138,83 @@ if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
     if old not in s:
         raise SystemExit('worldmap encounter-pick anchor not found')
     s = s.replace(old, new, 1)
+
+    helper_anchor = '''// 0x4C0CF4
+static int wmRndEncounterPick()
+{'''
+    if helper_anchor not in s:
+        raise SystemExit('worldmap encounter picker definition anchor not found')
+    helper = r'''// Classify the encounter already picked by Fallout's own encounter tables.
+// This lives beside wmRndEncounterPick because the table/base-type globals are
+// private to this translation unit and are declared after the unified helpers.
+static int coopWorldEncounterPickedPopulation()
+{
+    if (wmGenData.encounterTableId < 0
+        || wmGenData.encounterTableId >= wmMaxEncounterInfoTables) {
+        return 3;
+    }
+
+    EncounterTable& table = wmEncounterTableList[wmGenData.encounterTableId];
+    if (wmGenData.encounterEntryId < 0
+        || wmGenData.encounterEntryId >= table.entriesLength) {
+        return 3;
+    }
+
+    EncounterTableEntry& tableEntry = table.entries[wmGenData.encounterEntryId];
+    if ((tableEntry.flags & ENCOUNTER_ENTRY_SPECIAL) != 0) {
+        return 4;
+    }
+
+    int wildlife = 0;
+    int activity = 0;
+    for (int sub = 0; sub < tableEntry.subEntiesLength; sub++) {
+        int encounterIndex = tableEntry.subEntries[sub].encounterIndex;
+        if (encounterIndex < 0 || encounterIndex >= wmMaxEncBaseTypes) {
+            continue;
+        }
+
+        Encounter& encounter = wmEncBaseTypeList[encounterIndex];
+        for (int entryIndex = 0; entryIndex < encounter.entriesLength; entryIndex++) {
+            int pid = encounter.entries[entryIndex].pid;
+            if (pid < 0 || PID_TYPE(pid) != OBJ_TYPE_CRITTER) {
+                continue;
+            }
+
+            Proto* proto = nullptr;
+            if (protoGetProto(pid, &proto) != 0 || proto == nullptr) {
+                activity++;
+                continue;
+            }
+
+            switch (proto->critter.data.killType) {
+            case KILL_TYPE_BRAHMIN:
+            case KILL_TYPE_RADSCORPION:
+            case KILL_TYPE_RAT:
+            case KILL_TYPE_FLOATER:
+            case KILL_TYPE_CENTAUR:
+            case KILL_TYPE_DOG:
+            case KILL_TYPE_MANTIS:
+            case KILL_TYPE_DEATH_CLAW:
+            case KILL_TYPE_PLANT:
+            case KILL_TYPE_GECKO:
+            case KILL_TYPE_ALIEN:
+            case KILL_TYPE_GIANT_ANT:
+                wildlife++;
+                break;
+            default:
+                activity++;
+                break;
+            }
+        }
+    }
+
+    if (wildlife > 0 && activity == 0) return 1;
+    if (activity > 0 && wildlife == 0) return 2;
+    return 3;
+}
+
+'''
+    s = s.replace(helper_anchor, helper + helper_anchor, 1)
     p.write_text(s, encoding='utf-8')
     print('Patched worldmap encounter ecology gate')
 else:
