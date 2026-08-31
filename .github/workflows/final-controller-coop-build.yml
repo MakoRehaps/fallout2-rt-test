@@ -31,11 +31,12 @@ jobs:
           python tools/patch_controller_owned_menus.py
 
           # PhoBoi: never hard-lock controls behind orientation, keep the game
-          # feed full-screen under a transparent touch-controller HUD, and
-          # provide a raw RGBA stream fallback for mobile browsers without
-          # DecompressionStream.
+          # feed full-screen under a transparent touch-controller HUD, provide
+          # a raw RGBA stream fallback, and scale the logical landscape canvas
+          # to each phone's actual VisualViewport instead of the host PC size.
           python tools/patch_phoboi_landscape_gate.py
           python tools/patch_phoboi_video_fallback.py
+          python tools/patch_phoboi_adaptive_phone_viewport.py
 
           # The physical world grid owns a persistent ecology class. Quiet cells
           # stay empty, wildlife is common, human activity is uncommon, and the
@@ -98,6 +99,9 @@ jobs:
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NO_LANDSCAPE_GATE_V2' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1' },
             @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_RAW_VIDEO_FALLBACK_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_ADAPTIVE_PHONE_VIEWPORT_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_VISUAL_VIEWPORT_SCALE_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_READABLE_STREAM_LADDER_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' },
             @{ File = 'src/unified_world_system.h'; Marker = 'COOP_F1_NO_RAVINE_POOL_V1' },
