@@ -1,5 +1,11 @@
-# Regular co-op post-load spawn build trigger
+# Regular co-op build trigger
 
-This user-authored commit exists to trigger the Windows co-op installer after the ready-room P2-P4 post-load spawn fix was materialized into src/main.cc.
+This user-authored commit exists to trigger the Windows co-op installer after the current regular co-op fixes were materialized.
 
-Target materialized source commit: f050d199d473be1989558ee805928aafc0a529bc
+Includes:
+- ready-room P2-P4 post-load spawning
+- Ascent-style shared isometric camera late-frame ownership
+- per-player ready-room class selection
+- regular co-op build-validator compatibility marker
+
+Target materialized source commit: 990a16eba3a6e00d698809e74dc8a70f08d72ddd
