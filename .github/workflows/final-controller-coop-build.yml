@@ -55,6 +55,7 @@ jobs:
           # Treatment consumes available shared caps and persists unpaid cost as
           # medical debt in the existing save-compatible roster byte.
           python tools/patch_coop_downed_medical.py
+          python tools/patch_coop_medical_compile_fix.py
 
           # Escape is intentionally the only live-game keyboard exception: it
           # exits the application cleanly. VPN/co-op setup retains its broader
@@ -89,6 +90,7 @@ jobs:
             @{ File = 'src/critter.cc'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_CLOSEST_DOCTOR_RESCUE_V2' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_MEDICAL_FEE_MAX_HP_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_DIRECT_PIPBOY_HOTKEY_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
