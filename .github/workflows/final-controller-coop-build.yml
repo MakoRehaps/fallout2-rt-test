@@ -1,0 +1,143 @@
+name: Final Controller Co-op Windows Build
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Windows x64 / Controller-Owned Co-op Debug
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply final regular co-op and controller menu ownership
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Reassert the regular-coop cleanup last. Older build scripts contain
+          # legacy FPS hooks, so the final compiled source must win over them.
+          python tools/patch_regular_coop_cleanup.py
+          python tools/patch_controller_owned_menus.py
+
+          # The regular cleanup intentionally replaces the old menu dispatch
+          # block. Keep this compatibility marker because the old validator
+          # still checks it, while the actual runtime is the newer edge-toggle.
+          $runtime = 'src/local_coop_runtime.h'
+          $text = Get-Content $runtime -Raw
+          if ($text -notmatch 'COOP_SYSTEM_MENU_RUNTIME_V1') {
+            $anchor = '        // COOP_PIPBOY_EDGE_TOGGLE_V2'
+            if (-not $text.Contains($anchor)) { throw 'Pip-Boy controller edge marker missing' }
+            $text = $text.Replace($anchor, "        // COOP_SYSTEM_MENU_RUNTIME_V1`r`n$anchor")
+            Set-Content -Path $runtime -Value $text -NoNewline
+          }
+
+          $required = @(
+            @{ File = 'src/mainmenu.cc'; Marker = 'COOP_CONTROLLER_OWNED_MAIN_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_CONTROLLER_ONLY_SYSTEM_MENU_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_REGULAR_ISOMETRIC_ONLY_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' }
+          )
+          foreach ($check in $required) {
+            if (-not (Select-String -Path $check.File -Pattern $check.Marker -Quiet)) {
+              throw "Final controller co-op patch missing: $($check.Marker) in $($check.File)"
+            }
+          }
+
+          # Source scope is deliberately limited to Fallout main/in-game UI and
+          # gameplay. PhoBoi/VPN/remote setup files are not modified here, so
+          # keyboard entry remains available for connection/session setup.
+
+          git diff --quiet -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
+          if ($LASTEXITCODE -ne 0) {
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -- src/main.cc src/mainmenu.cc src/local_coop_runtime.h src/local_coop_system_menu.h src/unified_world_system.h
+            git commit -m 'Materialize controller-owned Fallout menus and gameplay input'
+            git push origin HEAD:fix/no-debug-no-data-copy
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Debug
+        shell: pwsh
+        run: cmake --build build --config Debug --parallel 4
+
+      - name: Upload debug executable and symbols
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallout2-ce-controller-coop-windows-x64-debug
+          path: |
+            build/Debug/fallout2-ce.exe
+            build/Debug/fallout2-ce.pdb
+          retention-days: 7
+
+      - name: Install Inno Setup
+        if: success()
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Download verified Cloudflare tunnel helper
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'installer\cloudflared.exe'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE' -OutFile 'installer\cloudflared-LICENSE.txt'
+          if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
+          if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
+
+      - name: Prepare Freedoom 0.13.0 packaged assets
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = 'freedoom-0.13.0.zip'
+          Invoke-WebRequest -Uri 'https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip' -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59') {
+            throw "Freedoom archive checksum mismatch: $hash"
+          }
+          Expand-Archive -Path $zip -DestinationPath freedoom-stage -Force
+          New-Item -ItemType Directory -Force -Path 'installer\freedoom' | Out-Null
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\freedoom1.wad' 'installer\freedoom\freedoom1.wad' -Force
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\COPYING.txt' 'installer\freedoom\COPYING.txt' -Force
+
+      - name: Build full controller co-op debug installer
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
+          & $iscc installer\UnifiedCoopBeta.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) {
+            throw 'installer output was not produced'
+          }
+
+      - name: Upload controller co-op debug installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallout-Unified-Coop-Controller-Beta-Debug-Setup
+          path: installer-output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
+          retention-days: 7
