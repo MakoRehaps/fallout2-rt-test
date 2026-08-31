@@ -42,4 +42,49 @@ if "PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1" not in text:
 else:
     print("PhoBoi transparent controller overlay already applied")
 
+# MSVC rejects very large individual string literals (C2026). The embedded
+# controller page has grown beyond that limit, so materialize it as several
+# runtime-concatenated raw-string chunks instead of one giant raw literal.
+cpp_split_marker = "PHOBOI_CPP_SPLIT_HTML_V1"
+if cpp_split_marker not in text:
+    start_token = '    return R"PHOBOI('
+    end_token = ')PHOBOI";'
+    start = text.find(start_token)
+    if start == -1:
+        raise SystemExit("PhoBoi controller HTML raw-string start not found")
+    body_start = start + len(start_token)
+    end = text.find(end_token, body_start)
+    if end == -1:
+        raise SystemExit("PhoBoi controller HTML raw-string end not found")
+
+    body = text[body_start:end]
+    chunks = []
+    max_chunk = 12000
+    while body:
+        if len(body) <= max_chunk:
+            chunks.append(body)
+            break
+        cut = body.rfind("\n", 0, max_chunk)
+        if cut < max_chunk // 2:
+            cut = max_chunk
+        else:
+            cut += 1
+        chunks.append(body[:cut])
+        body = body[cut:]
+
+    lines = [
+        f"    // {cpp_split_marker}",
+        "    static const std::string html =",
+        f'        std::string(R"PHOBOI({chunks[0]})PHOBOI")',
+    ]
+    for chunk in chunks[1:]:
+        lines.append(f'        + R"PHOBOI({chunk})PHOBOI"')
+    lines[-1] += ";"
+    lines.append("    return html.c_str();")
+    replacement = "\n".join(lines)
+    text = text[:start] + replacement + text[end + len(end_token):]
+    print(f"Split PhoBoi controller HTML into {len(chunks)} MSVC-safe literals")
+else:
+    print("PhoBoi controller HTML already split for MSVC")
+
 path.write_text(text, encoding="utf-8")
