@@ -3,9 +3,91 @@ from pathlib import Path
 path = Path("src/local_coop_mobile.cc")
 text = path.read_text(encoding="utf-8")
 
-old = "@media (orientation:portrait){#pad:before{content:'ROTATE PHONE TO LANDSCAPE';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#07100b;color:#ffd56a;font-size:18px;z-index:15}#video,.stick,.btn,.small,.dpad,.top{visibility:hidden}}"
+# iPhone Safari must never be gated by orientation. Keep the compatibility
+# markers used by older workflow validators, but make the rule unconditional:
+# there is no rotate overlay and all controls/video stay visible in both
+# portrait and landscape.
+old_gate = "@media (orientation:portrait){#pad:before{content:'ROTATE PHONE TO LANDSCAPE';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#07100b;color:#ffd56a;font-size:18px;z-index:15}#video,.stick,.btn,.small,.dpad,.top{visibility:hidden}}"
 legacy_nonblocking = "/* PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1 */\\n@media (orientation:portrait){#pad:before{content:'ROTATE PHONE TO LANDSCAPE';position:absolute;left:50%;top:max(4px,env(safe-area-inset-top));transform:translateX(-50%);display:block;width:max-content;max-width:92vw;padding:5px 10px;border:1px solid #ffd56a;border-radius:6px;background:#07100bcc;color:#ffd56a;font-size:12px;line-height:1.1;z-index:15;pointer-events:none}#video,.stick,.btn,.small,.dpad,.top{visibility:visible}}"
-no_gate = "/* PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1 PHOBOI_NO_LANDSCAPE_GATE_V2 */\\n@media (orientation:portrait){#pad:before{content:none!important;display:none!important}#video,.stick,.btn,.small,.dpad,.top{visibility:visible!important}}"
+v2_no_gate_escaped = "/* PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1 PHOBOI_NO_LANDSCAPE_GATE_V2 */\\n@media (orientation:portrait){#pad:before{content:none!important;display:none!important}#video,.stick,.btn,.small,.dpad,.top{visibility:visible!important}}"
+v2_no_gate_real = "/* PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1 PHOBOI_NO_LANDSCAPE_GATE_V2 */\n@media (orientation:portrait){#pad:before{content:none!important;display:none!important}#video,.stick,.btn,.small,.dpad,.top{visibility:visible!important}}"
+
+no_gate = """/* PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1 PHOBOI_NO_LANDSCAPE_GATE_V2 PHOBOI_IOS_ORIENTATION_AGNOSTIC_V3 */
+#pad::before{content:none!important;display:none!important;visibility:hidden!important;pointer-events:none!important}
+#video,.stick,.btn,.small,.dpad,.top{visibility:visible!important}
+@media (orientation:portrait){#pad::before{content:none!important;display:none!important;visibility:hidden!important}#video,.stick,.btn,.small,.dpad,.top{visibility:visible!important}}
+""".strip()
+
+if "PHOBOI_IOS_ORIENTATION_AGNOSTIC_V3" not in text:
+    replaced = False
+    for candidate in (old_gate, legacy_nonblocking, v2_no_gate_escaped, v2_no_gate_real):
+        if candidate in text:
+            text = text.replace(candidate, no_gate, 1)
+            replaced = True
+            break
+    if not replaced:
+        # Last-resort safety: if an old rotate phrase survived in a slightly
+        # different CSS block, fail the build instead of shipping it again.
+        if "ROTATE PHONE TO LANDSCAPE" in text:
+            raise SystemExit("Unrecognized PhoBoi rotate-phone gate still present")
+        style_end = "</style>"
+        if style_end not in text:
+            raise SystemExit("PhoBoi style closing tag not found")
+        text = text.replace(style_end, no_gate + "\n" + style_end, 1)
+    print("Made PhoBoi portrait/landscape orientation agnostic")
+else:
+    print("PhoBoi orientation-agnostic CSS already applied")
+
+# iPhone Safari does not provide a dependable orientation lock for this kind of
+# controller page. Never request landscape; portrait and landscape are both
+# supported layouts.
+orientation_lock = " if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});\n"
+if orientation_lock in text:
+    text = text.replace(orientation_lock, " // PHOBOI_IOS_NO_ORIENTATION_LOCK_V1\n", 1)
+elif "PHOBOI_IOS_NO_ORIENTATION_LOCK_V1" not in text:
+    # Accept formatting without the leading space too.
+    orientation_lock = "if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});\n"
+    if orientation_lock in text:
+        text = text.replace(orientation_lock, "// PHOBOI_IOS_NO_ORIENTATION_LOCK_V1\n", 1)
+    else:
+        raise SystemExit("PhoBoi orientation-lock call not found")
+
+# Edge-to-edge Safari layout with safe-area env() values working correctly.
+viewport_old = '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">'
+viewport_new = '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">'
+if viewport_old in text:
+    text = text.replace(viewport_old, viewport_new, 1)
+
+# Safari can restore a controller page from its back/forward page cache. If that
+# happens, force one real reload so an iPhone cannot keep an old rotate-gated
+# HTML document alive after the host has been updated.
+old_lifecycle = "['online','pageshow','orientationchange'].forEach(name=>window.addEventListener(name,()=>{if(slot>=0){openSocket();openStream()}}));"
+new_lifecycle = """// PHOBOI_IOS_BFCACHE_REFRESH_V1
+['online','orientationchange'].forEach(name=>window.addEventListener(name,()=>{if(slot>=0){openSocket();openStream()}}));
+window.addEventListener('pageshow',ev=>{if(ev.persisted){location.reload();return}if(slot>=0){openSocket();openStream()}});"""
+if old_lifecycle in text:
+    text = text.replace(old_lifecycle, new_lifecycle, 1)
+elif "PHOBOI_IOS_BFCACHE_REFRESH_V1" not in text:
+    raise SystemExit("PhoBoi lifecycle handler anchor not found")
+
+# Strengthen the already-present no-store response for mobile Safari and other
+# WebKit clients. This also makes intermediary proxies less likely to replay an
+# old controller HTML page.
+cache_old = '             << "Cache-Control: no-store\\r\\n"\n'
+cache_new = '''             // PHOBOI_IOS_CACHE_BUST_V1
+             << "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\\r\\n"
+             << "Pragma: no-cache\\r\\n"
+             << "Expires: 0\\r\\n"
+'''
+if cache_old in text:
+    text = text.replace(cache_old, cache_new, 1)
+elif "PHOBOI_IOS_CACHE_BUST_V1" not in text:
+    raise SystemExit("PhoBoi Cache-Control response anchor not found")
+
+# There must be no visible rotate instruction left anywhere in the compiled
+# page. Treat any remaining copy as a build-breaking regression.
+if "ROTATE PHONE TO LANDSCAPE" in text:
+    raise SystemExit("PhoBoi rotate-phone text survived orientation fix")
 
 overlay_css = r"""
 /* PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1 */
@@ -20,18 +102,6 @@ overlay_css = r"""
 .btn:active,.small:active,.dpad button:active{opacity:.96;background:rgba(16,45,25,.78)}
 .stick:active{opacity:.82}
 """.strip()
-
-if "PHOBOI_NO_LANDSCAPE_GATE_V2" not in text:
-    if legacy_nonblocking in text:
-        text = text.replace(legacy_nonblocking, no_gate, 1)
-        print("Removed PhoBoi landscape warning overlay")
-    elif old in text:
-        text = text.replace(old, no_gate, 1)
-        print("Removed PhoBoi landscape gate")
-    else:
-        raise SystemExit("PhoBoi portrait landscape CSS block not found")
-else:
-    print("PhoBoi landscape gate already removed")
 
 if "PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1" not in text:
     anchor = "</style>"
