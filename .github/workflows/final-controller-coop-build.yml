@@ -47,6 +47,11 @@ jobs:
           # persisted 56-64 cells/chains.
           python tools/patch_controller_ui_world_regressions.py
 
+          # Escape is intentionally the only live-game keyboard exception: it
+          # exits the application cleanly. VPN/co-op setup retains its broader
+          # keyboard support and is outside this gameplay input gate.
+          python tools/patch_esc_exit_game.py
+
           # Keep the compatibility marker used by the older validator without
           # changing the newer P1 controller-owned runtime behavior.
           $runtime = 'src/local_coop_runtime.h'
@@ -67,6 +72,7 @@ jobs:
             @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_CONTROLLER_EXIT_GAME_V1' },
             @{ File = 'src/local_coop.h'; Marker = 'COOP_EXIT_APPLICATION_REQUEST_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_EXIT_APPLICATION_CONSUMER_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_ESCAPE_EXIT_GAME_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_NO_GAMEPLAY_MOUSE_RETICLE_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1' },
             @{ File = 'src/main.cc'; Marker = 'COOP_REGULAR_ISOMETRIC_ONLY_V1' },
