@@ -35,12 +35,24 @@ marker = '// COOP_PIPBOY_EDGE_TOGGLE_V2'
 if marker not in s:
     start = s.index('        // COOP_P1_GLOBAL_UI_OWNER_V1\n        // COOP_P1_GLOBAL_UI_TOGGLE_V1')
     end = s.index('        runtime.pipboyWasDown = pipboyDown;', start)
-    replacement = '''        // COOP_P1_GLOBAL_UI_OWNER_V1\n        // COOP_P1_GLOBAL_UI_TOGGLE_V1\n        // COOP_PIPBOY_EDGE_TOGGLE_V2\n        // P1 owns the stock global Pip-Boy. Use the physical D-pad-left edge\n        // directly; no delayed re-arm timer survives across modal transitions.\n        bool canOwnGlobalUi = canOpen && slot == 0;\n        bool p1PipboyEdge = slot == 0 && pipboyDown && !runtime.pipboyWasDown;\n\n        if (p1PipboyEdge && pipboyModalActive) {\n            gLocalCoopModalControllerSlot = 0;\n            enqueueInputEvent(KEY_ESCAPE);\n            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=close\\n");\n        } else if (canOwnGlobalUi && p1PipboyEdge) {\n            gLocalCoopModalControllerSlot = 0;\n            enqueueInputEvent(KEY_LOWERCASE_P);\n            modalActive = true;\n            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=open\\n");\n        } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {\n            gLocalCoopModalControllerSlot = slot;\n            gLocalCoopSkilldexInvokerSlot = slot;\n            enqueueInputEvent(KEY_LOWERCASE_S);\n            modalActive = true;\n            debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\\n", slot);\n        } else if (canOpen && slot == 0 && startDown && !runtime.startWasDown) {\n            gLocalCoopModalControllerSlot = 0;\n            localCoopSystemMenuOpen();\n            modalActive = true;\n            debugPrint("[COOP MENU] slot=0 source=controller button=start action=open-phoboi\\n");\n        }\n\n'''
+    replacement = '''        // COOP_P1_GLOBAL_UI_OWNER_V1\n        // COOP_P1_GLOBAL_UI_TOGGLE_V1\n        // COOP_SYSTEM_MENU_RUNTIME_V1\n        // COOP_PIPBOY_EDGE_TOGGLE_V2\n        // P1 owns the stock global Pip-Boy. Use the physical D-pad-left edge\n        // directly; no delayed re-arm timer survives across modal transitions.\n        bool canOwnGlobalUi = canOpen && slot == 0;\n        bool p1PipboyEdge = slot == 0 && pipboyDown && !runtime.pipboyWasDown;\n\n        if (p1PipboyEdge && pipboyModalActive) {\n            gLocalCoopModalControllerSlot = 0;\n            enqueueInputEvent(KEY_ESCAPE);\n            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=close\\n");\n        } else if (canOwnGlobalUi && p1PipboyEdge) {\n            gLocalCoopModalControllerSlot = 0;\n            enqueueInputEvent(KEY_LOWERCASE_P);\n            modalActive = true;\n            debugPrint("[PHOBOI INPUT] slot=0 global-ui=pipboy action=open\\n");\n        } else if (canOpen && skilldexDown && !runtime.skilldexWasDown) {\n            gLocalCoopModalControllerSlot = slot;\n            gLocalCoopSkilldexInvokerSlot = slot;\n            enqueueInputEvent(KEY_LOWERCASE_S);\n            modalActive = true;\n            debugPrint("[COOP SKILLDEX] slot=%d source=controller button=right-stick\\n", slot);\n        } else if (canOpen && slot == 0 && startDown && !runtime.startWasDown) {\n            gLocalCoopModalControllerSlot = 0;\n            localCoopSystemMenuOpen();\n            modalActive = true;\n            debugPrint("[COOP MENU] slot=0 source=controller button=start action=open-phoboi\\n");\n        }\n\n'''
     s = s[:start] + replacement + s[end:]
     p.write_text(s, encoding='utf-8')
     print('Applied Pip-Boy edge toggle')
 else:
     print('Pip-Boy edge toggle already applied')
+
+# If the edge-toggle source was already materialized by an earlier version of
+# this patch, retain the legacy validator marker without changing behavior.
+p = Path('src/local_coop_runtime.h')
+s = p.read_text(encoding='utf-8')
+if '// COOP_SYSTEM_MENU_RUNTIME_V1' not in s and '// COOP_PIPBOY_EDGE_TOGGLE_V2' in s:
+    s = s.replace(
+        '        // COOP_PIPBOY_EDGE_TOGGLE_V2',
+        '        // COOP_SYSTEM_MENU_RUNTIME_V1\n        // COOP_PIPBOY_EDGE_TOGGLE_V2',
+        1)
+    p.write_text(s, encoding='utf-8')
+    print('Restored co-op system menu compatibility marker')
 
 # Encounter chains must never advance to the same map that is currently loaded.
 # Build-time generation already avoids adjacent duplicates, but old saves and
