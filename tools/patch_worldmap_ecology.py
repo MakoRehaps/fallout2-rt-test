@@ -97,16 +97,8 @@ if '// COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' not in s:
         wmGenData.encounterEntryId = -1;
     };
 
-    // Half of the physical grid is genuinely quiet wilderness. A map can still
-    // contain scenery, salvage, vehicles, weather, etc.; it simply does not
-    // manufacture a group of people every time the party crosses a cell.
-    if (ecology == UnifiedWorldSystemPopulation::Quiet) {
-        clearEncounter();
-        debugPrint("[WORLD ECOLOGY] quiet cell x=%d y=%d - no random critter group\n",
-            travel.currentCellX[gameIndex], travel.currentCellY[gameIndex]);
-        return;
-    }
-
+    // Let Fallout pick first so a rare SPECIAL can still break the normal
+    // ecology rules. Ordinary encounters are filtered immediately afterwards.
     if (wmRndEncounterPick() == -1) {
         clearEncounter();
         return;
