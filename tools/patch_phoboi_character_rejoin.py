@@ -1,4 +1,5 @@
 from pathlib import Path
+import runpy
 
 path = Path("src/local_coop_mobile.cc")
 text = path.read_text(encoding="utf-8")
@@ -129,3 +130,8 @@ if "PHOBOI_PERSISTENT_REJOIN_RESTORE_V1" not in text:
 # token so another controller can take over the same saved character slot.
 path.write_text(text, encoding="utf-8")
 print("Reserved co-op character slots across phone/network disconnects with automatic rejoin")
+
+# This patch is the last PhoBoi HTML mutator in the final build. Re-split the
+# completed controller page now, after readability/zoom/rejoin additions, so no
+# individual C++ string literal can exceed MSVC's C2026 limit.
+runpy.run_path("tools/patch_phoboi_msvc_final_split.py", run_name="__main__")
