@@ -139,3 +139,7 @@ runpy.run_path("tools/patch_phoboi_msvc_final_split.py", run_name="__main__")
 # Cloudflare reset/new-link controls alter only native host/tunnel code, not the
 # already-split HTML, so run them after the final HTML split.
 runpy.run_path("tools/patch_phoboi_cloudflare_reset.py", run_name="__main__")
+
+# Unified co-op owns PhoBoi from the start. Remove the legacy single-player
+# Vault Suit movie gate so the P1 controller shortcut/menu always reaches it.
+runpy.run_path("tools/patch_phoboi_pipboy_access.py", run_name="__main__")
