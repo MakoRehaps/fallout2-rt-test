@@ -135,3 +135,7 @@ print("Reserved co-op character slots across phone/network disconnects with auto
 # completed controller page now, after readability/zoom/rejoin additions, so no
 # individual C++ string literal can exceed MSVC's C2026 limit.
 runpy.run_path("tools/patch_phoboi_msvc_final_split.py", run_name="__main__")
+
+# Cloudflare reset/new-link controls alter only native host/tunnel code, not the
+# already-split HTML, so run them after the final HTML split.
+runpy.run_path("tools/patch_phoboi_cloudflare_reset.py", run_name="__main__")
