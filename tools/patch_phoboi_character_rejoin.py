@@ -109,32 +109,35 @@ if "PHOBOI_CHARACTER_SLOT_STREAM_RECLAIM_V1" not in text:
         raise SystemExit("PhoBoi stream auth anchor not found")
     text = text.replace(old_stream_auth, new_stream_auth, 1)
 
-# Persist the phone-side resume credential across Safari tab/app restarts. The
-# character remains identified by its numbered co-op slot; this token only
-# proves that this phone may resume the transport without claiming a new body.
+# Materialize the native transport-rejoin changes first. The cross-reference
+# hardening script needs the original sessionStorage claim-success substring as
+# a stable insertion point for the character rejoin-code result.
+path.write_text(text, encoding="utf-8")
+print("Reserved co-op character slots across phone/network disconnects with automatic rejoin")
+
+# Cross-referenced phone/network hardening runs after all normal phone CSS/JS
+# patches but BEFORE persistent-token rewriting and the final MSVC split. This
+# keeps its HTML anchors deterministic and gives it the finished browser page.
+runpy.run_path("tools/patch_phoboi_crossref_hardening.py", run_name="__main__")
+
+# Persist the phone-side resume credential across Safari tab/app restarts after
+# hardening has inserted the rejoin-code result. The replacement targets only
+# the sessionStorage statement, so both features compose instead of fighting.
+text = path.read_text(encoding="utf-8")
 old_store = "sessionStorage.setItem('phoboiSession',JSON.stringify({slot,token}));"
 new_store = "localStorage.setItem('phoboiSession',JSON.stringify({slot,token}));sessionStorage.setItem('phoboiSession',JSON.stringify({slot,token})); // PHOBOI_PERSISTENT_REJOIN_TOKEN_V1"
 if "PHOBOI_PERSISTENT_REJOIN_TOKEN_V1" not in text:
     if old_store not in text:
-        raise SystemExit("PhoBoi session storage anchor not found")
+        raise SystemExit("PhoBoi session storage anchor not found after hardening")
     text = text.replace(old_store, new_store, 1)
 
 old_restore = "const saved=JSON.parse(sessionStorage.getItem('phoboiSession')||'null');if(!saved)return;"
 new_restore = "const saved=JSON.parse(localStorage.getItem('phoboiSession')||sessionStorage.getItem('phoboiSession')||'null');if(!saved)return; // PHOBOI_PERSISTENT_REJOIN_RESTORE_V1"
 if "PHOBOI_PERSISTENT_REJOIN_RESTORE_V1" not in text:
     if old_restore not in text:
-        raise SystemExit("PhoBoi session restore anchor not found")
+        raise SystemExit("PhoBoi session restore anchor not found after hardening")
     text = text.replace(old_restore, new_restore, 1)
-
-# Explicit release/kick intentionally remains the escape hatch: it clears the
-# token so another controller can take over the same saved character slot.
 path.write_text(text, encoding="utf-8")
-print("Reserved co-op character slots across phone/network disconnects with automatic rejoin")
-
-# Cross-referenced phone/network hardening runs after all normal phone CSS/JS
-# patches but before the final MSVC literal split. This gives it the finished
-# browser page while guaranteeing its added HTML is split safely for MSVC.
-runpy.run_path("tools/patch_phoboi_crossref_hardening.py", run_name="__main__")
 
 # This is the final PhoBoi HTML split in the build. Re-split the completed page
 # after readability/zoom/rejoin/Retina changes so no individual C++ literal can
