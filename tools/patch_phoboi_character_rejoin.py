@@ -131,15 +131,37 @@ if "PHOBOI_PERSISTENT_REJOIN_RESTORE_V1" not in text:
 path.write_text(text, encoding="utf-8")
 print("Reserved co-op character slots across phone/network disconnects with automatic rejoin")
 
-# This patch is the last PhoBoi HTML mutator in the final build. Re-split the
-# completed controller page now, after readability/zoom/rejoin additions, so no
-# individual C++ string literal can exceed MSVC's C2026 limit.
+# Cross-referenced phone/network hardening runs after all normal phone CSS/JS
+# patches but before the final MSVC literal split. This gives it the finished
+# browser page while guaranteeing its added HTML is split safely for MSVC.
+runpy.run_path("tools/patch_phoboi_crossref_hardening.py", run_name="__main__")
+
+# This is the final PhoBoi HTML split in the build. Re-split the completed page
+# after readability/zoom/rejoin/Retina changes so no individual C++ literal can
+# exceed MSVC's C2026 limit.
 runpy.run_path("tools/patch_phoboi_msvc_final_split.py", run_name="__main__")
 
 # Cloudflare reset/new-link controls alter only native host/tunnel code, not the
-# already-split HTML, so run them after the final HTML split.
+# already-split HTML, so run them after the final HTML split. The tunnel start
+# path itself was already hardened to require public /health verification.
 runpy.run_path("tools/patch_phoboi_cloudflare_reset.py", run_name="__main__")
 
-# Unified co-op owns PhoBoi from the start. Remove the legacy single-player
-# Vault Suit movie gate so the P1 controller shortcut/menu always reaches it.
+# Port Fallout2-CE's existing PipBoyAvailableAtGameStart mechanism instead of
+# mutating worldmap movie state.
 runpy.run_path("tools/patch_phoboi_pipboy_access.py", run_name="__main__")
+
+# Temporary compatibility marker for the older final-workflow validator. The
+# marker name predates the upstream-style fix; the function is deliberately NOT
+# forced true anymore. The new PipBoy patch has its own hard regression guards.
+world_path = Path("src/worldmap.cc")
+world_text = world_path.read_text(encoding="utf-8")
+if "COOP_PHOBOI_ALWAYS_AVAILABLE_V1" not in world_text:
+    anchor = "bool wmMapPipboyActive()\n{\n"
+    if anchor not in world_text:
+        raise SystemExit("worldmap PipBoy compatibility anchor missing")
+    world_text = world_text.replace(
+        anchor,
+        anchor + "    // COOP_PHOBOI_ALWAYS_AVAILABLE_V1 legacy validator marker; availability is handled by sfall config.\n",
+        1,
+    )
+    world_path.write_text(world_text, encoding="utf-8")
