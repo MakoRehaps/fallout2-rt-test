@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import runpy
 
 
 def read(path):
@@ -201,4 +202,8 @@ for filename, marker in (
     if marker not in read(filename):
         raise SystemExit(f"missing Character/shared-Skilldex final marker {marker}")
 
-print("Kept Character modal deferred and finalized shared Skilldex declaration order V2")
+# This MUST run last: it reconciles saved character ownership with mixed
+# physical XInput/phone transports after every earlier phone/UI patch has run.
+runpy.run_path("tools/patch_phoboi_mixed_slot_allocator.py", run_name="__main__")
+
+print("Kept Character modal deferred, shared Skilldex, and final mixed slot allocator")
