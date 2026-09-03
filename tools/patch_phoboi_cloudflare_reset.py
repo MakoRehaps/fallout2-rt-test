@@ -1,5 +1,4 @@
 from pathlib import Path
-import runpy
 
 path = Path("src/local_coop_mobile.cc")
 text = path.read_text(encoding="utf-8")
@@ -7,11 +6,6 @@ text = path.read_text(encoding="utf-8")
 marker = "PHOBOI_CLOUDFLARE_RESET_V1"
 if marker in text:
     print("PhoBoi Cloudflare reset controls already applied")
-    runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
-    runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
-    runpy.run_path("tools/patch_phoboi_cloudflare_route_v5.py", run_name="__main__")
-    runpy.run_path("tools/patch_phoboi_public_failover_v6.py", run_name="__main__")
-    runpy.run_path("tools/patch_phoboi_ssh_discovery_v7.py", run_name="__main__")
     raise SystemExit(0)
 
 old_stop = r'''void mobileStopCloudflareTunnel()
@@ -50,14 +44,10 @@ bool mobileResetCloudflareTunnel(bool requestFreshLink)
     mobileStopCloudflareTunnel();
     mobileSetCloudflareStatus(requestFreshLink ? "NEW LINK..." : "RECONNECTING...");
 
-    // Quick Tunnels are ephemeral. Even a reconnect may receive a different
-    // trycloudflare.com URL, so the host QR/link is redrawn from live state.
-    bool started = mobileStartCloudflareTunnel();
-    if (!started) {
-        return false;
-    }
-
-    return true;
+    // Keep the original proven Quick Tunnel launcher. Reset/new-link is only
+    // lifecycle control around that launcher; it must not rewrite protocols,
+    // DNS handling, edge selection, config files, or introduce another relay.
+    return mobileStartCloudflareTunnel();
 }
 '''
 
@@ -115,19 +105,4 @@ if old_t_key not in text:
 text = text.replace(old_t_key, new_t_key, 1)
 
 path.write_text(text, encoding="utf-8")
-print("Added Cloudflare reset/new-link controls without releasing character slots")
-
-# V3 proves the local origin and fixes response/QR handling. V4 keeps the
-# cloudflared reader and public verifier independent. V5 then replaces V4's
-# empty-config/auto-edge launch with the documented zero-config Quick Tunnel
-# path, pins this Windows/VPN build to IPv4 + HTTP/2, and adds useful probe
-# diagnostics instead of another opaque self_probe=0. V6 handles the concrete
-# WinHTTP 12007 DNS failure by keeping a physical-LAN QR available and starting
-# an alternate no-signup HTTPS tunnel. V7 makes that fallback find the Windows
-# OpenSSH client or Git for Windows' bundled SSH instead of requiring one exact
-# optional-feature path.
-runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
-runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
-runpy.run_path("tools/patch_phoboi_cloudflare_route_v5.py", run_name="__main__")
-runpy.run_path("tools/patch_phoboi_public_failover_v6.py", run_name="__main__")
-runpy.run_path("tools/patch_phoboi_ssh_discovery_v7.py", run_name="__main__")
+print("Added Cloudflare reset/new-link controls without changing the proven Quick Tunnel transport")
