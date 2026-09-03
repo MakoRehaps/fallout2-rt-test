@@ -10,55 +10,63 @@ def write(path, text):
     Path(path).write_text(text, encoding="utf-8")
 
 
-# The shared Skilldex patch is intentionally final-source code, so fix two
-# compile/order details here before MSVC sees it: use the known window size
-# instead of nonexistent width/height accessors, and forward-declare the shared
-# bag close helper that the Skilldex opener calls.
+# Finalize shared Skilldex compile/order details before MSVC sees it.
+# V1 accidentally put the close-inventory declaration at the FIRST Skilldex
+# marker, which is inside LocalCoopPersonalUiState. V2 anchors it immediately
+# before the namespace-level shared Skilldex functions instead.
 path = "src/local_coop_personal_ui.h"
 text = read(path)
-if "COOP_SHARED_SKILLDEX_COMPILE_FIX_V1" not in text:
-    marker = "// COOP_SHARED_SKILLDEX_V1\n"
-    if marker not in text:
-        raise SystemExit("shared Skilldex marker missing before compile fix")
-    text = text.replace(
-        marker,
-        '''// COOP_SHARED_SKILLDEX_COMPILE_FIX_V1
+
+# Be robust if this script is ever run on already-generated V1 source.
+bad_member_decl = '''// COOP_SHARED_SKILLDEX_COMPILE_FIX_V1
 inline void localCoopPersonalUiCloseInventory(int slot);
 
-''' + marker,
-        1,
-    )
+'''
+text = text.replace(bad_member_decl, "", 1)
 
-    old = '''    int w = windowGetWidth(ui.skilldexWindow);
+if "COOP_SHARED_SKILLDEX_COMPILE_FIX_V2" not in text:
+    function_anchor = '''// COOP_SHARED_SKILLDEX_V1
+inline constexpr int kLocalCoopSharedSkilldexSkillCount = 8;
+'''
+    function_replacement = '''// COOP_SHARED_SKILLDEX_COMPILE_FIX_V2
+inline void localCoopPersonalUiCloseInventory(int slot);
+
+// COOP_SHARED_SKILLDEX_V1
+inline constexpr int kLocalCoopSharedSkilldexSkillCount = 8;
+'''
+    if function_anchor not in text:
+        raise SystemExit("namespace-level shared Skilldex function anchor missing")
+    text = text.replace(function_anchor, function_replacement, 1)
+
+window_old = '''    int w = windowGetWidth(ui.skilldexWindow);
     int h = windowGetHeight(ui.skilldexWindow);
     windowFill(ui.skilldexWindow, 0, 0, w, h, _colorTable[0]);
 '''
-    new = '''    int unusedX = 0;
+window_new = '''    int unusedX = 0;
     int unusedY = 0;
     int w = 0;
     int h = 0;
     localCoopPersonalUiSkilldexRect(unusedX, unusedY, w, h);
     windowFill(ui.skilldexWindow, 0, 0, w, h, _colorTable[0]);
 '''
-    if old not in text:
-        raise SystemExit("shared Skilldex window-size compile anchor missing")
-    text = text.replace(old, new, 1)
+if window_old in text:
+    text = text.replace(window_old, window_new, 1)
 
-    old = '''    return slot >= 0
+eligibility_old = '''    return slot >= 0
         && slot < kLocalCoopMaxPlayers
         && gLocalCoopPlayers[slot].slotLocked
         && gLocalCoopPlayers[slot].actor != nullptr;
 '''
-    new = '''    return slot >= 0
+eligibility_new = '''    return slot >= 0
         && slot < kLocalCoopMaxPlayers
         && gLocalCoopPlayers[slot].slotLocked
         && gLocalCoopPlayers[slot].connected
         && gLocalCoopPlayers[slot].humanOwned
         && gLocalCoopPlayers[slot].actor != nullptr;
 '''
-    if old not in text:
-        raise SystemExit("shared Skilldex operator eligibility anchor missing")
-    text = text.replace(old, new, 1)
+if eligibility_old in text:
+    text = text.replace(eligibility_old, eligibility_new, 1)
+
 write(path, text)
 
 
@@ -169,16 +177,23 @@ if "PHOBOI_CLOUDFLARE_ROUTE_V5" not in text:
 write(path, text)
 
 
-# Final hard checks.
-if "windowGetWidth" in read("src/local_coop_personal_ui.h"):
-    raise SystemExit("nonexistent windowGetWidth survived shared Skilldex compile fix")
-if "windowGetHeight" in read("src/local_coop_personal_ui.h"):
-    raise SystemExit("nonexistent windowGetHeight survived shared Skilldex compile fix")
+# Final checks target the exact generated constructs instead of rejecting an
+# unrelated identifier that might exist elsewhere in this large header.
+personal = read("src/local_coop_personal_ui.h")
+expected_decl = '''// COOP_SHARED_SKILLDEX_COMPILE_FIX_V2
+inline void localCoopPersonalUiCloseInventory(int slot);
+
+// COOP_SHARED_SKILLDEX_V1
+inline constexpr int kLocalCoopSharedSkilldexSkillCount = 8;'''
+if expected_decl not in personal:
+    raise SystemExit("shared Skilldex free-function declaration is not at namespace scope")
+if bad_member_decl in personal:
+    raise SystemExit("old shared Skilldex member declaration survived V2")
 if "characterEditorShow(false);" in read("src/local_coop_system_menu.h"):
     raise SystemExit("blocking Character editor call survived in co-op system-menu ticker")
 
 for filename, marker in (
-    ("src/local_coop_personal_ui.h", "COOP_SHARED_SKILLDEX_COMPILE_FIX_V1"),
+    ("src/local_coop_personal_ui.h", "COOP_SHARED_SKILLDEX_COMPILE_FIX_V2"),
     ("src/local_coop.h", "COOP_CHARACTER_DEFERRED_DIRECT_V1"),
     ("src/local_coop_system_menu.h", "COOP_CHARACTER_SYSTEM_MENU_DEFERRED_V1"),
     ("src/main.cc", "COOP_CHARACTER_DEFERRED_CONSUMER_V1"),
@@ -186,4 +201,4 @@ for filename, marker in (
     if marker not in read(filename):
         raise SystemExit(f"missing Character/shared-Skilldex final marker {marker}")
 
-print("Kept Character modal deferred and finalized shared Skilldex compile path")
+print("Kept Character modal deferred and finalized shared Skilldex declaration order V2")
