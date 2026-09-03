@@ -8,6 +8,7 @@ marker = "PHOBOI_CLOUDFLARE_RESET_V1"
 if marker in text:
     print("PhoBoi Cloudflare reset controls already applied")
     runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
+    runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
     raise SystemExit(0)
 
 old_stop = r'''void mobileStopCloudflareTunnel()
@@ -113,7 +114,9 @@ text = text.replace(old_t_key, new_t_key, 1)
 path.write_text(text, encoding="utf-8")
 print("Added Cloudflare reset/new-link controls without releasing character slots")
 
-# Route V3 runs after reset controls so every final build gets origin preflight,
-# full HTTP writes, safer QR gating, TCP/HTTP2 tunnel transport, and useful
-# cloudflared error logging if a public request still cannot reach the origin.
+# Route V3 proves the local origin and fixes response/QR handling. Route V4
+# then isolates Quick Tunnel from any user cloudflared config, lets cloudflared
+# negotiate QUIC/HTTP2 automatically, keeps stdout draining while public DNS is
+# warming up, and performs the longer public verification asynchronously.
 runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
+runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
