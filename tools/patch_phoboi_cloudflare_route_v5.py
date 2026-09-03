@@ -25,26 +25,30 @@ for required in (
 #
 # cloudflared 2026.4 changed edge IP selection from IPv4 to auto. The failing
 # host selected an IPv6 SEA edge despite the game origin and VPN being IPv4.
-# Pin the edge to IPv4. Keep HTTP/2 for this controller build because PhoBoi
-# relies on WebSocket upgrades and it avoids the current QUIC WebSocket path.
+# Pin the edge to IPv4. Keep HTTP/2 for this controller build so the public
+# transport stays on TCP while we diagnose the remote browser path.
 # ---------------------------------------------------------------------------
-old_command = r'''    // PHOBOI_CLOUDFLARE_AUTO_PROTOCOL_V4
-    std::string quickConfig = mobileCloudflaredQuickConfigPath();
-    std::string commandText = "\\\"" + executable + "\\\" tunnel --no-autoupdate --protocol auto --loglevel info";
-    if (!quickConfig.empty()) {
-        commandText += " --config \\\"" + quickConfig + "\\\"";
-    }
-    commandText += " --url http://127.0.0.1:27888";
-    debugPrint("[PHOBOI MOBILE] Cloudflare V4 transport=auto isolated_config=%d\\n", quickConfig.empty() ? 0 : 1);'''
+command_start = text.find("    // PHOBOI_CLOUDFLARE_AUTO_PROTOCOL_V4")
+if command_start == -1:
+    raise SystemExit("Cloudflare V4 command marker not found")
+command_log = text.find(
+    '    debugPrint("[PHOBOI MOBILE] Cloudflare V4 transport=auto isolated_config=%d',
+    command_start,
+)
+if command_log == -1:
+    raise SystemExit("Cloudflare V4 command diagnostic line not found")
+command_end = text.find(";", command_log)
+if command_end == -1:
+    raise SystemExit("Cloudflare V4 command diagnostic terminator not found")
+command_end += 1
+
 new_command = r'''    // PHOBOI_CLOUDFLARE_ROUTE_V5
     // PHOBOI_CLOUDFLARE_CANONICAL_QUICK_V5
     // PHOBOI_CLOUDFLARE_IPV4_HTTP2_V5
-    std::string commandText = "\\\"" + executable
-        + "\\\" tunnel --edge-ip-version 4 --protocol http2 --no-autoupdate --loglevel info --url http://127.0.0.1:27888";
-    debugPrint("[PHOBOI MOBILE] Cloudflare V5 zero-config quick tunnel edge_ip=4 protocol=http2 origin=http://127.0.0.1:27888\\n");'''
-if old_command not in text:
-    raise SystemExit("Cloudflare V4 command block not found")
-text = text.replace(old_command, new_command, 1)
+    std::string commandText = "\"" + executable
+        + "\" tunnel --edge-ip-version 4 --protocol http2 --no-autoupdate --loglevel info --url http://127.0.0.1:27888";
+    debugPrint("[PHOBOI MOBILE] Cloudflare V5 zero-config quick tunnel edge_ip=4 protocol=http2 origin=http://127.0.0.1:27888\n");'''
+text = text[:command_start] + new_command + text[command_end:]
 
 # ---------------------------------------------------------------------------
 # Replace the opaque bool-only WinHTTP verifier with a diagnostic verifier.
@@ -185,7 +189,8 @@ for required in (
         raise SystemExit(f"missing Cloudflare V5 marker {required}")
 
 # The V5 command must not pass an empty config and must not leave edge IP auto.
-command_window = text[text.find("PHOBOI_CLOUDFLARE_CANONICAL_QUICK_V5"):text.find("PHOBOI_CLOUDFLARE_CANONICAL_QUICK_V5") + 900]
+marker_index = text.find("PHOBOI_CLOUDFLARE_CANONICAL_QUICK_V5")
+command_window = text[marker_index:marker_index + 900]
 if "--config" in command_window:
     raise SystemExit("Cloudflare V5 command still passes --config")
 if "--edge-ip-version 4" not in command_window:
