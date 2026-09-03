@@ -18,7 +18,14 @@ if marker not in s:
 else:
     print('Escape exit-game patch already applied')
 
-# This workflow step runs after the controller UI regression patch. Correct its
-# blocking modal calls here so PipBoy/Skilldex/Character are dispatched from the
-# main loop only after the co-op ticker has released its re-entry guard.
-runpy.run_path('tools/patch_coop_deferred_global_ui.py', run_name='__main__')
+# This is deliberately the LAST gameplay/UI correction in the final workflow.
+# The earlier regression pass changed previously-working Pip-Boy behavior and
+# later PhoBoi patches layered transport experiments over the working Cloudflare
+# Quick Tunnel. Restore those known-working paths here, then add the new shared
+# party Skilldex without touching either one.
+runpy.run_path('tools/patch_restore_working_paths_shared_skilldex.py', run_name='__main__')
+
+# Preserve Character editor modal safety independently. It remains deferred
+# until after the runtime ticker returns, while Pip-Boy uses its restored direct
+# backend consumer and Skilldex uses the new non-stock shared party overlay.
+runpy.run_path('tools/patch_coop_character_ui_deferred.py', run_name='__main__')
