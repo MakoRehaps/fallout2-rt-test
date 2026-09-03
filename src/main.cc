@@ -9,6 +9,7 @@
 #include "color.h"
 #include "credits.h"
 #include "cycle.h"
+#include "dat_extractor.h"
 #include "db.h"
 #include "debug.h"
 #include "draw.h"
@@ -20,6 +21,9 @@
 #include "input.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop_staging_room.h"
+#include "local_coop_group_room.h"
+#include "local_coop_runtime.h"
 #include "mainmenu.h"
 #include "map.h"
 #include "mouse.h"
@@ -96,6 +100,11 @@ static bool _main_death_voiceover_done;
 // 0x48099C
 int falloutMain(int argc, char** argv)
 {
+    int extractorResult = datExtractorTryRun(argc, argv);
+    if (extractorResult != kDatExtractorNotRequested) {
+        return extractorResult;
+    }
+
     if (!autorunMutexCreate()) {
         return 1;
     }
@@ -134,7 +143,6 @@ int falloutMain(int argc, char** argv)
                 mainMenuWindowHide(true);
                 mainMenuWindowFree();
                 if (characterSelectorOpen() == 2) {
-                    gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                     randomSeedPrerandom(-1);
 
                     // SFALL: Override starting map.
@@ -146,7 +154,48 @@ int falloutMain(int argc, char** argv)
                     }
 
                     char* mapNameCopy = compat_strdup(mapName != nullptr ? mapName : _mainMap);
-                    _main_load_new(mapNameCopy);
+
+                    // COOP_TILELESS_GROUP_ROOM_START_V1
+                    // Unified co-op always begins in Fallout 1. The grouping
+                    // scene is a pure black UI room: no map, no tiles, no critters
+                    // and no V13ENT reuse. Start joins a controller; after release,
+                    // Start again votes READY. Only after all joined players are
+                    // ready do we enter the real Fallout 1 opening/start flow.
+                    if (unifiedCampaignIsEnabled()) {
+                        unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
+                        gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout1;
+                        gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
+
+                        if (!localCoopRunTilelessGroupRoom()) {
+                            free(mapNameCopy);
+                            mainMenuWindowInit();
+                            break;
+                        }
+
+                        // Do NOT play MOVIE_ELDER here. That is Fallout 2's elder
+                        // movie and was the cause of the new-game path looking like
+                        // Fallout 2. Load the actual Fallout 1 campaign start; its
+                        // normal Fallout 1 intro/Overseer scripting remains in
+                        // charge from this point onward.
+                        _main_load_new(mapNameCopy);
+
+                        // COOP_POSTLOAD_PREJOIN_SPAWN_V1
+                        // The ready-room vote is authoritative. Spawn P2-P4 immediately
+                        // after the first real map finishes loading instead of waiting for
+                        // the gameplay ticker. This removes the handoff gap seen in logs
+                        // where p2=1 transfers successfully but no live actor is ever made.
+                        localCoopMobileTick();
+                        localCoopRefreshControllers();
+                        debugPrint("[COOP PREJOIN] post-load handoff p1=%d p2=%d p3=%d p4=%d\n",
+                            gLocalCoopPrejoinedSlots[0] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[1] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[2] ? 1 : 0,
+                            gLocalCoopPrejoinedSlots[3] ? 1 : 0);
+                        localCoopSpawnPrejoinedPlayers();
+                    } else {
+                        gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
+                        _main_load_new(mapNameCopy);
+                    }
                     free(mapNameCopy);
 
                     // SFALL: AfterNewGameStartHook.
@@ -204,6 +253,36 @@ int falloutMain(int argc, char** argv)
                         showDeath();
                         _main_show_death_scene = 0;
                     }
+                    mainMenuWindowInit();
+                }
+                break;
+            case MAIN_MENU_RESUME_CAMPAIGN:
+                if (1) {
+                    int win = windowCreate(0, 0, screenGetWidth(), screenGetHeight(), _colorTable[0], WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
+                    mainMenuWindowHide(true);
+                    mainMenuWindowFree();
+
+                    main_loadgame_new();
+
+                    colorPaletteLoad("color.pal");
+                    paletteFadeTo(_cmap);
+                    int gameId = static_cast<int>(unifiedCampaignGetActiveGame());
+                    int loadGameRc = lsgLoadUnifiedCampaignCheckpoint(gameId);
+                    if (loadGameRc == -1) {
+                        debugPrint("\n ** Error restoring unified campaign checkpoint! **\n");
+                    } else if (loadGameRc != 0) {
+                        unifiedCampaignConsumePostgameResume();
+                        windowDestroy(win);
+                        win = -1;
+                        mainLoop();
+                    }
+                    paletteFadeTo(gPaletteWhite);
+                    if (win != -1) {
+                        windowDestroy(win);
+                    }
+
+                    main_unload_new();
+                    main_reset_system();
                     mainMenuWindowInit();
                 }
                 break;
@@ -360,7 +439,26 @@ static void mainLoop()
     while (_game_user_wants_to_quit == 0) {
         sharedFpsLimiter.mark();
 
-        int keyCode = inputGetInput();
+        // COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1
+        // Pump platform events so controllers/phones/hotplug remain live, but
+        // discard legacy keyboard/mouse gameplay commands for P1.
+        int legacyKeyCode = inputGetInput();
+        int keyCode = -1;
+        (void)legacyKeyCode;
+
+        // COOP_REGULAR_ISOMETRIC_ONLY_V1
+        // FPS is parked while regular co-op is stabilized. F9 is intentionally
+        // ignored here; legacy FPS code remains compiled only for compatibility.
+        if (keyCode == KEY_F9) {
+            keyCode = -1;
+        }
+
+        // COOP_RUNTIME_MAINLOOP_HOOK_V1
+        // Drive the co-op runtime directly from the live Fallout gameplay loop.
+        // The ticker remains useful inside stock modal loops, but it cannot be
+        // responsible for bootstrapping itself. This guarantees controller,
+        // keyboard, phone, HUD, AI and FPS/ISO camera processing every frame.
+        localCoopRuntimeTick();
 
         // SFALL: MainLoopHook.
         sfall_gl_scr_process_main();
@@ -380,6 +478,18 @@ static void mainLoop()
             _main_show_death_scene = 1;
             _game_user_wants_to_quit = 2;
         }
+
+        // COOP_CAMERA_LATE_FRAME_OWNER_V1
+        // The shared camera must be the LAST isometric camera writer in the frame.
+        // gameHandleKey, scriptsHandleRequests and mapHandleTransition can all move
+        // actors or recenter the stock camera, so following before them is overwritten.
+        // One player follows P1; 2-4 players use the same Ascent-style group framing.
+        localCoopUpdateSharedCamera();
+
+        // COOP_FPS_LATE_RENDER_HOOK_V1
+        // COOP_FPS_SINGLE_LATE_TICK_V1
+        // COOP_REGULAR_ISOMETRIC_ONLY_V1: deliberately no localCoopFpsTick().
+        // This disables L3/phone/FPS activation and rendering in regular co-op.
 
         renderPresent();
         sharedFpsLimiter.throttle();

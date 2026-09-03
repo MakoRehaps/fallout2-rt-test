@@ -1,0 +1,40 @@
+name: Materialize Ready Room Class Selection
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - tools/patch_ready_room_archetype_select.py
+      - .github/workflows/materialize-ready-room-class.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply ready-room class selection patch
+        run: python tools/patch_ready_room_archetype_select.py
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          if git diff --quiet -- src/local_coop_group_room.h; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_group_room.h
+          git commit -m "Allow each co-op player to choose class in ready room"
+          git push origin HEAD:fix/no-debug-no-data-copy

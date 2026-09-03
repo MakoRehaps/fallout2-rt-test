@@ -17,6 +17,11 @@ typedef enum LoadSaveMode {
 void _InitLoadSave();
 void _ResetLoadSave();
 int lsgSaveGame(int mode);
+int lsgAutosaveGame();
+int lsgLoadLastGame();
+int lsgSaveUnifiedCampaignCheckpoint(int gameId);
+int lsgLoadUnifiedCampaignCheckpoint(int gameId);
+bool lsgUnifiedCampaignCheckpointExists(int gameId);
 int lsgLoadGame(int mode);
 bool _isLoadingGame();
 void lsgInit();

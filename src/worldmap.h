@@ -267,6 +267,7 @@ bool wmAreaMarkVisitedState(int areaIdx, int state);
 bool wmAreaSetVisibleState(int areaIdx, int state, bool force);
 int wmAreaSetWorldPos(int areaIdx, int x, int y);
 int wmGetPartyWorldPos(int* xPtr, int* yPtr);
+int wmGetAreaWorldPos(int areaIdx, int* xPtr, int* yPtr);
 int wmGetPartyCurArea(int* areaIdxPtr);
 void wmTownMap();
 int wmCarUseGas(int amount);
@@ -288,5 +289,14 @@ void wmCarSetCurrentArea(int area);
 void wmForceEncounter(int map, unsigned int flags);
 
 } // namespace fallout
+
+// scripts.cc includes scripts.h before reaching this header, while worldmap.cc
+// includes worldmap.h first. Install the F1 travel redirect only in the former
+// translation-unit shape; stock Fallout 2 worldmap.cc never sees this include.
+#if defined(SCRIPTS_H)
+#include "unified_fallout1_worldmap_runtime.h"
+#define wmWorldMap unifiedWmWorldMapRuntime
+#define wmTownMap unifiedWmTownMap
+#endif
 
 #endif /* WORLD_MAP_H */

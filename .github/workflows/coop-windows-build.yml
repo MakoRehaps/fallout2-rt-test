@@ -1,0 +1,232 @@
+name: Co-op Windows Build
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Windows x64 / MSVC Debug
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply PhoBoi, co-op, camera, living-world, encounter, UI, accessibility, audio, quest, lineage, and world fixes
+        shell: pwsh
+        run: |
+          python tools/patch_phoboi_remote_play.py
+          python tools/patch_phoboi_labels.py
+          python tools/patch_phoboi_session_token.py
+          python tools/patch_phoboi_pagehide_release.py
+          python tools/patch_phoboi_websocket_headers.py
+          python tools/patch_phoboi_mobile_reliability.py
+          python tools/patch_phoboi_video_layout_v4.py
+          python tools/patch_phoboi_gamefirst_overlay_v5.py
+          python tools/patch_phoboi_low_latency_controls.py
+          python tools/patch_phoboi_phone_readability.py
+
+          python tools/patch_coop_18_archetypes.py
+          python tools/patch_coop_18_kits_repair.py
+          python tools/patch_coop_simulation_pause.py
+          python tools/patch_coop_downed_medical.py
+          python tools/patch_coop_nearest_clinic.py
+          python tools/patch_coop_final_hotbinds.py
+          python tools/patch_coop_hud_and_leash.py
+          python tools/patch_four_personal_huds_shared_inventory.py
+          python tools/patch_coop_full_repair_v2.py
+          python tools/patch_coop_p1_global_ui_owner.py
+          python tools/patch_p1_global_ui_toggle.py
+          python tools/patch_p1_hybrid_input_start_toggle.py
+          python tools/patch_p1_hybrid_input_repair_v2.py
+          python tools/patch_coop_system_menu.py
+          python tools/patch_coop_accessibility_highlights.py
+          python tools/patch_coop_fps_billboard_mode.py
+          python tools/patch_fps_raycast_freedoom.py
+          python tools/patch_fps_freedoom_weapons.py
+          python tools/patch_p1_exit_grid_authority.py
+          python tools/patch_coop_melee_hit_unlock.py
+
+          python tools/patch_dialog_dos_chatter.py
+          python tools/patch_no_voice_acting.py
+          python tools/patch_unified_original_music.py
+
+          python tools/patch_quest_profile_isolation.py
+          python tools/patch_postgame_campaign_resume.py
+          python tools/patch_f1_f2_lineage_transition.py
+          python tools/patch_tileless_group_room_start.py
+          python tools/patch_procedural_selfplay_encounters.py
+          python tools/patch_unified_living_world.py
+          python tools/patch_encounter_staged_approach.py
+          python tools/patch_no_mountain_maps.py
+          python tools/patch_wilderness_four_side_pool.py
+          python tools/patch_zoom_scroll_bounds.py
+          python tools/patch_coop_spawn_and_fps_layout.py
+
+          $required = @(
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_LOW_LATENCY_CONTROLS_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PHONE_READABILITY_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_ARCHETYPES_MENU_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_18_KITS_REPAIR_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_WIDE_LEASH_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_P1_EXIT_GRID_AUTHORITY_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_PREJOINED_LIVE_SPAWN_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PREJOIN_LIVE_SPAWN_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FPS_SINGLE_LATE_TICK_V1' },
+            @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_V1' },
+            @{ File = 'src/local_coop_personal_ui.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_HUD_HOOK_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FOUR_INDEPENDENT_FPS_CAMERAS_V2' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_RUNTIME_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_RUNTIME_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_DYNAMIC_ACTIVE_LAYOUT_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_DRAW_ACTIVE_ONLY_V1' },
+            @{ File = 'src/local_coop_fps.h'; Marker = 'COOP_FPS_POST_DRAW_DIAGNOSTICS_V1' },
+            @{ File = 'src/local_coop_fps_raycast.h'; Marker = 'COOP_REAL_RAYCAST_FREEDOOM_V1' },
+            @{ File = 'src/local_coop_fps_weapon.h'; Marker = 'COOP_FREEDOOM_FIRST_PERSON_WEAPONS_V1' },
+            @{ File = 'src/local_coop_iso_cameras.h'; Marker = 'COOP_FOUR_INDEPENDENT_ISOMETRIC_CAMERAS_V1' },
+            @{ File = 'src/unified_living_world.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_OWNER_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_GLOBAL_UI_TOGGLE_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_START_TOGGLE_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_HYBRID_INPUT_TRIGGER_FIX_V2' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'localCoopAccessibilityTick' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_SYSTEM_MENU_OPEN_LATCH_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_ACCESSIBILITY_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_MENU_V1' },
+            @{ File = 'src/local_coop_accessibility.h'; Marker = 'COOP_ACCESSIBILITY_HIGHLIGHTS_V1' },
+            @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_TILELESS_GROUP_ROOM_V1' },
+            @{ File = 'src/local_coop_group_room.h'; Marker = 'COOP_READY_ROOM_PREJOIN_TRANSFER_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_TILELESS_GROUP_ROOM_START_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_FPS_SINGLE_LATE_TICK_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_PROCEDURAL_SELFPLAY_ENCOUNTERS_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_STAGED_ENCOUNTER_APPROACH_V1' },
+            @{ File = 'src/combat.cc'; Marker = 'COOP_MELEE_HIT_UNLOCK_V1' },
+            @{ File = 'src/game_dialog.cc'; Marker = 'COOP_DOS_DIALOG_CHATTER_HOOK_V1' },
+            @{ File = 'src/local_coop_dialog_chatter.h'; Marker = 'COOP_DOS_DIALOG_CHATTER_V1' },
+            @{ File = 'src/game_sound.cc'; Marker = 'COOP_NO_VOICE_ACTING_V1' },
+            @{ File = 'src/game_sound.cc'; Marker = 'UNIFIED_ORIGINAL_MUSIC_FROM_VFS_V1' },
+            @{ File = 'src/tile.cc'; Marker = 'COOP_VIEWPORT_SCROLL_BOUNDS_V1' }
+          )
+          foreach ($check in $required) {
+            if (-not (Select-String -Path $check.File -Pattern $check.Marker -Quiet)) {
+              throw "Required co-op patch missing: $($check.Marker) in $($check.File)"
+            }
+          }
+
+          $tracked = @(
+            'src/local_coop_mobile.cc', 'src/local_coop.h', 'src/local_coop_runtime.h',
+            'src/local_coop_personal_ui.h', 'src/local_coop_fps.h', 'src/local_coop_fps_raycast.h', 'src/local_coop_fps_weapon.h', 'src/local_coop_iso_cameras.h',
+            'src/local_coop_group_room.h', 'src/local_coop_system_menu.h', 'src/local_coop_accessibility.h',
+            'src/unified_living_world.h',
+            'src/combat.cc', 'src/critter.cc', 'src/game_dialog.cc', 'src/game_sound.cc',
+            'src/map.cc', 'src/tile.cc', 'src/worldmap.cc', 'src/worldmap.h', 'src/scripts.cc',
+            'src/loadsave.cc', 'src/loadsave.h', 'src/unified_campaign_transition.h',
+            'src/unified_campaign_carryover.h', 'src/unified_world_system.h',
+            'src/unified_fallout1_endgame_profile.h', 'src/mainmenu.h', 'src/main.cc'
+          )
+
+          git diff --quiet -- $tracked
+          $sourceChanged = $LASTEXITCODE -ne 0
+          if (-not $sourceChanged) {
+            Write-Host "Full co-op source already current."
+          } elseif ("${{ github.event_name }}" -eq "push") {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- $tracked
+            git commit -m "Apply raycast FPS and Freedoom weapon view models"
+            git push origin HEAD:fix/no-debug-no-data-copy
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          exit 0
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Debug
+        shell: pwsh
+        run: cmake --build build --config Debug --parallel 4
+
+      - name: Upload debug executable and symbols
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallout2-ce-coop-windows-x64-debug
+          path: |
+            build/Debug/fallout2-ce.exe
+            build/Debug/fallout2-ce.pdb
+          retention-days: 7
+
+      - name: Install Inno Setup
+        if: success()
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Download verified Cloudflare tunnel helper
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'installer\cloudflared.exe'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE' -OutFile 'installer\cloudflared-LICENSE.txt'
+          if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
+          if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
+
+      - name: Prepare Freedoom 0.13.0 FPS assets
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = 'freedoom-0.13.0.zip'
+          Invoke-WebRequest -Uri 'https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip' -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59') {
+            throw "Freedoom archive checksum mismatch: $hash"
+          }
+          Expand-Archive -Path $zip -DestinationPath freedoom-stage -Force
+          New-Item -ItemType Directory -Force -Path 'installer\freedoom' | Out-Null
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\freedoom1.wad' 'installer\freedoom\freedoom1.wad' -Force
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\COPYING.txt' 'installer\freedoom\COPYING.txt' -Force
+          if (-not (Test-Path 'installer\freedoom\freedoom1.wad')) { throw 'Freedoom WAD preparation failed' }
+          if (-not (Test-Path 'installer\freedoom\COPYING.txt')) { throw 'Freedoom license preparation failed' }
+
+      - name: Build full debug beta installer
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
+          & $iscc installer\UnifiedCoopBeta.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) { throw 'installer output was not produced' }
+
+      - name: Upload full debug beta installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallout-Unified-Coop-Beta-Debug-Setup
+          path: installer-output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
+          retention-days: 7

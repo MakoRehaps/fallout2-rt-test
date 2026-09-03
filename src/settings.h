@@ -4,6 +4,7 @@
 #include <string>
 
 #include "game_config.h"
+#include "unified_campaign.h"
 
 namespace fallout {
 
@@ -102,6 +103,102 @@ extern Settings settings;
 bool settingsInit(bool isMapper, int argc, char** argv);
 bool settingsSave();
 bool settingsExit(bool shouldSave);
+
+// game.cc includes game.h before settings.h. Restrict this wrapper to that
+// consumer so settings.cc still defines the stock settingsInit symbol normally.
+// The selected content origin determines which dataset owns unqualified legacy
+// IDs for the current map, but it no longer determines which game is mounted.
+#ifdef GAME_H
+inline bool unifiedCampaignSettingsInit(bool isMapper, int argc, char** argv)
+{
+    if (!settingsInit(isMapper, argc, argv)) {
+        return false;
+    }
+
+    if (!unifiedCampaignIsEnabled()) {
+        return true;
+    }
+
+    const std::string& root = unifiedCampaignGetActiveRoot();
+    if (root.empty()) {
+        return true;
+    }
+
+#if defined(_WIN32)
+    constexpr char kPathSeparator = '\\';
+#else
+    constexpr char kPathSeparator = '/';
+#endif
+
+    std::string prefix = root;
+    if (!prefix.empty() && prefix.back() != '/' && prefix.back() != '\\') {
+        prefix.push_back(kPathSeparator);
+    }
+
+    settings.system.master_dat_path = prefix + "master.dat";
+    settings.system.critter_dat_path = prefix + "critter.dat";
+    settings.system.master_patches_path = prefix + "data";
+    settings.system.critter_patches_path = prefix + "data";
+
+    return true;
+}
+
+inline std::string unifiedCampaignDatasetPath(UnifiedGameId game, const char* relative)
+{
+    const std::string& root = unifiedCampaignGetRoot(game);
+    if (root.empty()) {
+        return std::string();
+    }
+
+#if defined(_WIN32)
+    constexpr char kDatasetPathSeparator = '\\';
+#else
+    constexpr char kDatasetPathSeparator = '/';
+#endif
+
+    std::string path = root;
+    if (!path.empty() && path.back() != '/' && path.back() != '\\') {
+        path.push_back(kDatasetPathSeparator);
+    }
+    path.append(relative != nullptr ? relative : "");
+    return path;
+}
+
+// A unified process always exposes both original data sets. The current map's
+// origin is still mounted last so old unqualified lookups preserve that game's
+// semantics, while explicit origin-aware systems can address either set. The
+// DAT reader itself now dispatches by archive origin (DAT1 for F1, DAT2 for F2)
+// rather than by active campaign.
+inline int unifiedCampaignDbOpen(const char* filePath1, int a2, const char* filePath2, int a4)
+{
+    if (unifiedCampaignIsEnabled()
+        && filePath1 != nullptr
+        && settings.system.master_dat_path == filePath1) {
+        UnifiedGameId active = unifiedCampaignGetActiveGame();
+        UnifiedGameId other = active == UnifiedGameId::Fallout1
+            ? UnifiedGameId::Fallout2
+            : UnifiedGameId::Fallout1;
+
+        std::string otherMaster = unifiedCampaignDatasetPath(other, "master.dat");
+        std::string otherCritter = unifiedCampaignDatasetPath(other, "critter.dat");
+        std::string otherData = unifiedCampaignDatasetPath(other, "data");
+
+        if (!otherMaster.empty() && !otherCritter.empty() && !otherData.empty()) {
+            // Mount the other game's master first, then critter/data. dbOpen /
+            // xbaseOpen place newer bases at the head; the stock active dataset
+            // is opened immediately after this wrapper returns and therefore
+            // remains the legacy default without hiding the other game.
+            dbOpen(otherMaster.c_str(), 0, otherData.c_str(), 1);
+            dbOpen(otherCritter.c_str(), 0, otherData.c_str(), 1);
+        }
+    }
+
+    return dbOpen(filePath1, a2, filePath2, a4);
+}
+
+#define settingsInit unifiedCampaignSettingsInit
+#define dbOpen unifiedCampaignDbOpen
+#endif
 
 } // namespace fallout
 

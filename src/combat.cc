@@ -23,6 +23,7 @@
 #include "item.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
@@ -3558,6 +3559,62 @@ int _combat_attack(Object* attacker, Object* defender, int hitMode, int hitLocat
     aiInfoSetLastTarget(attacker, defender);
     debugPrint("running attack...\n");
 
+    // Realtime co-op deliberately executes Fallout attacks outside the legacy
+    // turn-based combat mode. In stock combat reg_anim_end marks the sequence as
+    // a combat animation, and _combat_anim_finished later consumes ammo and
+    // applies _main_ctd damage. Outside combat that flag is never set, so the
+    // animation plays but neither side loses hit points. Finalize the computed
+    // attack immediately; the already-registered hit/death animations continue
+    // to provide the visual response without entering the legacy turn loop.
+    if (!isInCombat() && _combat_cleanup_enabled) {
+        _combat_cleanup_enabled = false;
+
+        int attackerId = _main_ctd.attacker != nullptr ? _main_ctd.attacker->id : -1;
+        int defenderId = _main_ctd.defender != nullptr ? _main_ctd.defender->id : -1;
+        int defenderDamage = _main_ctd.defenderDamage;
+        int attackerDamage = _main_ctd.attackerDamage;
+        int defenderFlags = _main_ctd.defenderFlags;
+        int attackerFlags = _main_ctd.attackerFlags;
+
+        Object* resolvedWeapon = critterGetWeaponForHitMode(
+            _main_ctd.attacker,
+            _main_ctd.hitMode);
+        if (resolvedWeapon != nullptr && ammoGetCapacity(resolvedWeapon) > 0) {
+            int ammoQuantity = ammoGetQuantity(resolvedWeapon);
+            ammoSetQuantity(
+                resolvedWeapon,
+                std::max(0, ammoQuantity - _main_ctd.ammoQuantity));
+
+            if (_main_ctd.attacker == gDude) {
+                _intface_update_ammo_lights();
+            }
+        }
+
+        if (_combat_call_display) {
+            _combat_display(&_main_ctd);
+            _combat_call_display = false;
+        }
+
+        _apply_damage(&_main_ctd, true);
+
+        debugPrint(
+            "[COOP REALTIME DAMAGE] attackerId=%d defenderId=%d defenderDamage=%d attackerDamage=%d defenderFlags=%08X attackerFlags=%08X\n",
+            attackerId,
+            defenderId,
+            defenderDamage,
+            attackerDamage,
+            defenderFlags,
+            attackerFlags);
+
+        Object* resolvedAttacker = _main_ctd.attacker;
+        attackInit(
+            &_main_ctd,
+            resolvedAttacker,
+            nullptr,
+            HIT_MODE_PUNCH,
+            HIT_LOCATION_TORSO);
+    }
+
     return 0;
 }
 
@@ -4677,6 +4734,23 @@ void _apply_damage(Attack* attack, bool animated)
     bool attackerIsCritter = attacker != nullptr && FID_TYPE(attacker->fid) == OBJ_TYPE_CRITTER;
     bool v5 = attack->defender != attack->oops;
 
+    // The battle timeout is based only on actual damage received by a human
+    // player. Do this at the common damage-application point so reflected damage
+    // and explosion extras follow the same rule as the primary target.
+    if (gLocalCoopInitialized) {
+        if (attack->attackerDamage > 0 && localCoopActorIsHumanOwned(attack->attacker)) {
+            localCoopDangerRecordPlayerDamage(attack->attackerDamage);
+        }
+        if (attack->defenderDamage > 0 && localCoopActorIsHumanOwned(attack->defender)) {
+            localCoopDangerRecordPlayerDamage(attack->defenderDamage);
+        }
+        for (int index = 0; index < attack->extrasLength; index++) {
+            if (attack->extrasDamage[index] > 0 && localCoopActorIsHumanOwned(attack->extras[index])) {
+                localCoopDangerRecordPlayerDamage(attack->extrasDamage[index]);
+            }
+        }
+    }
+
     if (attackerIsCritter && (attacker->data.critter.combat.results & DAM_DEAD) == 0) {
         _set_new_results(attacker, attack->attackerFlags);
         // TODO: Not sure about "attack->defender == attack->oops".
@@ -4720,7 +4794,21 @@ void _apply_damage(Attack* attack, bool animated)
         }
 
         scriptSetObjects(defender->sid, attack->attacker, attack->weapon);
-        _damage_object(defender, attack->defenderDamage, animated, attack->defender != attack->oops, attacker);
+
+        // COOP_MELEE_HIT_UNLOCK_V1
+        // In realtime co-op a normal melee hit reaction must not become a
+        // prioritized animation lock. Human players remain responsive after
+        // ordinary hits; genuine knockdown/knockout or physical knockback still
+        // uses Fallout's animated damage path and therefore keeps its impact.
+        bool defenderHardReaction = (attack->defenderFlags & (DAM_DEAD | DAM_KNOCKED_OUT | DAM_KNOCKED_DOWN)) != 0
+            || attack->defenderKnockback > 0;
+        bool defenderAnimated = animated;
+        if (gLocalCoopInitialized
+            && localCoopActorIsHumanOwned(defender)
+            && !defenderHardReaction) {
+            defenderAnimated = false;
+        }
+        _damage_object(defender, attack->defenderDamage, defenderAnimated, attack->defender != attack->oops, attacker);
 
         if (defenderIsCritter) {
             _combatai_notify_onlookers(defender);
@@ -4765,6 +4853,20 @@ void _apply_damage(Attack* attack, bool animated)
 // 0x424EE8
 static void _check_for_death(Object* object, int damage, int* flags)
 {
+    // COOP_DOWNED_MEDICAL_V1
+    // Human-controlled co-op actors do not enter Fallout's stock death path.
+    // At 0 HP they become downed; the co-op runtime owns the 60 second bleedout,
+    // -100 HP hard floor, Doctor revival and medical evacuation.
+    if (object != nullptr
+        && gLocalCoopInitialized
+        && localCoopActorIsHumanOwned(object)
+        && damage > 0
+        && critterGetHitPoints(object) - damage <= 0) {
+        *flags &= ~DAM_DEAD;
+        *flags |= DAM_KNOCKED_OUT;
+        return;
+    }
+
     if (object == nullptr || !_critter_flag_check(object->pid, CRITTER_INVULNERABLE)) {
         if (object == nullptr || PID_TYPE(object->pid) == OBJ_TYPE_CRITTER) {
             if (damage > 0) {

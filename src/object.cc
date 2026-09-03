@@ -5158,6 +5158,25 @@ static int _obj_preload_sort(const void* a1, const void* a2)
     return cmp;
 }
 
+bool objectPointerIsLive(const Object* candidate)
+{
+    if (candidate == nullptr) {
+        return false;
+    }
+
+    // Do not disturb the stateful objectFindFirst/objectFindNext iterator.
+    for (int tile = 0; tile < HEX_GRID_SIZE; tile++) {
+        ObjectListNode* node = gObjectListHeadByTile[tile];
+        while (node != nullptr) {
+            if (node->obj == candidate) {
+                return true;
+            }
+            node = node->next;
+        }
+    }
+    return false;
+}
+
 Object* objectTypedFindById(int id, int type)
 {
     Object* obj = objectFindFirst();

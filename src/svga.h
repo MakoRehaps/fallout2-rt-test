@@ -19,6 +19,12 @@ extern SDL_Texture* gSdlTexture;
 extern SDL_Surface* gSdlTextureSurface;
 extern FpsLimiter sharedFpsLimiter;
 
+// Optional post-world SDL overlay. It is rendered after the Fallout framebuffer
+// texture has been copied, so controller reticles never need a palette-indexed
+// GNW window that can blank the whole screen.
+using SdlRenderOverlayProc = void (*)();
+extern SdlRenderOverlayProc gSdlRenderOverlayProc;
+
 int _init_mode_320_200();
 int _init_mode_320_400();
 int _init_mode_640_480_16();

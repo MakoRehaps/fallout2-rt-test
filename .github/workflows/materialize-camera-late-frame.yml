@@ -1,0 +1,40 @@
+name: Materialize Late Frame Camera Fix
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - tools/patch_camera_late_frame.py
+      - .github/workflows/materialize-camera-late-frame.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply late-frame shared camera fix
+        run: python tools/patch_camera_late_frame.py
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          if git diff --quiet -- src/local_coop_runtime.h src/main.cc; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_runtime.h src/main.cc
+          git commit -m "Fix shared camera late-frame ownership"
+          git push origin HEAD:fix/no-debug-no-data-copy

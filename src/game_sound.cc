@@ -828,6 +828,13 @@ void speechSetVolume(int volume)
         return;
     }
 
+    // COOP_NO_VOICE_ACTING_V1
+    // Keep the original speech streams/lipsync machinery alive for dialogue
+    // timing and talking-head compatibility, but the co-op presentation is
+    // text + synthetic non-verbal chatter only. Never make recorded speech
+    // audible even if an old preferences file requests a non-zero value.
+    volume = 0;
+
     if (volume < VOLUME_MIN || volume > VOLUME_MAX) {
         if (gGameSoundDebugEnabled) {
             debugPrint("Requested speech volume out of range.\n");
@@ -2061,14 +2068,19 @@ Sound* _gsound_get_sound_ready_for_effect()
 // 0x4524E0
 bool _gsound_file_exists_f(const char* fname)
 {
-    FILE* f = compat_fopen(fname, "rb");
-    if (f == nullptr) {
-        return false;
+    // UNIFIED_ORIGINAL_MUSIC_FROM_VFS_V1
+    // Music is part of the original Fallout data set and may live inside the
+    // mounted master.dat rather than as a loose sound\music file. The stock
+    // existence probe used stdio directly, bypassing the unified xfile/db search
+    // chain, so backgroundSoundLoad rejected valid ACM tracks before soundLoad
+    // ever had a chance to open them. Use the same virtual filesystem lookup as
+    // speech/SFX so both Fallout 1 and Fallout 2 original music remain usable.
+    int fileSize = 0;
+    bool exists = dbGetFileSize(fname, &fileSize) == 0 && fileSize > 0;
+    if (!exists && gGameSoundDebugEnabled) {
+        debugPrint("[UNIFIED MUSIC] missing through VFS: %s\n", fname);
     }
-
-    fclose(f);
-
-    return true;
+    return exists;
 }
 
 // gsound_setup_paths

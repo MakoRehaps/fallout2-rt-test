@@ -14,6 +14,7 @@
 #include "geometry.h"
 #include "interface.h"
 #include "item.h"
+#include "local_coop.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
@@ -297,6 +298,21 @@ int critterAdjustHitPoints(Object* critter, int hp)
 
     int maximumHp = critterGetStat(critter, STAT_MAXIMUM_HIT_POINTS);
     int newHp = critter->data.critter.hp + hp;
+
+    // COOP_DOWNED_MEDICAL_V1
+    if (gLocalCoopInitialized && localCoopActorIsHumanOwned(critter)) {
+        // Co-op players can survive below zero while teammates attempt Doctor.
+        // -100 is the absolute damage floor; the runtime converts that state to
+        // a medical rescue instead of allowing Fallout's stock game-over.
+        if (newHp < -100) {
+            newHp = -100;
+        }
+        if (newHp > maximumHp) {
+            newHp = maximumHp;
+        }
+        critter->data.critter.hp = newHp;
+        return 0;
+    }
 
     critter->data.critter.hp = newHp;
     if (maximumHp >= newHp) {

@@ -32,6 +32,8 @@
 #include "item.h"
 #include "kb.h"
 #include "loadsave.h"
+#include "local_coop.h"
+#include "local_coop_focus.h"
 #include "map.h"
 #include "memory.h"
 #include "mouse.h"
@@ -652,7 +654,33 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
         break;
     case KEY_UPPERCASE_P:
     case KEY_LOWERCASE_P:
-        // pipboy
+        // PhoBoi is an exclusive modal. A queued controller/phone event must
+        // never open it on top of Inventory, Loot, Barter, Dialogue, or any
+        // other active menu.
+        {
+            constexpr int kPhoBoiBlockingModes =
+                GameMode::kWorldmap
+                | GameMode::kDialog
+                | GameMode::kOptions
+                | GameMode::kSaveGame
+                | GameMode::kLoadGame
+                | GameMode::kPreferences
+                | GameMode::kHelp
+                | GameMode::kEditor
+                | GameMode::kPipboy
+                | GameMode::kInventory
+                | GameMode::kAutomap
+                | GameMode::kSkilldex
+                | GameMode::kUseOn
+                | GameMode::kLoot
+                | GameMode::kBarter
+                | GameMode::kHero
+                | GameMode::kDialogReview
+                | GameMode::kCounter;
+            if ((GameMode::getCurrentGameMode() & kPhoBoiBlockingModes) != 0) {
+                break;
+            }
+        }
         if (interfaceBarEnabled()) {
             if (isInCombatMode) {
                 soundPlayFile("iisxxxx1");
@@ -664,23 +692,90 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_UNSPECIFIED);
+                phoboiOpen(PIPBOY_OPEN_INTENT_WORLD_MAP);
             }
+        }
+        break;
+    case KEY_LOWERCASE_F:
+        // First Aid hotkey. The crosshair selects the patient, preserving the
+        // stock point-and-click targeting flow.
+        if (interfaceBarEnabled()) {
+            soundPlayFile("ib1p1xx1");
+            gameMouseSetCursor(MOUSE_CURSOR_USE_CROSSHAIR);
+            gameMouseSetMode(GAME_MOUSE_MODE_USE_FIRST_AID);
+        }
+        break;
+    case KEY_UPPERCASE_F:
+        // Left Shift+F produces uppercase F and selects Doctor.
+        if (interfaceBarEnabled()) {
+            soundPlayFile("ib1p1xx1");
+            gameMouseSetCursor(MOUSE_CURSOR_USE_CROSSHAIR);
+            gameMouseSetMode(GAME_MOUSE_MODE_USE_DOCTOR);
         }
         break;
     case KEY_UPPERCASE_S:
     case KEY_LOWERCASE_S:
-        // skilldex
+        // Skilldex. Controller/phone invocations apply the chosen skill with
+        // the invoking co-op actor to that player's current focus target.
         if (interfaceBarEnabled()) {
             soundPlayFile("ib1p1xx1");
-
             int mode = -1;
-
-            // NOTE: There is an `inc` for this value to build jump table which
-            // is not needed.
             int rc = skilldexOpen();
+            int coopSlot = gLocalCoopSkilldexInvokerSlot;
+            gLocalCoopSkilldexInvokerSlot = -1;
 
-            // Remap Skilldex result code to action.
+            if (coopSlot >= 0
+                && coopSlot < kLocalCoopMaxPlayers
+                && gLocalCoopPlayers[coopSlot].humanOwned
+                && gLocalCoopPlayers[coopSlot].actor != nullptr) {
+                int skill = -1;
+                switch (rc) {
+                case SKILLDEX_RC_SNEAK: skill = SKILL_SNEAK; break;
+                case SKILLDEX_RC_LOCKPICK: skill = SKILL_LOCKPICK; break;
+                case SKILLDEX_RC_STEAL: skill = SKILL_STEAL; break;
+                case SKILLDEX_RC_TRAPS: skill = SKILL_TRAPS; break;
+                case SKILLDEX_RC_FIRST_AID: skill = SKILL_FIRST_AID; break;
+                case SKILLDEX_RC_DOCTOR: skill = SKILL_DOCTOR; break;
+                case SKILLDEX_RC_SCIENCE: skill = SKILL_SCIENCE; break;
+                case SKILLDEX_RC_REPAIR: skill = SKILL_REPAIR; break;
+                default: break;
+                }
+
+                if (skill != -1) {
+                    LocalCoopPlayer& player = gLocalCoopPlayers[coopSlot];
+                    Object* actor = player.actor;
+                    Object* target = localCoopFocusFindInteractable(player);
+
+                    if (skill == SKILL_SNEAK) {
+                        if (actor == gDude) {
+                            _action_skill_use(SKILL_SNEAK);
+                        } else {
+                            player.sneaking = !player.sneaking;
+                        }
+                    } else {
+                        if ((skill == SKILL_FIRST_AID || skill == SKILL_DOCTOR)
+                            && (target == nullptr
+                                || PID_TYPE(target->pid) != OBJ_TYPE_CRITTER
+                                || (target->data.critter.combat.results & DAM_DEAD) != 0
+                                || localCoopFocusIsEnemy(actor, target))) {
+                            target = actor;
+                        }
+
+                        int actionRc = target != nullptr
+                            ? actionUseSkill(actor, target, skill)
+                            : -1;
+                        debugPrint("[COOP SKILLDEX] slot=%d actorId=%d targetId=%d skill=%d rc=%d\n",
+                            coopSlot,
+                            actor->id,
+                            target != nullptr ? target->id : -1,
+                            skill,
+                            actionRc);
+                    }
+                }
+                break;
+            }
+
+            // Keyboard Skilldex keeps the stock P1 point-and-click flow.
             switch (rc) {
             case SKILLDEX_RC_ERROR:
                 debugPrint("\n ** Error calling skilldex_select()! ** \n");
@@ -732,7 +827,7 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, nullptr, 0, 192, 116, _colorTable[32328], nullptr, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(PIPBOY_OPEN_INTENT_REST);
+                phoboiOpen(PIPBOY_OPEN_INTENT_REST);
             }
         }
         break;
@@ -1534,8 +1629,6 @@ int gameShowDeathDialog(const char* message)
 
     int rc = showDialogBox(message, nullptr, 0, 169, 117, _colorTable[32328], nullptr, _colorTable[32328], DIALOG_BOX_LARGE);
 
-    _game_user_wants_to_quit = oldUserWantsToQuit;
-
     gameMouseSetCursor(oldCursor);
 
     if (cursorWasHidden) {
@@ -1550,6 +1643,17 @@ int gameShowDeathDialog(const char* message)
         isoEnable();
     }
 
+    // Bethesda-style death recovery: after acknowledging death, restore the
+    // most recently saved/loadable slot. Keep the old death flow only when no
+    // valid save exists or loading fails.
+    if (lsgLoadLastGame() == 1) {
+        _game_user_wants_to_quit = 0;
+        debugPrint("[AUTO RELOAD] death recovery loaded last save\n");
+        return 1;
+    }
+
+    _game_user_wants_to_quit = oldUserWantsToQuit;
+    debugPrint("[AUTO RELOAD] no valid last save; preserving death flow\n");
     return rc;
 }
 

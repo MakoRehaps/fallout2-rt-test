@@ -4,6 +4,7 @@
 #include "db.h"
 #include "obj_types.h"
 #include "perk_defs.h"
+#include "unified_campaign.h"
 
 namespace fallout {
 
@@ -23,6 +24,25 @@ int perkGetFrmId(int perk);
 void perkAddEffect(Object* critter, int perk);
 void perkRemoveEffect(Object* critter, int perk);
 int perkGetSkillModifier(Object* critter, int skill);
+
+// Fallout 1 has fewer perk-name entries than Fallout 2, while the F2 proto
+// bootstrap iterates the full F2 PERK_COUNT table. Keep real F1 names intact,
+// but make the F2-only null slots non-fatal when proto.cc asks for them.
+// perk.cc includes this header before proto.h, so its real perkGetName
+// definition is not macro-rewritten.
+#ifdef PROTO_H
+static inline char* unifiedProtoPerkGetName(int perk)
+{
+    char* name = perkGetName(perk);
+    if (name == nullptr && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        static char unusedPerkName[] = "<unused>";
+        return unusedPerkName;
+    }
+
+    return name;
+}
+#define perkGetName(perk) unifiedProtoPerkGetName(perk)
+#endif
 
 // Returns true if perk is valid.
 static inline bool perkIsValid(int perk)

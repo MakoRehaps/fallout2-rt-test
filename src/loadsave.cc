@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include <algorithm>
+#include <filesystem>
 
 #include "art.h"
 #include "automap.h"
@@ -271,6 +272,7 @@ static LoadGameHandler* _master_load_list[LOAD_SAVE_HANDLER_COUNT] = {
 
 // 0x5194C4
 static bool _loadingGame = false;
+static int gLastLoadableSlot = -1;
 
 // lsgame.msg
 //
@@ -831,6 +833,188 @@ int lsgSaveGame(int mode)
         }
     }
 
+    return rc;
+}
+
+// Uses the final visible slot as a dedicated rotating autosave. This keeps the
+// save loadable from the stock Load Game screen while never invoking a picker.
+int lsgAutosaveGame()
+{
+    ScopedGameMode gm(GameMode::kSaveGame);
+
+    if (gDude == nullptr || gIsoWindow == -1) {
+        return -1;
+    }
+
+    int previousSlot = _slot_cursor;
+    bool previousQuickDone = _quick_done;
+    int previousCursor = gameMouseGetCursor();
+
+    _ls_error_code = 0;
+    _patches = settings.system.master_patches_path.c_str();
+    _slot_cursor = 9;
+
+    memset(&_LSData[_slot_cursor], 0, sizeof(_LSData[_slot_cursor]));
+    strncpy(_LSData[_slot_cursor].description, "AUTOSAVE", LOAD_SAVE_DESCRIPTION_LENGTH - 1);
+
+    _snapshot = nullptr;
+    _snapshotBuf = nullptr;
+
+    int result = -1;
+    if (_QuickSnapShot() == 1 && lsgPerformSaveGame() != -1) {
+        result = 1;
+    }
+
+    if (_snapshot != nullptr) {
+        internal_free(_snapshot);
+        _snapshot = nullptr;
+        _snapshotBuf = nullptr;
+    }
+
+    _slot_cursor = previousSlot;
+    _quick_done = previousQuickDone;
+    gameMouseSetCursor(previousCursor);
+
+    return result;
+}
+
+int lsgLoadLastGame()
+{
+    ScopedGameMode gm(GameMode::kLoadGame);
+    _ls_error_code = 0;
+    _patches = settings.system.master_patches_path.c_str();
+
+    int slot = gLastLoadableSlot;
+    if (_GetSlotList() == -1) {
+        return -1;
+    }
+
+    if (slot < 0 || slot >= 10 || _LSstatus[slot] != SLOT_STATE_OCCUPIED) {
+        slot = -1;
+        long long newestStamp = -1;
+        for (int index = 0; index < 10; index++) {
+            if (_LSstatus[index] != SLOT_STATE_OCCUPIED) {
+                continue;
+            }
+
+            const LoadSaveSlotData& data = _LSData[index];
+            long long stamp = data.fileYear;
+            stamp = stamp * 13 + data.fileMonth;
+            stamp = stamp * 32 + data.fileDay;
+            stamp = stamp * 1440 + data.fileTime;
+            if (slot == -1 || stamp > newestStamp) {
+                newestStamp = stamp;
+                slot = index;
+            }
+        }
+    }
+
+    if (slot == -1) {
+        return -1;
+    }
+
+    int previousSlot = _slot_cursor;
+    _slot_cursor = slot;
+    debugPrint("[AUTO RELOAD] loading slot=%d name=%s\n",
+        slot + 1,
+        _LSData[slot].description);
+    if (lsgLoadGameInSlot(slot) == -1) {
+        _slot_cursor = previousSlot;
+        return -1;
+    }
+
+    gLastLoadableSlot = slot;
+    return 1;
+}
+
+
+static std::filesystem::path lsgUnifiedCampaignCheckpointPath(int gameId)
+{
+    return std::filesystem::path("SAVEGAME")
+        / (gameId == 1 ? "UNIFIED_F1_RESUME" : "UNIFIED_F2_RESUME");
+}
+
+bool lsgUnifiedCampaignCheckpointExists(int gameId)
+{
+    if (gameId != 1 && gameId != 2) {
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::path root = lsgUnifiedCampaignCheckpointPath(gameId);
+    return std::filesystem::exists(root / "SAVE.DAT", ec)
+        && std::filesystem::exists(root / "COOPMETA.SAV", ec);
+}
+
+static bool lsgCopyUnifiedCampaignCheckpointDirectory(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(source / "SAVE.DAT", ec)) {
+        return false;
+    }
+
+    std::filesystem::remove_all(destination, ec);
+    ec.clear();
+    std::filesystem::create_directories(destination.parent_path(), ec);
+    if (ec) {
+        return false;
+    }
+
+    std::filesystem::copy(
+        source,
+        destination,
+        std::filesystem::copy_options::recursive
+            | std::filesystem::copy_options::overwrite_existing,
+        ec);
+    return !ec;
+}
+
+int lsgSaveUnifiedCampaignCheckpoint(int gameId)
+{
+    if (gameId != 1 && gameId != 2) {
+        return -1;
+    }
+
+    // Slot 10 is already the engine-owned autosave slot. Save through the normal
+    // handler table first so every stock quest/script/map subsystem serializes
+    // itself, then archive that whole slot under the campaign-specific name.
+    if (lsgAutosaveGame() != 1) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint save failed game=%d\n", gameId);
+        return -1;
+    }
+
+    std::filesystem::path source = std::filesystem::path("SAVEGAME") / "SLOT10";
+    std::filesystem::path destination = lsgUnifiedCampaignCheckpointPath(gameId);
+    if (!lsgCopyUnifiedCampaignCheckpointDirectory(source, destination)) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint archive failed game=%d\n", gameId);
+        return -1;
+    }
+
+    debugPrint("[CAMPAIGN RESUME] checkpoint saved game=%d\n", gameId);
+    return 1;
+}
+
+int lsgLoadUnifiedCampaignCheckpoint(int gameId)
+{
+    if (gameId != 1 && gameId != 2 || !lsgUnifiedCampaignCheckpointExists(gameId)) {
+        return -1;
+    }
+
+    std::filesystem::path source = lsgUnifiedCampaignCheckpointPath(gameId);
+    std::filesystem::path destination = std::filesystem::path("SAVEGAME") / "SLOT10";
+    if (!lsgCopyUnifiedCampaignCheckpointDirectory(source, destination)) {
+        debugPrint("[CAMPAIGN RESUME] checkpoint restore failed game=%d\n", gameId);
+        return -1;
+    }
+
+    // Force the normal loader to use the restored campaign slot. COOPMETA.SAV
+    // belongs to this same checkpoint and therefore stages the matching profile
+    // plus unified/F1 world state before the stock SAVE.DAT handler table runs.
+    gLastLoadableSlot = 9;
+    int rc = lsgLoadLastGame();
+    debugPrint("[CAMPAIGN RESUME] checkpoint load game=%d rc=%d\n", gameId, rc);
     return rc;
 }
 
@@ -1687,6 +1871,7 @@ static int lsgPerformSaveGame()
     }
 
     backgroundSoundResume();
+    gLastLoadableSlot = _slot_cursor;
 
     return 0;
 }
@@ -1781,6 +1966,7 @@ static int lsgLoadGameInSlot(int slot)
         debugPrint("\nError: Couldn't find LoadSave Message!");
     }
 
+    gLastLoadableSlot = slot;
     _loadingGame = false;
 
     // SFALL: Start global scripts.

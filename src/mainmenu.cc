@@ -2,6 +2,8 @@
 
 #include <ctype.h>
 
+#include <SDL.h>
+
 #include "art.h"
 #include "color.h"
 #include "draw.h"
@@ -76,6 +78,64 @@ static int gMainMenuButtons[MAIN_MENU_BUTTON_COUNT];
 
 // 0x614858
 static bool gMainMenuWindowHidden;
+
+
+// COOP_CONTROLLER_OWNED_MAIN_MENU_V1
+// The first game controller owns the Fallout main menu. This deliberately does
+// not affect the separate VPN/remote-coop setup UI, where keyboard entry remains
+// useful for addresses, session codes, and connection setup.
+static SDL_GameController* gCoopMainMenuController = nullptr;
+static int gCoopMainMenuSelection = 1; // NEW GAME
+static bool gCoopMainMenuUpWasDown = false;
+static bool gCoopMainMenuDownWasDown = false;
+static bool gCoopMainMenuConfirmWasDown = false;
+static bool gCoopMainMenuCancelWasDown = false;
+
+static void coopMainMenuAcquireController()
+{
+    if (gCoopMainMenuController != nullptr
+        && SDL_GameControllerGetAttached(gCoopMainMenuController)) {
+        return;
+    }
+
+    if (gCoopMainMenuController != nullptr) {
+        SDL_GameControllerClose(gCoopMainMenuController);
+        gCoopMainMenuController = nullptr;
+    }
+
+    int count = SDL_NumJoysticks();
+    for (int i = 0; i < count; ++i) {
+        if (!SDL_IsGameController(i)) continue;
+        gCoopMainMenuController = SDL_GameControllerOpen(i);
+        if (gCoopMainMenuController != nullptr) break;
+    }
+}
+
+static void coopMainMenuReleaseController()
+{
+    if (gCoopMainMenuController != nullptr) {
+        SDL_GameControllerClose(gCoopMainMenuController);
+        gCoopMainMenuController = nullptr;
+    }
+}
+
+static void coopMainMenuDrawSelection()
+{
+    if (gMainMenuWindow == -1) return;
+
+    constexpr int markerX = 13;
+    constexpr int markerY = 23;
+    constexpr int markerW = 15;
+    constexpr int markerH = 250;
+    windowFill(gMainMenuWindow, markerX, markerY, markerW, markerH, 0);
+    windowDrawText(gMainMenuWindow,
+        ">",
+        markerW,
+        markerX,
+        markerY + gCoopMainMenuSelection * 41,
+        _colorTable[32747]);
+    windowRefresh(gMainMenuWindow);
+}
 
 static FrmImage _mainMenuBackgroundFrmImage;
 static FrmImage _mainMenuButtonNormalFrmImage;
@@ -303,78 +363,75 @@ int mainMenuWindowHandleEvents()
 {
     _in_main_menu = true;
 
-    bool oldCursorIsHidden = cursorIsHidden();
-    if (oldCursorIsHidden) {
-        mouseShowCursor();
-    }
+    // No gameplay-style mouse/keyboard ownership here. We still pump the input
+    // system so SDL/controller hotplug stays alive.
+    mouseHideCursor();
+    coopMainMenuAcquireController();
 
     unsigned int tick = getTicks();
-
     int rc = -1;
+
     while (rc == -1) {
         sharedFpsLimiter.mark();
+        inputGetInput();
+        coopMainMenuAcquireController();
 
-        int keyCode = inputGetInput();
+        bool up = gCoopMainMenuController != nullptr
+            && (SDL_GameControllerGetButton(gCoopMainMenuController, SDL_CONTROLLER_BUTTON_DPAD_UP) != 0
+                || SDL_GameControllerGetAxis(gCoopMainMenuController, SDL_CONTROLLER_AXIS_LEFTY) < -16000);
+        bool down = gCoopMainMenuController != nullptr
+            && (SDL_GameControllerGetButton(gCoopMainMenuController, SDL_CONTROLLER_BUTTON_DPAD_DOWN) != 0
+                || SDL_GameControllerGetAxis(gCoopMainMenuController, SDL_CONTROLLER_AXIS_LEFTY) > 16000);
+        bool confirm = gCoopMainMenuController != nullptr
+            && SDL_GameControllerGetButton(gCoopMainMenuController, SDL_CONTROLLER_BUTTON_A) != 0;
+        bool cancel = gCoopMainMenuController != nullptr
+            && SDL_GameControllerGetButton(gCoopMainMenuController, SDL_CONTROLLER_BUTTON_B) != 0;
 
-        for (int buttonIndex = 0; buttonIndex < MAIN_MENU_BUTTON_COUNT; buttonIndex++) {
-            if (keyCode == gMainMenuButtonKeyBindings[buttonIndex] || keyCode == toupper(gMainMenuButtonKeyBindings[buttonIndex])) {
-                // NOTE: Uninline.
-                main_menu_play_sound("nmselec1");
-
-                rc = _return_values[buttonIndex];
-
-                if (buttonIndex == MAIN_MENU_BUTTON_CREDITS && (gPressedPhysicalKeys[SDL_SCANCODE_RSHIFT] != KEY_STATE_UP || gPressedPhysicalKeys[SDL_SCANCODE_LSHIFT] != KEY_STATE_UP)) {
-                    rc = MAIN_MENU_QUOTES;
-                }
-
-                break;
-            }
+        if (up && !gCoopMainMenuUpWasDown) {
+            gCoopMainMenuSelection =
+                (gCoopMainMenuSelection + MAIN_MENU_BUTTON_COUNT - 1) % MAIN_MENU_BUTTON_COUNT;
+            main_menu_play_sound("nmselec0");
+            tick = getTicks();
         }
-
-        if (rc == -1) {
-            if (keyCode == KEY_CTRL_R) {
-                rc = MAIN_MENU_SELFRUN;
-                continue;
-            } else if (keyCode == KEY_PLUS || keyCode == KEY_EQUAL) {
-                brightnessIncrease();
-            } else if (keyCode == KEY_MINUS || keyCode == KEY_UNDERSCORE) {
-                brightnessDecrease();
-            } else if (keyCode == KEY_UPPERCASE_D || keyCode == KEY_LOWERCASE_D) {
-                rc = MAIN_MENU_SCREENSAVER;
-                continue;
-            } else if (keyCode == 1111) {
-                if (!(mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT)) {
-                    // NOTE: Uninline.
-                    main_menu_play_sound("nmselec0");
-                }
-                continue;
-            }
+        if (down && !gCoopMainMenuDownWasDown) {
+            gCoopMainMenuSelection =
+                (gCoopMainMenuSelection + 1) % MAIN_MENU_BUTTON_COUNT;
+            main_menu_play_sound("nmselec0");
+            tick = getTicks();
         }
-
-        if (keyCode == KEY_ESCAPE || _game_user_wants_to_quit == 3) {
-            rc = MAIN_MENU_EXIT;
-
-            // NOTE: Uninline.
+        if (confirm && !gCoopMainMenuConfirmWasDown) {
             main_menu_play_sound("nmselec1");
-            break;
+            rc = _return_values[gCoopMainMenuSelection];
+        } else if (cancel && !gCoopMainMenuCancelWasDown) {
+            main_menu_play_sound("nmselec1");
+            rc = MAIN_MENU_EXIT;
+        }
+
+        gCoopMainMenuUpWasDown = up;
+        gCoopMainMenuDownWasDown = down;
+        gCoopMainMenuConfirmWasDown = confirm;
+        gCoopMainMenuCancelWasDown = cancel;
+
+        if (_game_user_wants_to_quit == 3) {
+            rc = MAIN_MENU_EXIT;
         } else if (_game_user_wants_to_quit == 2) {
             _game_user_wants_to_quit = 0;
-        } else {
-            if (getTicksSince(tick) >= gMainMenuScreensaverDelay) {
-                rc = MAIN_MENU_TIMEOUT;
-            }
+        } else if (getTicksSince(tick) >= gMainMenuScreensaverDelay) {
+            rc = MAIN_MENU_TIMEOUT;
         }
 
+        coopMainMenuDrawSelection();
         renderPresent();
         sharedFpsLimiter.throttle();
     }
 
-    if (oldCursorIsHidden) {
-        mouseHideCursor();
-    }
-
+    coopMainMenuReleaseController();
+    gCoopMainMenuUpWasDown = false;
+    gCoopMainMenuDownWasDown = false;
+    gCoopMainMenuConfirmWasDown = false;
+    gCoopMainMenuCancelWasDown = false;
+    mouseHideCursor();
     _in_main_menu = false;
-
     return rc;
 }
 

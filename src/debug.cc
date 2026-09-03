@@ -7,6 +7,10 @@
 
 #include <SDL.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "memory.h"
 #include "platform_compat.h"
 #include "window_manager_private.h"
@@ -20,6 +24,7 @@ static int _debug_log(char* string);
 static int _debug_screen(char* string);
 static void _debug_putc(int ch);
 static void _debug_scroll();
+static FILE* debugOpenUnifiedStartupLog();
 
 // 0x51DEF8
 static FILE* _fd = nullptr;
@@ -33,10 +38,52 @@ static int _cury = 0;
 // 0x51DF04
 static DebugPrintProc* gDebugPrintProc = nullptr;
 
+static FILE* debugOpenUnifiedStartupLog()
+{
+#if defined(_WIN32)
+    char modulePath[MAX_PATH];
+    DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length > 0 && length < MAX_PATH) {
+        char* slash = strrchr(modulePath, '\\');
+        char* forwardSlash = strrchr(modulePath, '/');
+        if (forwardSlash != nullptr && (slash == nullptr || forwardSlash > slash)) {
+            slash = forwardSlash;
+        }
+
+        if (slash != nullptr) {
+            slash[1] = '\0';
+            char logPath[MAX_PATH];
+            if (snprintf(logPath, sizeof(logPath), "%sunified-startup.log", modulePath) > 0) {
+                FILE* stream = compat_fopen(logPath, "at");
+                if (stream != nullptr) {
+                    return stream;
+                }
+            }
+        }
+    }
+#endif
+
+    return compat_fopen("unified-startup.log", "at");
+}
+
 // 0x4C6CD0
 void _GNW_debug_init()
 {
     atexit(_debug_exit);
+
+#ifdef _DEBUG
+    // Full Debug builds merge the engine's normal debugPrint diagnostics into
+    // the same executable-local file used by the Fallout 1 compatibility trace.
+    // This avoids losing the decisive "Failed on ..." startup line in a second
+    // working-directory-dependent debug.log file.
+    if (_fd != nullptr) {
+        fclose(_fd);
+    }
+    _fd = debugOpenUnifiedStartupLog();
+    gDebugPrintProc = _debug_log;
+#else
+    _debug_register_env();
+#endif
 }
 
 // 0x4C6CDC
@@ -61,7 +108,15 @@ void _debug_register_log(const char* fileName, const char* mode)
             fclose(_fd);
         }
 
+#ifdef _DEBUG
+        // The Debug build intentionally has one startup log. Even when the game
+        // config later asks for "debug.log", keep appending to the executable-
+        // local unified-startup.log so engine and compatibility diagnostics stay
+        // in chronological order in the file the tester already has.
+        _fd = debugOpenUnifiedStartupLog();
+#else
         _fd = compat_fopen(fileName, mode);
+#endif
         gDebugPrintProc = _debug_log;
     }
 }
