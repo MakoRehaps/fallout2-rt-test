@@ -120,6 +120,12 @@ print("Reserved co-op character slots across phone/network disconnects with auto
 # keeps its HTML anchors deterministic and gives it the finished browser page.
 runpy.run_path("tools/patch_phoboi_crossref_hardening.py", run_name="__main__")
 
+# V1 could permanently mark a healthy Quick Tunnel UNREACHABLE when its first
+# public self-probe ran before Cloudflare finished edge registration. V2 waits
+# for the registered connector, publishes the usable URL, and treats WinHTTP
+# self-probing as stronger best-effort evidence rather than a blocking gate.
+runpy.run_path("tools/patch_phoboi_cloudflare_verify_v2.py", run_name="__main__")
+
 # Persist the phone-side resume credential across Safari tab/app restarts after
 # hardening has inserted the rejoin-code result. The replacement targets only
 # the sessionStorage statement, so both features compose instead of fighting.
@@ -145,8 +151,7 @@ path.write_text(text, encoding="utf-8")
 runpy.run_path("tools/patch_phoboi_msvc_final_split.py", run_name="__main__")
 
 # Cloudflare reset/new-link controls alter only native host/tunnel code, not the
-# already-split HTML, so run them after the final HTML split. The tunnel start
-# path itself was already hardened to require public /health verification.
+# already-split HTML, so run them after the final HTML split.
 runpy.run_path("tools/patch_phoboi_cloudflare_reset.py", run_name="__main__")
 
 # Port Fallout2-CE's existing PipBoyAvailableAtGameStart mechanism instead of
