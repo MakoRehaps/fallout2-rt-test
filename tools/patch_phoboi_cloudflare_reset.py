@@ -10,6 +10,7 @@ if marker in text:
     runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
     runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
     runpy.run_path("tools/patch_phoboi_cloudflare_route_v5.py", run_name="__main__")
+    runpy.run_path("tools/patch_phoboi_public_failover_v6.py", run_name="__main__")
     raise SystemExit(0)
 
 old_stop = r'''void mobileStopCloudflareTunnel()
@@ -119,7 +120,10 @@ print("Added Cloudflare reset/new-link controls without releasing character slot
 # cloudflared reader and public verifier independent. V5 then replaces V4's
 # empty-config/auto-edge launch with the documented zero-config Quick Tunnel
 # path, pins this Windows/VPN build to IPv4 + HTTP/2, and adds useful probe
-# diagnostics instead of another opaque self_probe=0.
+# diagnostics instead of another opaque self_probe=0. V6 handles the concrete
+# WinHTTP 12007 DNS failure by keeping a physical-LAN QR available and starting
+# an alternate no-signup HTTPS tunnel through Windows OpenSSH.
 runpy.run_path("tools/patch_phoboi_cloudflare_route_v3.py", run_name="__main__")
 runpy.run_path("tools/patch_phoboi_cloudflare_route_v4.py", run_name="__main__")
 runpy.run_path("tools/patch_phoboi_cloudflare_route_v5.py", run_name="__main__")
+runpy.run_path("tools/patch_phoboi_public_failover_v6.py", run_name="__main__")
