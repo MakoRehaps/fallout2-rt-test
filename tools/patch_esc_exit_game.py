@@ -28,3 +28,7 @@ runpy.run_path('tools/patch_coop_character_ui_deferred.py', run_name='__main__')
 # co-op patch so hybrid keyboard gameplay, visible Pip-Boy entries, 16:9 phone
 # scaling, and stale phone join behavior cannot overwrite the requested model.
 runpy.run_path('tools/patch_phoboi_phone800_controller_only.py', run_name='__main__')
+
+# The final workflow still checks a few old marker names. Keep them as inert
+# comments only; they must never restore the removed stock Pip-Boy UI/action.
+runpy.run_path('tools/patch_phoboi_only_validation_compat.py', run_name='__main__')
