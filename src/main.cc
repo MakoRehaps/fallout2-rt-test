@@ -161,7 +161,9 @@ int falloutMain(int argc, char** argv)
                     // and no V13ENT reuse. Start joins a controller; after release,
                     // Start again votes READY. Only after all joined players are
                     // ready do we enter the real Fallout 1 opening/start flow.
-                    if (unifiedCampaignIsEnabled()) {
+                    if (unifiedCampaignIsEnabled()
+                        && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+                        // UNIFIED_ORIGINAL_MOVIE_TIMING_V1
                         unifiedCampaignSetActiveGame(UnifiedGameId::Fallout1);
                         gUnifiedCampaignRuntime.requestedContentGame = UnifiedGameId::Fallout1;
                         gUnifiedCampaignRuntime.loadedSaveRequiresContentReload = false;
@@ -172,11 +174,11 @@ int falloutMain(int argc, char** argv)
                             break;
                         }
 
-                        // Do NOT play MOVIE_ELDER here. That is Fallout 2's elder
-                        // movie and was the cause of the new-game path looking like
-                        // Fallout 2. Load the actual Fallout 1 campaign start; its
-                        // normal Fallout 1 intro/Overseer scripting remains in
-                        // charge from this point onward.
+                        // Fallout 1's original new-game path plays the Overseer
+                        // intro after character selection and before V13Ent. main.cc
+                        // routes MOVIE_ELDER to F1 OverseerIntro while F1 is active,
+                        // so this preserves the original timing without using F2 art.
+                        gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
                         _main_load_new(mapNameCopy);
 
                         // COOP_POSTLOAD_PREJOIN_SPAWN_V1

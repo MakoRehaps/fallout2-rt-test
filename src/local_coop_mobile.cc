@@ -1557,6 +1557,34 @@ void mobileApplyController(int slot)
 
 } // namespace
 
+// COOP_READY_ROOM_HOST_KICK_MOBILE_V1
+bool localCoopMobileKickSlot(int slot)
+{
+    if (slot <= 0 || slot >= kLocalCoopMaxPlayers) {
+        return false;
+    }
+
+    MobileSlotState& state = gMobileSlots[slot];
+    MobileVirtualDevice& device = gMobileDevices[slot];
+    bool hadMobileSession = state.claimed.load() || device.deviceIndex >= 0;
+    if (!hadMobileSession) {
+        return false;
+    }
+
+    mobileResetInput(state);
+    state.claimed.store(false);
+    state.token.store(0);
+    state.lastSeen.store(0);
+
+    if (device.deviceIndex >= 0) {
+        mobileDetachController(slot);
+    }
+
+    mobileDrawHostWindow();
+    debugPrint("[COOP GROUP] P1 kicked PhoBoi mobile slot=%d\n", slot);
+    return true;
+}
+
 void localCoopMobileTick()
 {
     if (!gLocalCoopInitialized || !mobileStartServer()) {

@@ -21,6 +21,7 @@ namespace fallout {
 // COOP_TILELESS_GROUP_ROOM_V1
 // COOP_TILELESS_GROUP_ROOM_V2
 // COOP_UNIFORM_READY_ROOM_FLOW_V1
+// COOP_READY_ROOM_SEX_AND_HOST_KICK_V1
 // Pure UI scene shown before the real Fallout opening. It deliberately creates
 // no map, no tiles, no scripts, no critters and no world transitions.
 //
@@ -70,6 +71,12 @@ inline bool localCoopRunTilelessGroupRoom()
     std::array<bool, kLocalCoopMaxPlayers> aWasDown {};
     std::array<bool, kLocalCoopMaxPlayers> leftWasDown {};
     std::array<bool, kLocalCoopMaxPlayers> rightWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> yWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> lbWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> rbWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> xWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> hostKicked {};
+    int kickTarget = 1;
 
     joined[0] = true;
     // COOP_READY_ROOM_PREJOIN_TRANSFER_V1
@@ -177,25 +184,30 @@ inline bool localCoopRunTilelessGroupRoom()
 
             for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
                 const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-                char line[180];
-                const char* state = ready[slot]
-                    ? "READY"
-                    : joined[slot]
-                        ? "CHOOSE CLASS - THEN READY"
-                        : player.connected
-                            ? "PRESS START TO JOIN"
-                            : (slot == 0 ? "PRESS ENTER OR START TO JOIN" : "WAITING FOR CONTROLLER / PHONE");
+                char line[256];
+                const char* state = hostKicked[slot]
+                    ? "KICKED BY P1"
+                    : ready[slot]
+                        ? "READY"
+                        : joined[slot]
+                            ? "CHOOSE CLASS / SEX - THEN READY"
+                            : player.connected
+                                ? "PRESS START TO JOIN"
+                                : (slot == 0 ? "PRESS ENTER OR START TO JOIN" : "WAITING FOR CONTROLLER / PHONE");
                 const char* archetype = (player.archetype >= 0 && player.archetype < kLocalCoopArchetypeCount)
                     ? kLocalCoopArchetypeNames[player.archetype]
                     : "UNKNOWN";
-                std::snprintf(line, sizeof(line), "PLAYER %d   %s   CLASS: %s", slot + 1, state, archetype);
+                const char* sex = player.gender == GENDER_FEMALE ? "FEMALE" : "MALE";
+                const char* kickCursor = slot == kickTarget && slot > 0 ? "  <P1 TARGET>" : "";
+                std::snprintf(line, sizeof(line), "PLAYER %d   %s   CLASS: %s   SEX: %s%s",
+                    slot + 1, state, archetype, sex, kickCursor);
                 windowDrawText(win, line, width - 72, 38, 126 + slot * 54,
                     ready[slot] ? _colorTable[32747] : _colorTable[992]);
             }
 
-            windowDrawText(win, "EVERY PLAYER: LEFT/RIGHT = CLASS   START = READY", width - 48, 24, height - 78, _colorTable[32747]);
-            windowDrawText(win, "P1 KEYBOARD FALLBACK: ARROWS = CLASS   ENTER = READY", width - 48, 24, height - 54, _colorTable[992]);
-            windowDrawText(win, "ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
+            windowDrawText(win, "ALL PLAYERS: LEFT/RIGHT = CLASS   Y = SEX   START = READY", width - 48, 24, height - 78, _colorTable[32747]);
+            windowDrawText(win, "P1 HOST: LB/RB = TARGET P2-P4   X = KICK / ALLOW", width - 48, 24, height - 54, _colorTable[992]);
+            windowDrawText(win, "P1 KEYBOARD: ARROWS = CLASS   ENTER = READY   ESC = CANCEL", width - 48, 24, height - 30, _colorTable[992]);
         }
 
         windowRefresh(win);
@@ -243,11 +255,23 @@ inline bool localCoopRunTilelessGroupRoom()
                 && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
             bool rightDown = hasController
                 && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
+            bool yDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+            bool lbDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+            bool rbDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
+            bool xDown = hasController
+                && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
 
             bool startEdge = startDown && !startWasDown[slot];
             bool aEdge = aDown && !aWasDown[slot];
             bool leftEdge = leftDown && !leftWasDown[slot];
             bool rightEdge = rightDown && !rightWasDown[slot];
+            bool yEdge = yDown && !yWasDown[slot];
+            bool lbEdge = lbDown && !lbWasDown[slot];
+            bool rbEdge = rbDown && !rbWasDown[slot];
+            bool xEdge = xDown && !xWasDown[slot];
 
             if (!tutorialComplete) {
                 if (startEdge && !joined[slot]) {
@@ -261,6 +285,10 @@ inline bool localCoopRunTilelessGroupRoom()
                 tutorialPrevious = tutorialPrevious || leftEdge;
                 tutorialNext = tutorialNext || rightEdge;
             } else {
+                if (hostKicked[slot] && slot > 0) {
+                    // P1 owns the pre-game party. Keep this controller/phone
+                    // visible but barred from joining until P1 toggles ALLOW.
+                } else {
                 // COOP_READY_ROOM_ARCHETYPE_SELECT_V1
                 // A joined player chooses their own class before locking READY.
                 // This is deliberately per-slot, so P2-P4 do not inherit the
@@ -281,6 +309,12 @@ inline bool localCoopRunTilelessGroupRoom()
                     dirty = true;
                     debugPrint("[COOP GROUP] slot=%d class=%s\n", slot, kLocalCoopArchetypeNames[player.archetype]);
                 }
+                if (joined[slot] && !ready[slot] && yEdge) {
+                    player.gender = player.gender == GENDER_MALE ? GENDER_FEMALE : GENDER_MALE;
+                    dirty = true;
+                    debugPrint("[COOP GROUP] slot=%d sex=%s\n", slot,
+                        player.gender == GENDER_FEMALE ? "FEMALE" : "MALE");
+                }
 
                 if (startEdge || (slot == 0 && enterDown && !enterWasDown)) {
                     if (!joined[slot]) {
@@ -295,12 +329,43 @@ inline bool localCoopRunTilelessGroupRoom()
                         debugPrint("[COOP GROUP] slot=%d ready=%d class=%s\n", slot, ready[slot] ? 1 : 0, kLocalCoopArchetypeNames[player.archetype]);
                     }
                 }
+                }
+
+                if (slot == 0 && joined[0]) {
+                    if (lbEdge) {
+                        kickTarget = kickTarget <= 1 ? 3 : kickTarget - 1;
+                        dirty = true;
+                    }
+                    if (rbEdge) {
+                        kickTarget = kickTarget >= 3 ? 1 : kickTarget + 1;
+                        dirty = true;
+                    }
+                    if (xEdge && kickTarget > 0 && kickTarget < kLocalCoopMaxPlayers) {
+                        if (hostKicked[kickTarget]) {
+                            hostKicked[kickTarget] = false;
+                            dirty = true;
+                            debugPrint("[COOP GROUP] P1 allowed slot=%d\n", kickTarget);
+                        } else if (joined[kickTarget] || gLocalCoopPlayers[kickTarget].connected) {
+                            localCoopMobileKickSlot(kickTarget);
+                            joined[kickTarget] = false;
+                            ready[kickTarget] = false;
+                            gLocalCoopPrejoinedSlots[kickTarget] = false;
+                            hostKicked[kickTarget] = true;
+                            dirty = true;
+                            debugPrint("[COOP GROUP] P1 kicked slot=%d\n", kickTarget);
+                        }
+                    }
+                }
             }
 
             startWasDown[slot] = startDown;
             aWasDown[slot] = aDown;
             leftWasDown[slot] = leftDown;
             rightWasDown[slot] = rightDown;
+            yWasDown[slot] = yDown;
+            lbWasDown[slot] = lbDown;
+            rbWasDown[slot] = rbDown;
+            xWasDown[slot] = xDown;
         }
 
         if (!tutorialComplete) {

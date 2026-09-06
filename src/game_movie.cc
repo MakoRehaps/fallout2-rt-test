@@ -19,6 +19,8 @@
 #include "svga.h"
 #include "text_font.h"
 #include "touch.h"
+#include "unified_campaign.h"
+#include "unified_fallout1_movie_profile.h"
 #include "window_manager.h"
 
 namespace fallout {
@@ -99,6 +101,7 @@ int gameMoviesInit()
     movieSetBuildSubtitleFilePathProc(gameMovieBuildSubtitlesFilePath);
 
     memset(gGameMoviesSeen, 0, sizeof(gGameMoviesSeen));
+    unifiedFallout1MoviesReset();
 
     gGameMovieIsPlaying = false;
     gGameMovieFaded = false;
@@ -110,6 +113,7 @@ int gameMoviesInit()
 void gameMoviesReset()
 {
     memset(gGameMoviesSeen, 0, sizeof(gGameMoviesSeen));
+    unifiedFallout1MoviesReset();
 
     gGameMovieIsPlaying = false;
     gGameMovieFaded = false;
@@ -118,6 +122,15 @@ void gameMoviesReset()
 // 0x44E638
 int gameMoviesLoad(File* stream)
 {
+    // UNIFIED_PROFILE_MOVIE_ROUTING_V1
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);
+        if (fileRead(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {
+            return -1;
+        }
+        return 0;
+    }
+
     if (fileRead(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {
         return -1;
     }
@@ -128,6 +141,14 @@ int gameMoviesLoad(File* stream)
 // 0x44E664
 int gameMoviesSave(File* stream)
 {
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);
+        if (fileWrite(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {
+            return -1;
+        }
+        return 0;
+    }
+
     if (fileWrite(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {
         return -1;
     }
@@ -139,6 +160,14 @@ int gameMoviesSave(File* stream)
 // 0x44E690
 int gameMoviePlay(int movie, int flags)
 {
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        if (!unifiedFallout1MovieIndexIsValid(movie)) {
+            debugPrint("\nF1 movie index out of range: %d\n", movie);
+            return -1;
+        }
+        return unifiedFallout1MoviePlay(static_cast<UnifiedFallout1Movie>(movie), flags);
+    }
+
     gGameMovieIsPlaying = true;
 
     const char* movieFileName = gMovieFileNames[movie];
@@ -323,12 +352,21 @@ void gameMovieFadeOut()
 // 0x44EB04
 bool gameMovieIsSeen(int movie)
 {
-    return gGameMoviesSeen[movie] == 1;
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        if (!unifiedFallout1MovieIndexIsValid(movie)) {
+            return false;
+        }
+        return unifiedFallout1MovieIsSeen(static_cast<UnifiedFallout1Movie>(movie));
+    }
+    return movie >= 0 && movie < MOVIE_COUNT && gGameMoviesSeen[movie] == 1;
 }
 
 // 0x44EB14
 bool gameMovieIsPlaying()
 {
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        return gUnifiedFallout1MoviePlaying;
+    }
     return gGameMovieIsPlaying;
 }
 
