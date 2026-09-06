@@ -1,0 +1,44 @@
+name: Materialize Global Co-op Perks
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - 'tools/patch_global_coop_perks.py'
+      - '.github/workflows/materialize-global-coop-perks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply global co-op perk draft
+        run: python tools/patch_global_coop_perks.py
+
+      - name: Verify global perk source
+        run: |
+          grep -q 'COOP_GLOBAL_PERKS_V1' src/local_coop_global_perks.h
+          grep -q 'COOP_GLOBAL_PERKS_EFFECTS_V1' src/perk.cc
+          grep -q 'COOP_GLOBAL_PERKS_ACTOR_RESTORE_V1' src/local_coop.h
+          grep -q 'COOP_GLOBAL_PERKS_RUNTIME_V1' src/local_coop_runtime.h
+          grep -q 'COOP_GLOBAL_PERKS_STOCK_PICKER_DISABLED_V1' src/character_editor.cc
+
+      - name: Commit materialized source
+        run: |
+          if git diff --quiet -- src/perk.h src/perk.cc src/local_coop.h src/local_coop_runtime.h src/local_coop_global_perks.h src/character_editor.cc; then
+            echo 'Global co-op perks already materialized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- src/perk.h src/perk.cc src/local_coop.h src/local_coop_runtime.h src/local_coop_global_perks.h src/character_editor.cc
+          git commit -m 'Use global perks with four-player random draft'
+          git push origin HEAD:fix/no-debug-no-data-copy
