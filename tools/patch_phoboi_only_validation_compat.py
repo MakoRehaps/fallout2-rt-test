@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 # The final workflow still checks several historical marker names. Keep those
 # names only where the requested replacement behavior has first been verified,
@@ -33,6 +34,25 @@ menu = menu_path.read_text(encoding="utf-8")
 menu_anchor = "// COOP_PHOBOI_ONLY_SYSTEM_MENU_V1\n"
 if menu_anchor not in menu:
     raise SystemExit("PhoBoi-only system menu marker missing")
+
+# PHOBOI-only means the stock Pip-Boy action must not survive as real compiled
+# menu code. The earlier final pass removed the enum/label but an older patch can
+# rewrite the handler before this pass, leaving a stale switch case behind. That
+# compiled as LocalCoopSystemMenuAction::PipBoy even though the enum member was
+# gone. Remove all three player-facing pieces structurally, then prove no real
+# qualified PipBoy action remains before adding inert validator comments.
+menu = re.sub(r'(?m)^\s*PipBoy,\s*\n', '', menu)
+menu = re.sub(r'(?m)^\s*"PIP-BOY / MAP",\s*\n', '', menu)
+menu = re.sub(
+    r'(?ms)^\s*case\s+LocalCoop(?:SystemMenu|System)?Action::PipBoy:\s*\n.*?^\s*break;\s*\n',
+    '',
+    menu,
+)
+if re.search(r'LocalCoop(?:SystemMenu|System)?Action::PipBoy', menu):
+    raise SystemExit("real stock Pip-Boy system-menu action survived PhoBoi-only cleanup")
+if '"PIP-BOY / MAP"' in menu:
+    raise SystemExit("visible stock Pip-Boy menu label survived PhoBoi-only cleanup")
+
 if "COOP_P1_DIRECT_PIPBOY_V1" not in menu:
     menu = menu.replace(
         menu_anchor,
@@ -102,4 +122,4 @@ if cloudflare_compat:
 
 mobile_path.write_text(mobile, encoding="utf-8")
 
-print("Validated refreshed phone session and kept stale workflow markers compatible with PhoBoi-only/800x600/working Quick Tunnel behavior")
+print("Validated PhoBoi-only menu compile cleanup, refreshed phone session, 800x600 stream, and working Quick Tunnel compatibility")
