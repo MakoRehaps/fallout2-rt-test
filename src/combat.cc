@@ -4854,9 +4854,10 @@ void _apply_damage(Attack* attack, bool animated)
 static void _check_for_death(Object* object, int damage, int* flags)
 {
     // COOP_DOWNED_MEDICAL_V1
+    // COOP_P1_PROTAGONIST_DEATH_V2
     // Human-controlled co-op actors do not enter Fallout's stock death path.
-    // At 0 HP they become downed; the co-op runtime owns the 60 second bleedout,
-    // -100 HP hard floor, Doctor revival and medical evacuation.
+    // P1 is the story protagonist and owns the negative-HP / medical-rescue
+    // rule. P2-P4 stop at 0 HP and remain downed until revived.
     if (object != nullptr
         && gLocalCoopInitialized
         && localCoopActorIsHumanOwned(object)

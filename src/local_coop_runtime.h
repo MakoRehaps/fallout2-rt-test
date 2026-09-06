@@ -988,7 +988,11 @@ inline LocalCoopMedicalDestination localCoopFindClosestMedicalDestination()
 
 inline void localCoopMedicalEvacuate(LocalCoopPlayer& patient, const char* reason)
 {
-    if (patient.actor == nullptr) {
+    // COOP_P1_PROTAGONIST_DEATH_V2
+    // Only P1 is allowed to trigger the story medical-rescue transition.
+    // P2-P4 are support actors and remain downed until another player revives
+    // them; they never teleport the party or create a treatment bill.
+    if (patient.actor == nullptr || patient.slot != 0) {
         return;
     }
 
@@ -1056,20 +1060,39 @@ inline void localCoopProcessDownedPlayers(Uint32 now)
             continue;
         }
 
-        if (!runtime.downed) {
-            runtime.downed = true;
-            runtime.downedUntil = now + kLocalCoopDownedDurationMs;
-            localCoopClearQueuedAttack(runtime);
-            debugPrint("[COOP DOWNED] slot=%d hp=%d bleedoutMs=%u\n",
-                player.slot,
-                hp,
-                kLocalCoopDownedDurationMs);
+        const bool protagonist = player.slot == 0;
+
+        // P2-P4 can only be downed. Keep them at exactly 0 HP even if some
+        // damage path bypassed critterAdjustHitPoints, and give them no bleedout
+        // timer or medical-evacuation trigger.
+        if (!protagonist && hp < 0) {
+            actor->data.critter.hp = 0;
+            hp = 0;
         }
 
-        // Keep stock knockout recovery from waking a downed co-op player before
-        // Doctor is used or the medical rescue fires.
+        if (!runtime.downed) {
+            runtime.downed = true;
+            runtime.downedUntil = protagonist ? now + kLocalCoopDownedDurationMs : 0;
+            localCoopClearQueuedAttack(runtime);
+            if (protagonist) {
+                debugPrint("[COOP DOWNED] P1 hp=%d bleedoutMs=%u hardFloor=%d\n",
+                    hp,
+                    kLocalCoopDownedDurationMs,
+                    kLocalCoopDownedHardFloor);
+            } else {
+                debugPrint("[COOP DOWNED] slot=%d hp=0 persistent-support-downed\n", player.slot);
+            }
+        }
+
+        // Keep stock knockout recovery from waking a downed co-op actor. Doctor
+        // revival is the only way P2-P4 return; P1 can additionally trigger the
+        // protagonist medical rescue.
         actor->data.critter.combat.results &= ~DAM_DEAD;
         actor->data.critter.combat.results |= DAM_KNOCKED_OUT;
+
+        if (!protagonist) {
+            continue;
+        }
 
         if (hp <= kLocalCoopDownedHardFloor) {
             localCoopMedicalEvacuate(player, "hp-floor");

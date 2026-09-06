@@ -300,12 +300,14 @@ int critterAdjustHitPoints(Object* critter, int hp)
     int newHp = critter->data.critter.hp + hp;
 
     // COOP_DOWNED_MEDICAL_V1
+    // COOP_P1_PROTAGONIST_DEATH_V2
     if (gLocalCoopInitialized && localCoopActorIsHumanOwned(critter)) {
-        // Co-op players can survive below zero while teammates attempt Doctor.
-        // -100 is the absolute damage floor; the runtime converts that state to
-        // a medical rescue instead of allowing Fallout's stock game-over.
-        if (newHp < -100) {
-            newHp = -100;
+        // P1/gDude is the story protagonist and is the only co-op actor allowed
+        // below zero. P2-P4 are support actors: reaching 0 HP means downed and
+        // further damage cannot push them into protagonist death/rescue.
+        int minimumHp = critter == gLocalCoopPlayers[0].actor ? -100 : 0;
+        if (newHp < minimumHp) {
+            newHp = minimumHp;
         }
         if (newHp > maximumHp) {
             newHp = maximumHp;
