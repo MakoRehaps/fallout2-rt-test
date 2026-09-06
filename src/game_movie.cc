@@ -124,10 +124,12 @@ int gameMoviesLoad(File* stream)
 {
     // UNIFIED_PROFILE_MOVIE_ROUTING_V1
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
-        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);
-        if (fileRead(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {
+        unsigned char persisted[MOVIE_COUNT] {};
+        if (fileRead(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {
             return -1;
         }
+        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);
+        memcpy(gUnifiedFallout1MoviesSeen.data(), persisted, f1Count);
         return 0;
     }
 
@@ -142,8 +144,11 @@ int gameMoviesLoad(File* stream)
 int gameMoviesSave(File* stream)
 {
     if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
-        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);
-        if (fileWrite(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {
+        // UNIFIED_PROFILE_MOVIE_SAVE_COMPAT_V2
+        unsigned char persisted[MOVIE_COUNT] {};
+        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);
+        memcpy(persisted, gUnifiedFallout1MoviesSeen.data(), f1Count);
+        if (fileWrite(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {
             return -1;
         }
         return 0;
