@@ -6,6 +6,7 @@ on:
       - fix/no-debug-no-data-copy
     paths:
       - 'tools/patch_global_coop_perks.py'
+      - 'tools/patch_global_coop_perks_v2.py'
       - '.github/workflows/materialize-global-coop-perks.yml'
   workflow_dispatch:
 
@@ -21,7 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply global co-op perk draft
-        run: python tools/patch_global_coop_perks.py
+        run: python tools/patch_global_coop_perks_v2.py
 
       - name: Verify global perk source
         run: |
