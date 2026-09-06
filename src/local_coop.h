@@ -21,6 +21,7 @@
 #include "local_coop_danger.h"
 #include "object.h"
 #include "party_member.h"
+#include "perk.h"
 #include "platform_compat.h"
 #include "proto.h"
 #include "proto_types.h"
@@ -625,6 +626,8 @@ inline bool localCoopCreatePlayerActor(int slot)
     actor->flags |= OBJECT_NO_REMOVE | OBJECT_NO_SAVE | OBJECT_LIGHT_THRU;
     actor->flags &= ~OBJECT_HIDDEN;
     actor->data.critter.combat.results = 0;
+    // COOP_GLOBAL_PERKS_ACTOR_RESTORE_V1
+    perkApplyGlobalCoopEffectsToActor(actor);
     critterUpdateDerivedStats(actor);
     actor->data.critter.hp = critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS);
     actor->data.critter.combat.ap = critterGetStat(actor, STAT_MAXIMUM_ACTION_POINTS);

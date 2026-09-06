@@ -23,6 +23,8 @@ char* perkGetDescription(int perk);
 int perkGetFrmId(int perk);
 void perkAddEffect(Object* critter, int perk);
 void perkRemoveEffect(Object* critter, int perk);
+// COOP_GLOBAL_PERKS_V1
+void perkApplyGlobalCoopEffectsToActor(Object* critter);
 int perkGetSkillModifier(Object* critter, int skill);
 
 // Fallout 1 has fewer perk-name entries than Fallout 2, while the F2 proto

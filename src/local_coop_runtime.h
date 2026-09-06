@@ -18,6 +18,7 @@
 #include "local_coop_ai_realtime.h"
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
+#include "local_coop_global_perks.h"
 #include "local_coop_fps.h"
 #include "local_coop_mobile.h"
 #include "local_coop_personal_ui.h"
@@ -1456,6 +1457,7 @@ inline void localCoopRuntimeTick()
     if (_main_menu_is_enabled()) {
         localCoopFpsDestroyWindow();
         localCoopPersonalUiShutdown();
+        localCoopGlobalPerksShutdown();
         localCoopDestroyHud();
         if (cursorIsHidden()) mouseShowCursor();
         gLocalCoopRuntimeInsideTick = false;
@@ -1482,6 +1484,8 @@ inline void localCoopRuntimeTick()
     // COOP_PREJOIN_LIVE_SPAWN_RUNTIME_V1
     localCoopSpawnPrejoinedPlayers();
     localCoopKeepReservedActorsWithParty();
+    // COOP_GLOBAL_PERKS_RUNTIME_V1
+    localCoopGlobalPerksTick();
 
     // COOP_EXPLICIT_SIMULATION_PAUSE_RUNTIME_V1
     // Keep polling controllers and join UI while paused, but freeze the world.

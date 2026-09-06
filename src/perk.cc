@@ -6,6 +6,7 @@
 #include "game.h"
 #include "memory.h"
 #include "message.h"
+#include "local_coop.h"
 #include "object.h"
 #include "party_member.h"
 #include "platform_compat.h"
@@ -269,7 +270,10 @@ int perksSave(File* stream)
 // 0x49678C
 static PerkRankData* perkGetRankData(Object* critter)
 {
-    if (critter == gDude) {
+    // COOP_GLOBAL_PERKS_V1: P1 is the single saved perk-rank table for all
+    // synthetic co-op players. Stock companions keep their own tables.
+    if (critter == gDude
+        || (critter != nullptr && protoIsLocalCoopPlayerPid(critter->pid))) {
         return gPartyMemberPerkRanks;
     }
 
@@ -302,7 +306,10 @@ static bool perkCanAdd(Object* critter, int perk)
         return false;
     }
 
-    if (critter == gDude) {
+    // COOP_GLOBAL_PERKS_LEVEL_GATE_V1: every co-op actor uses P1's party
+    // level for perk requirements, while keeping its own SPECIAL/skills.
+    if (critter == gDude
+        || (critter != nullptr && protoIsLocalCoopPlayerPid(critter->pid))) {
         if (pcGetStat(PC_STAT_LEVEL) < perkDescription->minLevel) {
             return false;
         }
@@ -416,6 +423,74 @@ static void perkResetRanks()
     }
 }
 
+// COOP_GLOBAL_PERKS_EFFECTS_V1
+static bool perkIsGlobalCoopActor(const Object* critter)
+{
+    return critter != nullptr
+        && (critter == gDude || protoIsLocalCoopPlayerPid(critter->pid));
+}
+
+static void perkApplyGlobalCoopDirectStatEffect(Object* critter, int perk, int direction)
+{
+    if (critter == nullptr || !perkIsValid(perk) || direction == 0) {
+        return;
+    }
+
+    PerkDescription* perkDescription = &(gPerkDescriptions[perk]);
+    if (perkDescription->stat != -1) {
+        int value = critterGetBonusStat(critter, perkDescription->stat);
+        critterSetBonusStat(
+            critter,
+            perkDescription->stat,
+            value + direction * perkDescription->statModifier);
+    }
+}
+
+static void perkApplyGlobalCoopDirectStatEffectToParty(int perk, int direction)
+{
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!player.slotLocked || player.actor == nullptr) {
+            continue;
+        }
+        perkApplyGlobalCoopDirectStatEffect(player.actor, perk, direction);
+        critterUpdateDerivedStats(player.actor);
+    }
+}
+
+void perkApplyGlobalCoopEffectsToActor(Object* critter)
+{
+    if (critter == nullptr || critter == gDude || !protoIsLocalCoopPlayerPid(critter->pid)) {
+        return;
+    }
+
+    // Synthetic player critters are rebuilt on map/load handoffs. Reconstruct
+    // the direct stat side of every shared perk from P1's persistent rank table.
+    for (int perk = 0; perk < PERK_COUNT; perk++) {
+        int rank = gPartyMemberPerkRanks[0].ranks[perk];
+        for (int index = 0; index < rank; index++) {
+            perkApplyGlobalCoopDirectStatEffect(critter, perk, 1);
+        }
+    }
+
+    // P2-P4 do not own PC_STAT_LEVEL, but they still share P1's party level.
+    // Rebuild their HP growth deterministically whenever their synthetic actor
+    // is recreated so save/load and map transitions do not erase progression.
+    int partyLevel = std::max(1, pcGetStat(PC_STAT_LEVEL));
+    if (partyLevel > 1) {
+        int endurance = critterGetBaseStatWithTraitModifier(critter, STAT_ENDURANCE);
+        int hpPerLevel = endurance / 2 + 2;
+        hpPerLevel += perkGetRank(gDude, PERK_LIFEGIVER) * 4;
+        int bonusHp = critterGetBonusStat(critter, STAT_MAXIMUM_HIT_POINTS);
+        critterSetBonusStat(
+            critter,
+            STAT_MAXIMUM_HIT_POINTS,
+            bonusHp + (partyLevel - 1) * hpPerLevel);
+    }
+
+    critterUpdateDerivedStats(critter);
+}
+
 // 0x496A5C
 int perkAdd(Object* critter, int perk)
 {
@@ -430,7 +505,14 @@ int perkAdd(Object* critter, int perk)
     PerkRankData* ranksData = perkGetRankData(critter);
     ranksData->ranks[perk] += 1;
 
-    perkAddEffect(critter, perk);
+    if (perkIsGlobalCoopActor(critter)) {
+        // Rank ownership is global. Apply global/PC side effects once to P1,
+        // then mirror critter-local stat effects to P2-P4.
+        perkAddEffect(gDude, perk);
+        perkApplyGlobalCoopDirectStatEffectToParty(perk, 1);
+    } else {
+        perkAddEffect(critter, perk);
+    }
 
     return 0;
 }
@@ -454,7 +536,12 @@ int perkAddForce(Object* critter, int perk)
 
     ranksData->ranks[perk] += 1;
 
-    perkAddEffect(critter, perk);
+    if (perkIsGlobalCoopActor(critter)) {
+        perkAddEffect(gDude, perk);
+        perkApplyGlobalCoopDirectStatEffectToParty(perk, 1);
+    } else {
+        perkAddEffect(critter, perk);
+    }
 
     return 0;
 }
@@ -476,7 +563,12 @@ int perkRemove(Object* critter, int perk)
 
     ranksData->ranks[perk] -= 1;
 
-    perkRemoveEffect(critter, perk);
+    if (perkIsGlobalCoopActor(critter)) {
+        perkRemoveEffect(gDude, perk);
+        perkApplyGlobalCoopDirectStatEffectToParty(perk, -1);
+    } else {
+        perkRemoveEffect(critter, perk);
+    }
 
     return 0;
 }
