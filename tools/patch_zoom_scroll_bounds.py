@@ -1,5 +1,20 @@
 from pathlib import Path
 
+# Repair the co-op medical fee compile break introduced by the downed/medical
+# patch. P2-P4 are synthetic critters and do not own Fallout PC_STAT_* values;
+# co-op progression is campaign-wide, so treatment cost uses the campaign PC
+# level whenever the patient actor exists.
+runtime_path = Path('src/local_coop_runtime.h')
+runtime = runtime_path.read_text(encoding='utf-8')
+bad_level = 'int level = actor != nullptr ? std::max(1, critterGetStat(actor, STAT_LEVEL)) : 1;'
+good_level = 'int level = actor != nullptr ? std::max(1, pcGetStat(PC_STAT_LEVEL)) : 1;'
+if bad_level in runtime:
+    runtime = runtime.replace(bad_level, good_level, 1)
+    runtime_path.write_text(runtime, encoding='utf-8')
+    print('Repaired co-op medical fee level lookup for MSVC build')
+elif good_level in runtime:
+    print('Co-op medical fee level lookup already repaired')
+
 p = Path('src/tile.cc')
 s = p.read_text(encoding='utf-8')
 marker = '// COOP_VIEWPORT_SCROLL_BOUNDS_V1'
