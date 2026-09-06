@@ -41,6 +41,7 @@ jobs:
           python tools/patch_coop_18_kits_repair.py
           python tools/patch_coop_simulation_pause.py
           python tools/patch_coop_downed_medical.py
+          python tools/patch_coop_p1_protagonist_death.py
           python tools/patch_coop_nearest_clinic.py
           python tools/patch_coop_final_hotbinds.py
           python tools/patch_coop_hud_and_leash.py
@@ -86,6 +87,7 @@ jobs:
             @{ File = 'src/local_coop.h'; Marker = 'COOP_PREJOINED_LIVE_SPAWN_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FINAL_HOTBINDS_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PLAYER_HUD_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_PROTAGONIST_DEATH_V2' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_FOUR_PERSONAL_HUD_SHARED_BAG_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_NATIVE_BILLBOARD_FPS_RUNTIME_V1' },
             @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_UNIFIED_LIVING_WORLD_RUNTIME_V1' },
@@ -155,7 +157,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -- $tracked
-            git commit -m "Apply raycast FPS and Freedoom weapon view models"
+            git commit -m "Apply P1 protagonist death and co-op runtime fixes"
             git push origin HEAD:fix/no-debug-no-data-copy
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
