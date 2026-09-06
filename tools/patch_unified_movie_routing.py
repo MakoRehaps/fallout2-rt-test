@@ -1,6 +1,7 @@
 from pathlib import Path
 
 MOVIE_MARKER = '// UNIFIED_PROFILE_MOVIE_ROUTING_V1'
+SAVE_COMPAT_MARKER = '// UNIFIED_PROFILE_MOVIE_SAVE_COMPAT_V2'
 TIMING_MARKER = '// UNIFIED_ORIGINAL_MOVIE_TIMING_V1'
 
 
@@ -12,7 +13,8 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 # Route every movie request through the active game's native movie table.
 # Fallout 2 retains the stock 17-entry table. Fallout 1 uses its original
-# 14-entry table, including script-triggered films, seen-state and save/load.
+# 14-entry table for semantics, while the F2-engine save block stays 17 bytes
+# on disk so existing unified saves and following save sections stay aligned.
 p = Path('src/game_movie.cc')
 s = p.read_text(encoding='utf-8')
 if MOVIE_MARKER not in s:
@@ -24,16 +26,14 @@ if MOVIE_MARKER not in s:
     init_old = '''    memset(gGameMoviesSeen, 0, sizeof(gGameMoviesSeen));\n\n    gGameMovieIsPlaying = false;\n'''
     init_new = '''    memset(gGameMoviesSeen, 0, sizeof(gGameMoviesSeen));\n    unifiedFallout1MoviesReset();\n\n    gGameMovieIsPlaying = false;\n'''
     s = replace_once(s, init_old, init_new, 'gameMoviesInit')
-
-    # The same stock reset block occurs once more in gameMoviesReset.
     s = replace_once(s, init_old, init_new, 'gameMoviesReset')
 
     load_old = '''int gameMoviesLoad(File* stream)\n{\n    if (fileRead(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
-    load_new = '''int gameMoviesLoad(File* stream)\n{\n    // UNIFIED_PROFILE_MOVIE_ROUTING_V1\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);\n        if (fileRead(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {\n            return -1;\n        }\n        return 0;\n    }\n\n    if (fileRead(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
+    load_new = '''int gameMoviesLoad(File* stream)\n{\n    // UNIFIED_PROFILE_MOVIE_ROUTING_V1\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        unsigned char persisted[MOVIE_COUNT] {};\n        if (fileRead(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n            return -1;\n        }\n        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);\n        memcpy(gUnifiedFallout1MoviesSeen.data(), persisted, f1Count);\n        return 0;\n    }\n\n    if (fileRead(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
     s = replace_once(s, load_old, load_new, 'gameMoviesLoad')
 
     save_old = '''int gameMoviesSave(File* stream)\n{\n    if (fileWrite(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
-    save_new = '''int gameMoviesSave(File* stream)\n{\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);\n        if (fileWrite(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {\n            return -1;\n        }\n        return 0;\n    }\n\n    if (fileWrite(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
+    save_new = '''int gameMoviesSave(File* stream)\n{\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        // UNIFIED_PROFILE_MOVIE_SAVE_COMPAT_V2\n        unsigned char persisted[MOVIE_COUNT] {};\n        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);\n        memcpy(persisted, gUnifiedFallout1MoviesSeen.data(), f1Count);\n        if (fileWrite(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n            return -1;\n        }\n        return 0;\n    }\n\n    if (fileWrite(gGameMoviesSeen, sizeof(*gGameMoviesSeen), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n        return -1;\n    }\n\n    return 0;\n}\n'''
     s = replace_once(s, save_old, save_new, 'gameMoviesSave')
 
     play_old = '''int gameMoviePlay(int movie, int flags)\n{\n    gGameMovieIsPlaying = true;\n'''
@@ -44,7 +44,22 @@ if MOVIE_MARKER not in s:
     seen_new = '''bool gameMovieIsSeen(int movie)\n{\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        if (!unifiedFallout1MovieIndexIsValid(movie)) {\n            return false;\n        }\n        return unifiedFallout1MovieIsSeen(static_cast<UnifiedFallout1Movie>(movie));\n    }\n    return movie >= 0 && movie < MOVIE_COUNT && gGameMoviesSeen[movie] == 1;\n}\n\n// 0x44EB14\nbool gameMovieIsPlaying()\n{\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        return gUnifiedFallout1MoviePlaying;\n    }\n    return gGameMovieIsPlaying;\n}\n'''
     s = replace_once(s, seen_old, seen_new, 'movie seen/playing')
 
-    p.write_text(s, encoding='utf-8')
+# Upgrade the first materialized V1 source without requiring a clean checkout.
+if SAVE_COMPAT_MARKER not in s:
+    old_load = '''    // UNIFIED_PROFILE_MOVIE_ROUTING_V1\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);\n        if (fileRead(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {\n            return -1;\n        }\n        return 0;\n    }\n'''
+    new_load = '''    // UNIFIED_PROFILE_MOVIE_ROUTING_V1\n    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        unsigned char persisted[MOVIE_COUNT] {};\n        if (fileRead(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n            return -1;\n        }\n        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);\n        memcpy(gUnifiedFallout1MoviesSeen.data(), persisted, f1Count);\n        return 0;\n    }\n'''
+    if old_load in s:
+        s = s.replace(old_load, new_load, 1)
+
+    old_save = '''    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        constexpr int count = static_cast<int>(UnifiedFallout1Movie::Count);\n        if (fileWrite(gUnifiedFallout1MoviesSeen.data(), sizeof(unsigned char), count, stream) != count) {\n            return -1;\n        }\n        return 0;\n    }\n'''
+    new_save = '''    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {\n        // UNIFIED_PROFILE_MOVIE_SAVE_COMPAT_V2\n        unsigned char persisted[MOVIE_COUNT] {};\n        constexpr int f1Count = static_cast<int>(UnifiedFallout1Movie::Count);\n        memcpy(persisted, gUnifiedFallout1MoviesSeen.data(), f1Count);\n        if (fileWrite(persisted, sizeof(unsigned char), MOVIE_COUNT, stream) != MOVIE_COUNT) {\n            return -1;\n        }\n        return 0;\n    }\n'''
+    if old_save in s:
+        s = s.replace(old_save, new_save, 1)
+
+    if SAVE_COMPAT_MARKER not in s:
+        raise SystemExit('game_movie.cc F1 movie save compatibility upgrade anchor not found')
+
+p.write_text(s, encoding='utf-8')
 
 # Preserve original new-game movie timing for both halves of the unified game.
 # F1: ready room -> Overseer intro (ovrintro.mve) -> V13Ent.
@@ -63,4 +78,4 @@ if TIMING_MARKER not in s:
 
     p.write_text(s, encoding='utf-8')
 
-print('Unified campaign now preserves original Fallout 1 and Fallout 2 movie routing and timing')
+print('Unified campaign now preserves original Fallout 1 and Fallout 2 movie routing, timing and save layout')
