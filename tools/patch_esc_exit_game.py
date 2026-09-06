@@ -18,14 +18,13 @@ if marker not in s:
 else:
     print('Escape exit-game patch already applied')
 
-# This is deliberately the LAST gameplay/UI correction in the final workflow.
-# The earlier regression pass changed previously-working Pip-Boy behavior and
-# later PhoBoi patches layered transport experiments over the working Cloudflare
-# Quick Tunnel. Restore those known-working paths here, then add the new shared
-# party Skilldex without touching either one.
+# Restore the known working tunnel/backend paths and shared Skilldex first.
 runpy.run_path('tools/patch_restore_working_paths_shared_skilldex.py', run_name='__main__')
 
-# Preserve Character editor modal safety independently. It remains deferred
-# until after the runtime ticker returns, while Pip-Boy uses its restored direct
-# backend consumer and Skilldex uses the new non-stock shared party overlay.
+# Preserve Character editor modal safety and mixed phone/XInput reservation.
 runpy.run_path('tools/patch_coop_character_ui_deferred.py', run_name='__main__')
+
+# FINAL ownership/presentation pass. This deliberately runs after every older
+# co-op patch so hybrid keyboard gameplay, visible Pip-Boy entries, 16:9 phone
+# scaling, and stale phone join behavior cannot overwrite the requested model.
+runpy.run_path('tools/patch_phoboi_phone800_controller_only.py', run_name='__main__')
