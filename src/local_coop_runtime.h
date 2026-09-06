@@ -785,7 +785,7 @@ inline bool localCoopActorIsDowned(Object* actor)
 
 inline int localCoopMedicalTreatmentFee(Object* actor)
 {
-    int level = actor != nullptr ? std::max(1, critterGetStat(actor, STAT_LEVEL)) : 1;
+    int level = actor != nullptr ? std::max(1, pcGetStat(PC_STAT_LEVEL)) : 1;
     int rawFee = 100 + 25 * level;
     // Debt is stored in the roster's existing reserved byte as 100-cap units,
     // preserving the current save chunk layout and old-save compatibility.
