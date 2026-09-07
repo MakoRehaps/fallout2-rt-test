@@ -7,6 +7,7 @@ on:
     paths:
       - tools/patch_midgame_ready_room_and_viewport_gui.py
       - tools/patch_phoboi_no_refresh_join.py
+      - tools/patch_phoboi_ready_json_escape.py
       - .github/workflows/materialize-midgame-ready-room-gui.yml
   workflow_dispatch:
 
@@ -28,6 +29,9 @@ jobs:
       - name: Apply PhoBoi no-refresh join patch
         run: python3 tools/patch_phoboi_no_refresh_join.py
 
+      - name: Repair PhoBoi ready handshake JSON
+        run: python3 tools/patch_phoboi_ready_json_escape.py
+
       - name: Verify materialized source
         run: |
           grep -q 'COOP_MIDGAME_READY_ROOM_V1' src/local_coop.h
@@ -38,6 +42,7 @@ jobs:
           grep -q 'COOP_MIDGAME_PHONE_READY_ROOM_V1' src/local_coop_mobile.cc
           grep -q 'PHOBOI_NO_REFRESH_JOIN_V1' src/local_coop_mobile.cc
           grep -q 'route == "/ready"' src/local_coop_mobile.cc
+          grep -q '{\\"ok\\":true,\\"ready\\":' src/local_coop_mobile.cc
 
       - name: Commit materialized source
         run: |
@@ -48,5 +53,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/local_coop.h src/local_coop_group_room.h src/local_coop_runtime.h src/local_coop_personal_ui.h src/local_coop_iso_cameras.h src/local_coop_mobile.cc
-          git commit -m 'Fix no-refresh browser and phone join handshake'
+          git commit -m 'Fix PhoBoi no-refresh join handshake JSON'
           git push origin HEAD:fix/no-debug-no-data-copy
