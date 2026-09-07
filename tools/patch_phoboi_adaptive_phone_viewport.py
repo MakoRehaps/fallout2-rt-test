@@ -132,6 +132,66 @@ if "PHOBOI_VISUAL_VIEWPORT_SCALE_V1" not in text:
     text = text.replace(anchor, anchor + "\n" + layout_js, 1)
     print("Applied VisualViewport-based phone scaling")
 
+# PHOBOI_CLOUDFLARE_BROWSER_KBM_V1
+# Desktop browsers reached through a Cloudflare Quick Tunnel previously had no
+# keyboard or mouse transport at all. Keep the native game controller-owned,
+# but translate browser keyboard/mouse state into the existing virtual SDL pad
+# packet. This needs no extra public endpoint and therefore works over the same
+# /ws and /input Cloudflare paths as touch controls.
+kbm_js = r"""
+// PHOBOI_CLOUDFLARE_BROWSER_KBM_V1
+let phoboiKbmKeys=new Set(),phoboiMouseAim=false,phoboiMouseDecay=0;
+function phoboiKbmActive(){return slot>=0&&$('pad')&&$('pad').style.display!=='none'}
+function phoboiKbmAxis(){
+ const left=(phoboiKbmKeys.has('KeyA')||phoboiKbmKeys.has('ArrowLeft'))?-32767:0;
+ const right=(phoboiKbmKeys.has('KeyD')||phoboiKbmKeys.has('ArrowRight'))?32767:0;
+ const up=(phoboiKbmKeys.has('KeyW')||phoboiKbmKeys.has('ArrowUp'))?-32767:0;
+ const down=(phoboiKbmKeys.has('KeyS')||phoboiKbmKeys.has('ArrowDown'))?32767:0;
+ axes[0]=Math.max(-32767,Math.min(32767,left+right));
+ axes[1]=Math.max(-32767,Math.min(32767,up+down));
+}
+const phoboiKeyBits={
+ Space:0,KeyE:0,KeyQ:3,KeyR:2,Tab:4,Enter:6,KeyF:10,
+ Digit1:11,Digit2:12,Digit3:13,Digit4:14,ShiftLeft:9,ShiftRight:9
+};
+function phoboiSetKey(ev,down){
+ if(!phoboiKbmActive())return;
+ const tag=(ev.target&&ev.target.tagName||'').toUpperCase();if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
+ if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(ev.code)){
+  ev.preventDefault();down?phoboiKbmKeys.add(ev.code):phoboiKbmKeys.delete(ev.code);phoboiKbmAxis();send(true);return;
+ }
+ const bit=phoboiKeyBits[ev.code];if(bit!==undefined){ev.preventDefault();if(down)buttons|=(1<<bit);else buttons&=~(1<<bit);send(true)}
+}
+window.addEventListener('keydown',ev=>{if(!ev.repeat)phoboiSetKey(ev,true)},{capture:true});
+window.addEventListener('keyup',ev=>phoboiSetKey(ev,false),{capture:true});
+window.addEventListener('blur',()=>{phoboiKbmKeys.clear();axes[0]=axes[1]=axes[2]=axes[3]=0;axes[4]=axes[5]=-32768;buttons=0;send(true)});
+function phoboiMouseMove(ev){
+ if(!phoboiKbmActive()||document.pointerLockElement!==$('pad'))return;
+ const gain=900;axes[2]=Math.max(-32767,Math.min(32767,Math.round(ev.movementX*gain)));axes[3]=Math.max(-32767,Math.min(32767,Math.round(ev.movementY*gain)));
+ clearTimeout(phoboiMouseDecay);phoboiMouseDecay=setTimeout(()=>{axes[2]=axes[3]=0;send(true)},34);send(true);
+}
+window.addEventListener('mousemove',phoboiMouseMove,{passive:true});
+window.addEventListener('mousedown',ev=>{
+ if(!phoboiKbmActive())return;
+ if(document.pointerLockElement!==$('pad')){$('pad').requestPointerLock?.();return}
+ ev.preventDefault();if(ev.button===0)axes[5]=32767;else if(ev.button===2)axes[4]=32767;else if(ev.button===1)buttons|=(1<<10);send(true);
+},{capture:true});
+window.addEventListener('mouseup',ev=>{
+ if(!phoboiKbmActive())return;ev.preventDefault();if(ev.button===0)axes[5]=-32768;else if(ev.button===2)axes[4]=-32768;else if(ev.button===1)buttons&=~(1<<10);send(true);
+},{capture:true});
+window.addEventListener('contextmenu',ev=>{if(phoboiKbmActive())ev.preventDefault()},{capture:true});
+document.addEventListener('pointerlockchange',()=>{phoboiMouseAim=document.pointerLockElement===$('pad');if(!phoboiMouseAim){axes[2]=axes[3]=0;axes[4]=axes[5]=-32768;send(true)}updateStatus()});
+""".strip()
+
+if "PHOBOI_CLOUDFLARE_BROWSER_KBM_V1" not in text:
+    # Install after send() exists so key/mouse handlers can immediately flush a
+    # state transition through WebSocket or the HTTP fallback.
+    anchor = "setInterval(send,16);"
+    if anchor not in text:
+        raise SystemExit("PhoBoi send loop anchor not found for browser K/M bridge")
+    text = text.replace(anchor, kbm_js + "\n" + anchor, 1)
+    print("Applied Cloudflare desktop keyboard/mouse to virtual-controller bridge")
+
 # Prefer readable pixels over a tiny high-FPS feed. The previous emergency
 # ladder could collapse all the way to 256x144, which is unreadable when blown
 # up on a modern phone. Control traffic uses its own socket, so on weak links we
