@@ -1011,7 +1011,7 @@ void mobileHandleClient(MobileSocket client)
     if (method == "GET" && route == "/ready") {
         uint32_t token = mobileUnsignedValue(values, "token", 0);
         if (!state.claimed.load() || token == 0 || token != state.token.load()) {
-            mobileSendResponse(client, "403 Forbidden", "application/json", "{\\\"ok\\\":false,\\\"error\\\":\\\"Session expired\\\"}");
+            mobileSendResponse(client, "403 Forbidden", "application/json", "{\"ok\":false,\"error\":\"Session expired\"}");
             return;
         }
         state.lastSeen.store(mobileNow());
@@ -1022,8 +1022,8 @@ void mobileHandleClient(MobileSocket client)
             && player.connected
             && player.controller == device.controller;
         std::ostringstream body;
-        body << "{\\\"ok\\\":true,\\\"ready\\\":" << (ready ? "true" : "false")
-             << ",\\\"player\\\":" << slot + 1 << "}";
+        body << "{\"ok\":true,\"ready\":" << (ready ? "true" : "false")
+             << ",\"player\":" << slot + 1 << "}";
         mobileSendResponse(client, "200 OK", "application/json", body.str());
         return;
     }
