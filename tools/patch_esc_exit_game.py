@@ -32,7 +32,11 @@ def _enforce_setup_only_input():
             globals_anchor,
             globals_anchor
             + marker + '\n'
-            + 'bool gMobileHostMouseWasDown = false;\n',
+            + 'bool gMobileHostMouseWasDown = false;\n'
+            + 'void mobileCloseHostWindow();\n'
+            + '#ifdef _WIN32\n'
+            + 'bool mobileStartCloudflareTunnel();\n'
+            + '#endif\n',
             1,
         )
 
