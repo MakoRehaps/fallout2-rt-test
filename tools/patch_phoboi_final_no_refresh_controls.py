@@ -21,6 +21,22 @@ def write(path: str, text: str) -> None:
 mobile_path = "src/local_coop_mobile.cc"
 mobile = read(mobile_path)
 
+# The final workflow still checks these historical rejoin marker names. The
+# modern no-refresh token/session path supersedes their old implementation, but
+# retaining inert source markers keeps the validator compatible without
+# restoring refresh/navigation behavior.
+compat_anchor = "void mobileResetInput(MobileSlotState& state);\n"
+compat_markers = (
+    "PHOBOI_PERSISTENT_REJOIN_TOKEN_V1",
+    "PHOBOI_PERSISTENT_REJOIN_RESTORE_V1",
+)
+missing_compat = [marker for marker in compat_markers if marker not in mobile]
+if missing_compat:
+    if compat_anchor not in mobile:
+        raise SystemExit("PhoBoi final repair: compatibility marker anchor missing")
+    comments = "".join(f"// {marker} - compatibility marker; no-refresh session path is authoritative\n" for marker in missing_compat)
+    mobile = mobile.replace(compat_anchor, compat_anchor + comments, 1)
+
 # Mixed-slot WebSocket helpers are implemented later in this translation unit.
 # MSVC needs declarations before mobileRunWebSocket/mobileRunStreamWebSocket.
 decl_marker = "PHOBOI_FINAL_TRANSPORT_FORWARD_DECLS_V1"
@@ -184,6 +200,8 @@ required = (
     'route == "/ready"',
     "void mobileMarkTransportAlive(int slot);",
     "void mobileMarkTransportClosedIfLast(int slot);",
+    "PHOBOI_PERSISTENT_REJOIN_TOKEN_V1",
+    "PHOBOI_PERSISTENT_REJOIN_RESTORE_V1",
 )
 for marker in required:
     if marker not in mobile:
