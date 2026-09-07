@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Kept as a dedicated repair/validation pass so the browser handshake cannot
+# regress to over-escaped JSON during later materializer runs or Windows builds.
 path = Path("src/local_coop_mobile.cc")
 text = path.read_text(encoding="utf-8")
 
