@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import atexit
 import runpy
+
+# Some older PhoBoi materializers intentionally stop this wrapper early once
+# their target is already present. Register the modern join/control repair as
+# an exit hook so it ALWAYS runs after those legacy passes, even on SystemExit.
+# This is the authoritative last word for browser CONNECT and MSVC transport
+# helper visibility.
+def _final_phoboi_repair():
+    runpy.run_path('tools/patch_phoboi_final_no_refresh_controls.py', run_name='__main__')
+
+atexit.register(_final_phoboi_repair)
 
 p = Path('src/main.cc')
 s = p.read_text(encoding='utf-8')
@@ -33,9 +44,5 @@ runpy.run_path('tools/patch_phoboi_phone800_controller_only.py', run_name='__mai
 # comments only; they must never restore the removed stock Pip-Boy UI/action.
 runpy.run_path('tools/patch_phoboi_only_validation_compat.py', run_name='__main__')
 
-# The 800x600 presentation pass above historically forced location.replace()
-# after CONNECT. Reassert the user-facing behavior last: shared browser/phone
-# links stay on the same page, wait for the SDL virtual controller, then enter
-# the current game with live controls. This pass also fixes mixed-slot helper
-# declaration order for MSVC.
-runpy.run_path('tools/patch_phoboi_final_no_refresh_controls.py', run_name='__main__')
+# Do not call the final PhoBoi repair here directly. The atexit hook above runs
+# it after this wrapper and also covers early exits from any legacy child patch.
