@@ -6,10 +6,11 @@ import runpy
 # Some older PhoBoi materializers intentionally stop this wrapper early once
 # their target is already present. Register the modern join/control repair as
 # an exit hook so it ALWAYS runs after those legacy passes, even on SystemExit.
-# This is the authoritative last word for browser CONNECT and MSVC transport
-# helper visibility.
+# V3 also reapplies the compact phone layout after the old 800x600 pass and
+# installs stable compatibility markers outside generated HTML before the
+# no-refresh/MSVC transport repair validates the final source.
 def _final_phoboi_repair():
-    runpy.run_path('tools/patch_phoboi_final_no_refresh_controls.py', run_name='__main__')
+    runpy.run_path('tools/patch_phoboi_final_repair_v3.py', run_name='__main__')
 
 atexit.register(_final_phoboi_repair)
 
