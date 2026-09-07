@@ -1,0 +1,1 @@
+Midgame ready-room + per-player viewport GUI validation trigger v1.
