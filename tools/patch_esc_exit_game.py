@@ -151,15 +151,15 @@ marker = '// COOP_ESCAPE_EXIT_GAME_V1'
 
 if marker not in s:
     old = '''        int legacyKeyCode = inputGetInput();\n        int keyCode = -1;\n        (void)legacyKeyCode;\n'''
-    new = '''        int legacyKeyCode = inputGetInput();\n        int keyCode = -1;\n\n        // COOP_ESCAPE_EXIT_GAME_V1\n        // Escape is the one live-game keyboard exception. It opens the P1\n        // system menu; every other keyboard/mouse gameplay command is discarded.\n        // PhoBoi/Cloudflare host setup input is handled separately.\n        if (legacyKeyCode == KEY_ESCAPE) {\n            localCoopSystemMenuToggle();\n        }\n'''
+    new = '''        int legacyKeyCode = inputGetInput();\n        int keyCode = -1;\n\n        // COOP_ESCAPE_EXIT_GAME_V1\n        // Keyboard is disabled for gameplay. The raw key is offered only to\n        // PhoBoi host/setup first: outside that window it accepts F11 only;\n        // while open it owns C/T/2/3/4/Escape. Escape otherwise opens P1 menu.\n        bool phoboiSetupKey = localCoopMobileHandleKey(legacyKeyCode);\n        if (!phoboiSetupKey && legacyKeyCode == KEY_ESCAPE) {\n            localCoopSystemMenuToggle();\n        }\n'''
     if old not in s:
         raise SystemExit('controller-only legacy input anchor missing')
 
     s = s.replace(old, new, 1)
     p.write_text(s, encoding='utf-8')
-    print('Mapped Escape to P1 system menu; gameplay keyboard remains disabled')
+    print('Routed keyboard only to PhoBoi setup; Escape opens P1 system menu')
 else:
-    print('Escape system-menu patch already applied')
+    print('Escape/system-menu patch already applied')
 
 # Restore the known working tunnel/backend paths and shared Skilldex first.
 runpy.run_path('tools/patch_restore_working_paths_shared_skilldex.py', run_name='__main__')
