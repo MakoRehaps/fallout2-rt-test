@@ -15,6 +15,7 @@
 #include "item.h"
 #include "kb.h"
 #include "local_coop.h"
+#include "local_coop_group_room.h"
 #include "local_coop_ai_realtime.h"
 #include "local_coop_danger.h"
 #include "local_coop_focus.h"
@@ -1501,6 +1502,19 @@ inline void localCoopRuntimeTick()
     localCoopPollControllers();
     localCoopUpdateP1InputSource();
     localCoopProcessJoinMenus();
+
+    // COOP_MIDGAME_READY_ROOM_RUNTIME_V1
+    // Party management is modal and intentionally leaves the current map loaded.
+    // Tear down personal presentation windows first so the ready room is the
+    // only foreground UI, then let the next runtime tick rebuild each viewport.
+    if (gLocalCoopMidgameReadyRoomRequested && !gLocalCoopMidgameReadyRoomActive) {
+        localCoopPersonalUiShutdown();
+        localCoopDestroyHud();
+        localCoopRunMidgameGroupRoom();
+        gLocalCoopRuntimeInsideTick = false;
+        return;
+    }
+
     localCoopSystemMenuTick();
     localCoopAccessibilityTick();
     localCoopRestoreCharactersFromSave();

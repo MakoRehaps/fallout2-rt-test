@@ -104,6 +104,12 @@ inline int gLocalCoopSkilldexInvokerSlot = -1;
 // COOP_SYSTEM_MENU_RUNTIME_V1
 inline bool gLocalCoopSystemMenuActive = false;
 
+// COOP_MIDGAME_READY_ROOM_V1
+// New P2-P4 participants do not spawn directly into a running map. Their join
+// request pauses the live campaign and opens the shared party/ready room first.
+inline bool gLocalCoopMidgameReadyRoomRequested = false;
+inline bool gLocalCoopMidgameReadyRoomActive = false;
+
 // COOP_EXPLICIT_SIMULATION_PAUSE_V1
 // Window focus/Alt+Tab must never pause realtime co-op. Only explicit gameplay
 // flows such as joining a player or choosing a level-up perk freeze simulation.
@@ -896,7 +902,17 @@ inline void localCoopProcessJoinMenus()
             && startDown
             && !player.joinStartWasDown
             && !player.joinMenuActive) {
-            localCoopOpenJoinMenu(player);
+            // COOP_MIDGAME_READY_ROOM_V1
+            // During a live campaign START means "join party", which returns the
+            // session to the shared ready room instead of spawning this player
+            // directly into combat. The old compact join panel remains only as a
+            // defensive fallback when no live map exists.
+            if (gDude != nullptr && tileIsValid(gDude->tile)) {
+                gLocalCoopMidgameReadyRoomRequested = true;
+                debugPrint("[COOP GROUP] midgame ready room requested by slot=%d\n", slot);
+            } else {
+                localCoopOpenJoinMenu(player);
+            }
         }
 
         bool dirty = false;

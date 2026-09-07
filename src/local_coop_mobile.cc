@@ -1490,6 +1490,18 @@ bool mobileAttachController(int slot)
     player.connected = true;
     snprintf(player.controllerGuid, sizeof(player.controllerGuid), "PHOBOI-MOBILE-%d", slot + 1);
 
+    // COOP_MIDGAME_PHONE_READY_ROOM_V1
+    // Selecting an unused phone slot is itself a join request. In a running
+    // campaign route it through the same party-management room as a physical
+    // controller instead of silently creating a live-map actor.
+    if (!player.slotLocked
+        && !gLocalCoopMidgameReadyRoomActive
+        && gDude != nullptr
+        && tileIsValid(gDude->tile)) {
+        gLocalCoopMidgameReadyRoomRequested = true;
+        debugPrint("[COOP GROUP] midgame ready room requested by phone slot=%d\n", slot);
+    }
+
     MobileVirtualDevice& device = gMobileDevices[slot];
     device.deviceIndex = deviceIndex;
     device.controller = controller;

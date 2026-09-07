@@ -3,6 +3,7 @@
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -424,6 +425,243 @@ inline bool localCoopRunTilelessGroupRoom()
 
     windowDestroy(win);
     if (oldCursorHidden) mouseHideCursor();
+    return accepted;
+}
+
+
+// COOP_MIDGAME_READY_ROOM_UI_V1
+// Baldur's Gate-style party management for a campaign that is already running.
+// The current map remains loaded underneath this modal room; no scripts, world
+// position, quest state, clocks, inventories or protagonist state are reset.
+inline bool localCoopRunMidgameGroupRoom()
+{
+    gLocalCoopMidgameReadyRoomRequested = false;
+    gLocalCoopMidgameReadyRoomActive = true;
+
+    std::array<bool, kLocalCoopMaxPlayers> joined {};
+    std::array<bool, kLocalCoopMaxPlayers> ready {};
+    std::array<bool, kLocalCoopMaxPlayers> startWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> leftWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> rightWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> yWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> lbWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> rbWasDown {};
+    std::array<bool, kLocalCoopMaxPlayers> xWasDown {};
+
+    joined[0] = true;
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; ++slot) {
+        const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        // Existing connected party members and newly attached empty slots are
+        // participants. A disconnected reserved character remains in the save
+        // but does not block the ready vote.
+        joined[slot] = player.connected && (player.slotLocked || player.actor == nullptr);
+    }
+
+    int kickTarget = 1;
+    int sw = std::max(640, screenGetWidth());
+    int sh = std::max(480, screenGetVisibleHeight());
+    int width = std::max(600, std::min(920, sw - 24));
+    int height = std::max(390, std::min(540, sh - 24));
+    int win = windowCreate(
+        (screenGetWidth() - width) / 2,
+        (screenGetVisibleHeight() - height) / 2,
+        width,
+        height,
+        _colorTable[0],
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
+    if (win == -1) {
+        gLocalCoopMidgameReadyRoomActive = false;
+        return false;
+    }
+
+    bool oldCursorHidden = cursorIsHidden();
+    mouseShowCursor();
+    bool accepted = false;
+    bool dirty = true;
+    bool enterWasDown = false;
+    bool keyLeftWasDown = false;
+    bool keyRightWasDown = false;
+
+    auto draw = [&]() {
+        windowFill(win, 0, 0, width, height, _colorTable[0]);
+        windowDrawBorder(win);
+        windowDrawText(win, "PHOBOI PARTY MANAGEMENT - GAME PAUSED", width - 48, 24, 20, _colorTable[992]);
+        windowDrawText(win, "CURRENT MAP AND CAMPAIGN ARE PRESERVED - READY TO RETURN", width - 48, 24, 48, _colorTable[32747]);
+
+        int rowTop = 92;
+        int rowGap = std::max(48, (height - 190) / kLocalCoopMaxPlayers);
+        for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+            const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+            const char* archetype = player.archetype >= 0 && player.archetype < kLocalCoopArchetypeCount
+                ? kLocalCoopArchetypeNames[player.archetype]
+                : "UNKNOWN";
+            const char* sex = player.gender == GENDER_FEMALE ? "FEMALE" : "MALE";
+            const char* state = ready[slot]
+                ? "READY"
+                : joined[slot]
+                    ? (player.slotLocked ? "CURRENT CHARACTER" : "NEW - CHOOSE CLASS / SEX")
+                    : player.connected
+                        ? "NOT IN PARTY"
+                        : (player.slotLocked ? "RESERVED / OFFLINE" : "OPEN");
+            const char* target = slot == kickTarget && slot > 0 ? "  <P1 TARGET>" : "";
+            char line[320];
+            std::snprintf(line, sizeof(line), "P%d  %s  CLASS: %s  SEX: %s%s",
+                slot + 1, state, archetype, sex, target);
+            windowDrawText(win, line, width - 72, 36, rowTop + slot * rowGap,
+                ready[slot] ? _colorTable[32747] : _colorTable[992]);
+        }
+
+        windowDrawText(win, "NEW PLAYER: LEFT/RIGHT = CLASS   Y = SEX   START = READY", width - 48, 24, height - 78, _colorTable[32747]);
+        windowDrawText(win, "P1 HOST: LB/RB = TARGET P2-P4   X = KICK CONTROLLER / PHONE", width - 48, 24, height - 54, _colorTable[992]);
+        windowDrawText(win, "EVERY ACTIVE PLAYER READIES, THEN THE SAME MAP RESUMES", width - 48, 24, height - 30, _colorTable[992]);
+        windowRefresh(win);
+    };
+
+    while (_game_user_wants_to_quit == 0) {
+        sharedFpsLimiter.mark();
+        inputGetInput();
+        localCoopMobileTick();
+        localCoopRefreshControllers();
+
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        bool enterDown = keys != nullptr && keys[SDL_SCANCODE_RETURN] != 0;
+        bool escapeDown = keys != nullptr && keys[SDL_SCANCODE_ESCAPE] != 0;
+        bool keyLeft = keys != nullptr && keys[SDL_SCANCODE_LEFT] != 0;
+        bool keyRight = keys != nullptr && keys[SDL_SCANCODE_RIGHT] != 0;
+
+        if (escapeDown) {
+            break;
+        }
+
+        // A second phone/controller may arrive while this room is already open.
+        // Add it to the same party-management pass instead of opening another UI.
+        for (int slot = 1; slot < kLocalCoopMaxPlayers; ++slot) {
+            LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+            if (player.connected && !player.slotLocked && !joined[slot]) {
+                joined[slot] = true;
+                ready[slot] = false;
+                dirty = true;
+            }
+        }
+
+        for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+            LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+            bool hasController = player.controller != nullptr;
+            bool startDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_START) != 0;
+            bool leftDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT) != 0;
+            bool rightDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) != 0;
+            bool yDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_Y) != 0;
+            bool lbDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0;
+            bool rbDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0;
+            bool xDown = hasController && SDL_GameControllerGetButton(player.controller, SDL_CONTROLLER_BUTTON_X) != 0;
+
+            bool startEdge = startDown && !startWasDown[slot];
+            bool leftEdge = leftDown && !leftWasDown[slot];
+            bool rightEdge = rightDown && !rightWasDown[slot];
+            bool yEdge = yDown && !yWasDown[slot];
+            bool lbEdge = lbDown && !lbWasDown[slot];
+            bool rbEdge = rbDown && !rbWasDown[slot];
+            bool xEdge = xDown && !xWasDown[slot];
+
+            // Only a genuinely new character can change class/sex here. Existing
+            // characters keep the stats they have earned in this campaign.
+            if (joined[slot] && !player.slotLocked && !ready[slot]) {
+                if (leftEdge) {
+                    player.archetype = (player.archetype + kLocalCoopArchetypeCount - 1) % kLocalCoopArchetypeCount;
+                    dirty = true;
+                }
+                if (rightEdge) {
+                    player.archetype = (player.archetype + 1) % kLocalCoopArchetypeCount;
+                    dirty = true;
+                }
+                if (yEdge) {
+                    player.gender = player.gender == GENDER_MALE ? GENDER_FEMALE : GENDER_MALE;
+                    dirty = true;
+                }
+            }
+
+            bool keyboardReadyEdge = slot == 0 && enterDown && !enterWasDown;
+            if (joined[slot] && (startEdge || keyboardReadyEdge)) {
+                ready[slot] = !ready[slot];
+                dirty = true;
+            }
+
+            if (slot == 0 && joined[0]) {
+                if (lbEdge) {
+                    kickTarget = kickTarget <= 1 ? 3 : kickTarget - 1;
+                    dirty = true;
+                }
+                if (rbEdge) {
+                    kickTarget = kickTarget >= 3 ? 1 : kickTarget + 1;
+                    dirty = true;
+                }
+                if (xEdge && kickTarget > 0 && kickTarget < kLocalCoopMaxPlayers) {
+                    LocalCoopPlayer& target = gLocalCoopPlayers[kickTarget];
+                    bool kickedMobile = localCoopMobileKickSlot(kickTarget);
+                    if (!kickedMobile && target.connected) {
+                        localCoopClearController(target);
+                    }
+                    joined[kickTarget] = false;
+                    ready[kickTarget] = false;
+                    dirty = true;
+                    debugPrint("[COOP GROUP] P1 midgame kicked controller slot=%d\\n", kickTarget);
+                }
+            }
+
+            startWasDown[slot] = startDown;
+            leftWasDown[slot] = leftDown;
+            rightWasDown[slot] = rightDown;
+            yWasDown[slot] = yDown;
+            lbWasDown[slot] = lbDown;
+            rbWasDown[slot] = rbDown;
+            xWasDown[slot] = xDown;
+        }
+
+        enterWasDown = enterDown;
+        keyLeftWasDown = keyLeft;
+        keyRightWasDown = keyRight;
+
+        int joinedCount = 0;
+        int readyCount = 0;
+        for (int slot = 0; slot < kLocalCoopMaxPlayers; ++slot) {
+            if (joined[slot]) {
+                ++joinedCount;
+                if (ready[slot]) ++readyCount;
+            }
+        }
+
+        if (joinedCount > 0 && readyCount == joinedCount) {
+            bool createdAll = true;
+            for (int slot = 1; slot < kLocalCoopMaxPlayers; ++slot) {
+                LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+                if (joined[slot] && !player.slotLocked) {
+                    if (!localCoopCreatePlayerActor(slot)) {
+                        ready[slot] = false;
+                        createdAll = false;
+                        dirty = true;
+                        debugPrint("[COOP GROUP] midgame create failed slot=%d; staying in room\\n", slot);
+                    }
+                }
+            }
+            if (createdAll) {
+                accepted = true;
+                break;
+            }
+        }
+
+        if (dirty) {
+            draw();
+            dirty = false;
+        }
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+
+    windowDestroy(win);
+    if (oldCursorHidden) mouseHideCursor();
+    gLocalCoopMidgameReadyRoomRequested = false;
+    gLocalCoopMidgameReadyRoomActive = false;
+    debugPrint("[COOP GROUP] midgame room closed accepted=%d\\n", accepted ? 1 : 0);
     return accepted;
 }
 

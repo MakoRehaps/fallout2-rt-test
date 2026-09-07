@@ -29,28 +29,70 @@ struct LocalCoopPersonalUiState {
     bool bWasDown = false;
     bool xWasDown = false;
     Uint32 nextRefreshTick = 0;
+    int hudX = -1;
+    int hudY = -1;
+    int hudWidth = -1;
+    int hudHeight = -1;
+    int inventoryX = -1;
+    int inventoryY = -1;
+    int inventoryWidth = -1;
+    int inventoryHeight = -1;
 };
 
 inline std::array<LocalCoopPersonalUiState, kLocalCoopMaxPlayers> gLocalCoopPersonalUi;
 
+// COOP_VIEWPORT_SCALED_PERSONAL_UI_V1
+inline bool localCoopPersonalUiViewportForSlot(int slot, LocalCoopIsoViewport& view)
+{
+    int sw = screenGetWidth();
+    int sh = screenGetVisibleHeight();
+    if (sw <= 0 || sh <= 0) return false;
+
+    std::array<int, kLocalCoopMaxPlayers> activeSlots {};
+    int count = 0;
+    int ordinal = -1;
+    for (int candidate = 0; candidate < kLocalCoopMaxPlayers; ++candidate) {
+        const LocalCoopPlayer& player = gLocalCoopPlayers[candidate];
+        if (!player.connected || !player.humanOwned || player.actor == nullptr
+            || (player.actor->flags & OBJECT_HIDDEN) != 0) {
+            continue;
+        }
+        if (candidate == slot) ordinal = count;
+        activeSlots[count++] = candidate;
+    }
+    if (ordinal < 0 || count <= 0) return false;
+    view = localCoopIsoViewportForOrdinal(ordinal, count, sw, sh);
+    return view.width > 0 && view.height > 0;
+}
+
 inline void localCoopPersonalUiHudRect(int slot, int& x, int& y, int& width, int& height)
 {
-    int sw = std::max(640, screenGetWidth());
-    int sh = std::max(480, screenGetHeight());
-    width = std::min(360, std::max(280, sw / 3));
-    height = 112;
-    x = (slot & 1) ? sw - width : 0;
-    y = slot >= 2 ? sh - INTERFACE_BAR_HEIGHT - height : 0;
+    LocalCoopIsoViewport view;
+    if (!localCoopPersonalUiViewportForSlot(slot, view)) {
+        x = y = width = height = 0;
+        return;
+    }
+    int margin = std::clamp(std::min(view.width, view.height) / 80, 4, 12);
+    width = std::min(420, std::max(220, view.width - margin * 2));
+    height = std::clamp(view.height / 5, 78, 112);
+    x = view.x + margin;
+    y = view.y + view.height - height - margin;
 }
 
 inline void localCoopPersonalUiInventoryRect(int slot, int& x, int& y, int& width, int& height)
 {
-    int sw = std::max(640, screenGetWidth());
-    int sh = std::max(480, screenGetHeight());
-    width = std::max(310, sw / 2 - 8);
-    height = std::max(230, sh / 2 - 8);
-    x = (slot & 1) ? sw - width : 0;
-    y = slot >= 2 ? sh - height : 0;
+    LocalCoopIsoViewport view;
+    if (!localCoopPersonalUiViewportForSlot(slot, view)) {
+        x = y = width = height = 0;
+        return;
+    }
+    int margin = std::clamp(std::min(view.width, view.height) / 30, 8, 20);
+    width = std::max(240, view.width - margin * 2);
+    height = std::max(180, view.height - margin * 2);
+    width = std::min(width, view.width);
+    height = std::min(height, view.height);
+    x = view.x + (view.width - width) / 2;
+    y = view.y + (view.height - height) / 2;
 }
 
 inline void localCoopPersonalUiCloseInventory(int slot)
@@ -58,6 +100,7 @@ inline void localCoopPersonalUiCloseInventory(int slot)
     auto& ui = gLocalCoopPersonalUi[slot];
     if (ui.inventoryWindow != -1) windowDestroy(ui.inventoryWindow);
     ui.inventoryWindow = -1;
+    ui.inventoryX = ui.inventoryY = ui.inventoryWidth = ui.inventoryHeight = -1;
     if (gLocalCoopPlayers[slot].uiMode == LocalCoopUiMode::Inventory) {
         gLocalCoopPlayers[slot].uiMode = LocalCoopUiMode::World;
     }
@@ -70,8 +113,13 @@ inline void localCoopPersonalUiOpenInventory(int slot)
     if (!player.connected || !player.humanOwned || player.actor == nullptr || ui.inventoryWindow != -1) return;
     int x, y, w, h;
     localCoopPersonalUiInventoryRect(slot, x, y, w, h);
+    if (w <= 0 || h <= 0) return;
     ui.inventoryWindow = windowCreate(x, y, w, h, _colorTable[0], WINDOW_MOVE_ON_TOP);
     if (ui.inventoryWindow == -1) return;
+    ui.inventoryX = x;
+    ui.inventoryY = y;
+    ui.inventoryWidth = w;
+    ui.inventoryHeight = h;
     ui.equipHand = localCoopGetActiveHand(player);
     player.uiMode = LocalCoopUiMode::Inventory;
 }
@@ -81,7 +129,24 @@ inline void localCoopPersonalUiDrawHud(int slot)
     auto& ui = gLocalCoopPersonalUi[slot];
     int x, y, w, h;
     localCoopPersonalUiHudRect(slot, x, y, w, h);
-    if (ui.hudWindow == -1) ui.hudWindow = windowCreate(x, y, w, h, _colorTable[0], WINDOW_MOVE_ON_TOP);
+    if (w <= 0 || h <= 0) {
+        if (ui.hudWindow != -1) windowDestroy(ui.hudWindow);
+        ui.hudWindow = -1;
+        ui.hudX = ui.hudY = ui.hudWidth = ui.hudHeight = -1;
+        return;
+    }
+    if (ui.hudWindow != -1
+        && (ui.hudX != x || ui.hudY != y || ui.hudWidth != w || ui.hudHeight != h)) {
+        windowDestroy(ui.hudWindow);
+        ui.hudWindow = -1;
+    }
+    if (ui.hudWindow == -1) {
+        ui.hudWindow = windowCreate(x, y, w, h, _colorTable[0], WINDOW_MOVE_ON_TOP);
+        ui.hudX = x;
+        ui.hudY = y;
+        ui.hudWidth = w;
+        ui.hudHeight = h;
+    }
     if (ui.hudWindow == -1) return;
 
     windowFill(ui.hudWindow, 0, 0, w, h, _colorTable[0]);
@@ -91,27 +156,29 @@ inline void localCoopPersonalUiDrawHud(int slot)
     snprintf(line, sizeof(line), "P%d  %s%s", slot + 1,
         player.connected ? "CONNECTED" : (player.slotLocked ? "RESERVED" : "EMPTY"),
         ui.inventoryWindow != -1 ? "  [BAG]" : "");
-    windowDrawText(ui.hudWindow, line, w - 16, 8, 7, _colorTable[992]);
+    int hudStep = std::max(16, (h - 12) / 4);
+    int hudTop = 5;
+    windowDrawText(ui.hudWindow, line, w - 16, 8, hudTop, _colorTable[992]);
 
     Object* actor = player.actor;
     if (actor == nullptr || !player.slotLocked) {
-        windowDrawText(ui.hudWindow, "NO CHARACTER", w - 16, 8, 31, _colorTable[992]);
+        windowDrawText(ui.hudWindow, "NO CHARACTER", w - 16, 8, hudTop + hudStep, _colorTable[992]);
         windowRefresh(ui.hudWindow);
         return;
     }
 
     int maxHp = std::max(1, critterGetStat(actor, STAT_MAXIMUM_HIT_POINTS));
     snprintf(line, sizeof(line), "HP %d/%d", actor->data.critter.hp, maxHp);
-    windowDrawText(ui.hudWindow, line, w - 16, 8, 29, _colorTable[992]);
+    windowDrawText(ui.hudWindow, line, w - 16, 8, hudTop + hudStep, _colorTable[992]);
 
     Object* item = localCoopGetActiveItem(player);
     const char* itemName = item != nullptr ? protoGetName(item->pid) : nullptr;
     if (itemName == nullptr || *itemName == '\0') itemName = "UNARMED";
     snprintf(line, sizeof(line), "%s HAND: %s", localCoopGetActiveHand(player) == HAND_LEFT ? "LEFT" : "RIGHT", itemName);
-    windowDrawText(ui.hudWindow, line, w - 16, 8, 51, _colorTable[992]);
+    windowDrawText(ui.hudWindow, line, w - 16, 8, hudTop + hudStep * 2, _colorTable[992]);
 
     snprintf(line, sizeof(line), "%s   BACK: BAG", player.actionMode == LocalCoopActionMode::Aim ? "AIM" : "INTERACT");
-    windowDrawText(ui.hudWindow, line, w - 16, 8, 75, _colorTable[992]);
+    windowDrawText(ui.hudWindow, line, w - 16, 8, hudTop + hudStep * 3, _colorTable[992]);
     windowRefresh(ui.hudWindow);
 }
 
@@ -119,6 +186,27 @@ inline void localCoopPersonalUiDrawInventory(int slot)
 {
     auto& ui = gLocalCoopPersonalUi[slot];
     if (ui.inventoryWindow == -1) return;
+
+    int wantedX, wantedY, wantedW, wantedH;
+    localCoopPersonalUiInventoryRect(slot, wantedX, wantedY, wantedW, wantedH);
+    if (wantedW <= 0 || wantedH <= 0) {
+        localCoopPersonalUiCloseInventory(slot);
+        return;
+    }
+    if (ui.inventoryX != wantedX || ui.inventoryY != wantedY
+        || ui.inventoryWidth != wantedW || ui.inventoryHeight != wantedH) {
+        windowDestroy(ui.inventoryWindow);
+        ui.inventoryWindow = windowCreate(wantedX, wantedY, wantedW, wantedH, _colorTable[0], WINDOW_MOVE_ON_TOP);
+        if (ui.inventoryWindow == -1) {
+            ui.inventoryX = ui.inventoryY = ui.inventoryWidth = ui.inventoryHeight = -1;
+            return;
+        }
+        ui.inventoryX = wantedX;
+        ui.inventoryY = wantedY;
+        ui.inventoryWidth = wantedW;
+        ui.inventoryHeight = wantedH;
+    }
+
     Object* shared = localCoopGetSharedInventoryOwner();
     if (shared == nullptr) return;
     Inventory& inv = shared->data.inventory;
@@ -132,9 +220,12 @@ inline void localCoopPersonalUiDrawInventory(int slot)
     char line[256];
     snprintf(line, sizeof(line), "P%d SHARED BAG  -> %s HAND", slot + 1, ui.equipHand == HAND_LEFT ? "LEFT" : "RIGHT");
     windowDrawText(ui.inventoryWindow, line, w - 20, 10, 10, _colorTable[992]);
-    windowDrawText(ui.inventoryWindow, "UP/DOWN SELECT  LEFT/RIGHT HAND  A EQUIP  X UNEQUIP  B/BACK CLOSE", w - 20, 10, 31, _colorTable[992]);
+    const char* controls = w >= 500
+        ? "UP/DOWN SELECT  LEFT/RIGHT HAND  A EQUIP  X UNEQUIP  B/BACK CLOSE"
+        : "UP/DOWN ITEM  L/R HAND  A EQUIP  X OFF  B CLOSE";
+    windowDrawText(ui.inventoryWindow, controls, w - 20, 10, 31, _colorTable[992]);
 
-    constexpr int visible = 10;
+    int visible = std::max(4, (h - 74) / 18);
     if (ui.selectedItem < ui.scroll) ui.scroll = ui.selectedItem;
     if (ui.selectedItem >= ui.scroll + visible) ui.scroll = ui.selectedItem - visible + 1;
     int last = std::min(inv.length, ui.scroll + visible);

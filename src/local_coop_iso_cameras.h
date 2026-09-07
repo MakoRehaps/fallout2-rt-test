@@ -136,8 +136,11 @@ inline void localCoopIsoCamerasTick()
     int playerCount = 0;
     for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
         const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        // COOP_STABLE_SPLIT_WITH_PERSONAL_UI_V1
+        // Inventory/character overlays belong to this player's viewport; opening
+        // one must not remove the player from the camera layout and reshuffle the
+        // other players' panes.
         if (player.connected && player.humanOwned && player.actor != nullptr
-            && player.uiMode == LocalCoopUiMode::World
             && (player.actor->flags & OBJECT_HIDDEN) == 0) {
             activeSlots[playerCount++] = slot;
         }
