@@ -278,12 +278,36 @@ function bindStick(id,ax,ay){
  e.addEventListener('pointerup',end);e.addEventListener('pointercancel',end);
 }
 bindStick('ls',0,1);bindStick('rs',2,3);
-$('connect').onclick=async()=>{try{const body=new URLSearchParams({slot:$('slot').value,pin:$('pin').value});
- const r=await fetch('/claim',{method:'POST',body});const j=await r.json();if(!j.ok)throw new Error(j.error||'Unable to connect');
- slot=j.slotIndex;token=j.token;sessionStorage.setItem('phoboiSession',JSON.stringify({slot,token}));$('join').style.display='none';$('pad').style.display='block';controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
+// PHOBOI_NO_REFRESH_JOIN_V1
+// Claiming a shared browser/phone link is two-phase: reserve the slot, then wait
+// until the game thread has actually attached the SDL virtual controller. The old
+// page jumped straight to WS/video and often only worked after a manual refresh.
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function waitForControllerReady(){
+ while(slot>=0&&token){
+  try{
+   const r=await fetch(`/ready?slot=${slot}&token=${token}&nonce=${Date.now()}`,{cache:'no-store'});
+   if(r.status===403)throw new Error('Session expired');
+   if(r.ok){const j=await r.json();if(j.ok&&j.ready)return true}
+  }catch(e){if(String(e&&e.message||e).includes('expired'))throw e}
+  $('msg').textContent=`PLAYER ${slot+1} CONNECTED - JOINING CURRENT GAME...`;
+  await sleep(125);
+ }
+ return false;
+}
+function enterControllerPage(){
+ $('join').style.display='none';$('pad').style.display='block';
+ controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
+}
+$('connect').onclick=async()=>{const button=$('connect');button.disabled=true;try{
+ $('msg').textContent='CONNECTING TO CURRENT GAME...';
+ const body=new URLSearchParams({slot:$('slot').value,pin:$('pin').value});
+ const r=await fetch('/claim',{method:'POST',body,cache:'no-store'});const j=await r.json();if(!j.ok)throw new Error(j.error||'Unable to connect');
+ slot=j.slotIndex;token=j.token;sessionStorage.setItem('phoboiSession',JSON.stringify({slot,token}));
+ await waitForControllerReady();enterControllerPage();
  if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});
  if(screen.orientation?.lock)screen.orientation.lock('landscape').catch(()=>{});
-}catch(e){$('msg').textContent=e.message}};
+}catch(e){$('msg').textContent=e.message||String(e);button.disabled=false}};
 let ws=null,controlTimer=null,controlAttempt=0,controlMode='STARTING';
 let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttpSent=0,decodeBusy=false,pendingFrame=null;
 // PHOBOI_LOW_LATENCY_CONTROLS_V1
@@ -370,8 +394,9 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&slot>=0){
 (async()=>{try{
  const saved=JSON.parse(sessionStorage.getItem('phoboiSession')||'null');if(!saved)return;
  const r=await fetch(`/resume?slot=${saved.slot}&token=${saved.token}`,{cache:'no-store'});const j=await r.json();if(!j.ok)return;
- slot=saved.slot;token=saved.token;$('join').style.display='none';$('pad').style.display='block';controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
-}catch(e){}})();
+ slot=saved.slot;token=saved.token;$('msg').textContent=`PLAYER ${slot+1} - RESTORING CONTROLLER...`;
+ await waitForControllerReady();enterControllerPage();
+}catch(e){sessionStorage.removeItem('phoboiSession');slot=-1;token=0;$('join').style.display='flex';$('pad').style.display='none';$('msg').textContent=e.message||String(e)}})();
 </script></body></html>)PHOBOI";
 }
 
@@ -978,6 +1003,30 @@ void mobileHandleClient(MobileSocket client)
     }
 
     MobileSlotState& state = gMobileSlots[slot];
+
+    // PHOBOI_NO_REFRESH_JOIN_V1
+    // The browser must not guess when the game thread has finished creating its
+    // SDL virtual controller. Polling this endpoint also keeps the reserved slot
+    // alive while a modal/slow frame delays the attach by a few ticks.
+    if (method == "GET" && route == "/ready") {
+        uint32_t token = mobileUnsignedValue(values, "token", 0);
+        if (!state.claimed.load() || token == 0 || token != state.token.load()) {
+            mobileSendResponse(client, "403 Forbidden", "application/json", "{\\\"ok\\\":false,\\\"error\\\":\\\"Session expired\\\"}");
+            return;
+        }
+        state.lastSeen.store(mobileNow());
+        const MobileVirtualDevice& device = gMobileDevices[slot];
+        const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        bool ready = device.deviceIndex >= 0
+            && device.controller != nullptr
+            && player.connected
+            && player.controller == device.controller;
+        std::ostringstream body;
+        body << "{\\\"ok\\\":true,\\\"ready\\\":" << (ready ? "true" : "false")
+             << ",\\\"player\\\":" << slot + 1 << "}";
+        mobileSendResponse(client, "200 OK", "application/json", body.str());
+        return;
+    }
 
     if (method == "GET" && route == "/resume") {
         uint32_t token = mobileUnsignedValue(values, "token", 0);
