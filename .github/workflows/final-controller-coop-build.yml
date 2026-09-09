@@ -1,0 +1,213 @@
+name: Final Controller Co-op Windows Build
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 / Controller-Owned Co-op Debug
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply final regular co-op, controller ownership, phone, ecology, medical, and UI fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Reassert the regular-coop cleanup last. Older build scripts contain
+          # legacy FPS hooks, so the final compiled source must win over them.
+          python tools/patch_regular_coop_cleanup.py
+          python tools/patch_controller_owned_menus.py
+
+          # PhoBoi: orientation-safe transparent controller, browser fallback,
+          # per-device viewport scaling, readable text/video, independent local
+          # zoom, and character-owned slots that survive phone/network loss.
+          python tools/patch_phoboi_landscape_gate.py
+          python tools/patch_phoboi_video_fallback.py
+          python tools/patch_phoboi_adaptive_phone_viewport.py
+          python tools/patch_phoboi_first_paint_landscape.py
+          python tools/patch_phoboi_text_readability.py
+          python tools/patch_phoboi_per_user_zoom.py
+          python tools/patch_phoboi_character_rejoin.py
+
+          # The physical world grid owns a persistent ecology class. Quiet cells
+          # stay empty, wildlife is common, human activity is uncommon, and the
+          # Pip-Boy shows the class for the selected cell.
+          python tools/patch_worldmap_ecology.py
+
+          # Final regression pass replaces legacy key-queued menu actions with
+          # controller-native backends, keeps P1 Pip-Boy only, preserves the
+          # shared bag, hides the live mouse reticle, restores a real Exit Game
+          # action, and removes F1 ravine road maps including old persisted
+          # 56-64 cells/chains.
+          python tools/patch_controller_ui_world_regressions.py
+
+          # Death is a co-op downed/rescue state, never stock game-over. Teammate
+          # Doctor use can revive within 60 seconds; bleedout or -100 HP sends
+          # the whole party to the geographically closest medical settlement.
+          # Treatment consumes available shared caps and persists unpaid cost as
+          # medical debt in the existing save-compatible roster byte.
+          python tools/patch_coop_downed_medical.py
+          python tools/patch_coop_medical_compile_fix.py
+
+          # Escape is intentionally the only live-game keyboard exception: it
+          # exits the application cleanly. VPN/co-op setup retains its broader
+          # keyboard support and is outside this gameplay input gate.
+          python tools/patch_esc_exit_game.py
+
+          # Keep the compatibility marker used by the older validator without
+          # changing the newer P1 controller-owned runtime behavior.
+          $runtime = 'src/local_coop_runtime.h'
+          $text = Get-Content $runtime -Raw
+          if ($text -notmatch 'COOP_SYSTEM_MENU_RUNTIME_V1') {
+            $anchor = '        // COOP_PIPBOY_EDGE_TOGGLE_V2'
+            if (-not $text.Contains($anchor)) { throw 'Pip-Boy controller edge marker missing' }
+            $text = $text.Replace($anchor, "        // COOP_SYSTEM_MENU_RUNTIME_V1`r`n$anchor")
+            Set-Content -Path $runtime -Value $text -NoNewline
+          }
+
+          $required = @(
+            @{ File = 'src/mainmenu.cc'; Marker = 'COOP_CONTROLLER_OWNED_MAIN_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_CONTROLLER_ONLY_SYSTEM_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_CONTROLLER_UI_WORLD_REGRESSIONS_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_P1_SHARED_BAG_MENU_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_P1_DIRECT_PIPBOY_V1' },
+            @{ File = 'src/local_coop_system_menu.h'; Marker = 'COOP_CONTROLLER_EXIT_GAME_V1' },
+            @{ File = 'src/local_coop.h'; Marker = 'COOP_EXIT_APPLICATION_REQUEST_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_EXIT_APPLICATION_CONSUMER_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_ESCAPE_EXIT_GAME_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_NO_GAMEPLAY_MOUSE_RETICLE_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1' },
+            @{ File = 'src/main.cc'; Marker = 'COOP_REGULAR_ISOMETRIC_ONLY_V1' },
+            @{ File = 'src/combat.cc'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/critter.cc'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_DOWNED_MEDICAL_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_CLOSEST_DOCTOR_RESCUE_V2' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_MEDICAL_FEE_MAX_HP_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_P1_DIRECT_PIPBOY_HOTKEY_V1' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_PIPBOY_EDGE_TOGGLE_V2' },
+            @{ File = 'src/local_coop_runtime.h'; Marker = 'COOP_SYSTEM_MENU_RUNTIME_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NONBLOCKING_LANDSCAPE_HINT_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NO_LANDSCAPE_GATE_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_TRANSPARENT_CONTROLLER_OVERLAY_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_RAW_VIDEO_FALLBACK_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_ADAPTIVE_PHONE_VIEWPORT_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_VISUAL_VIEWPORT_SCALE_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_FIRST_PAINT_LANDSCAPE_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_FIRST_PAINT_LAYOUT_BURST_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_READABLE_STREAM_LADDER_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_NATIVE_TEXT_STREAM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_TEXT_READABILITY_V2' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PER_USER_ZOOM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PER_USER_ZOOM_STATUS_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_REJOIN_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_RESUME_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_WS_RECLAIM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CHARACTER_SLOT_STREAM_RECLAIM_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PERSISTENT_REJOIN_TOKEN_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_PERSISTENT_REJOIN_RESTORE_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_RESET_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_RESET_KEYS_V1' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_ROUTE_V5' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_CANONICAL_QUICK_V5' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_IPV4_HTTP2_V5' },
+            @{ File = 'src/local_coop_mobile.cc'; Marker = 'PHOBOI_CLOUDFLARE_PROBE_DIAGNOSTICS_V5' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_CHAIN_NO_REPEAT_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_REGULAR_NO_MOUNTAIN_ENCOUNTERS_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_F1_NO_RAVINE_POOL_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_F1_RAVINE_HARD_REMAP_V1' },
+            @{ File = 'src/unified_world_system.h'; Marker = 'COOP_PIPBOY_ECOLOGY_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_WORLD_ENCOUNTER_ECOLOGY_GATE_V1' },
+            @{ File = 'src/worldmap.cc'; Marker = 'COOP_PHOBOI_ALWAYS_AVAILABLE_V1' },
+            @{ File = 'src/pipboy.cc'; Marker = 'COOP_PIPBOY_ECOLOGY_DISPLAY_V1' }
+          )
+          foreach ($check in $required) {
+            if (-not (Select-String -Path $check.File -Pattern $check.Marker -Quiet)) {
+              throw "Final controller co-op patch missing: $($check.Marker) in $($check.File)"
+            }
+          }
+
+          Write-Host 'Final controller co-op source validation passed.'
+          git diff --check
+          git diff --stat -- src/main.cc src/mainmenu.cc src/combat.cc src/critter.cc src/local_coop.h src/local_coop_runtime.h src/local_coop_system_menu.h src/local_coop_mobile.cc src/unified_world_system.h src/worldmap.cc src/pipboy.cc
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Debug
+        shell: pwsh
+        run: cmake --build build --config Debug --parallel 4
+
+      - name: Upload debug executable and symbols
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallout2-ce-controller-coop-windows-x64-debug
+          path: |
+            build/Debug/fallout2-ce.exe
+            build/Debug/fallout2-ce.pdb
+          retention-days: 7
+
+      - name: Install Inno Setup
+        if: success()
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Download verified Cloudflare tunnel helper
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'installer\cloudflared.exe'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/cloudflare/cloudflared/master/LICENSE' -OutFile 'installer\cloudflared-LICENSE.txt'
+          if (-not (Test-Path 'installer\cloudflared.exe')) { throw 'cloudflared download failed' }
+          if (-not (Test-Path 'installer\cloudflared-LICENSE.txt')) { throw 'cloudflared license download failed' }
+
+      - name: Prepare Freedoom 0.13.0 packaged assets
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = 'freedoom-0.13.0.zip'
+          Invoke-WebRequest -Uri 'https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip' -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59') {
+            throw "Freedoom archive checksum mismatch: $hash"
+          }
+          Expand-Archive -Path $zip -DestinationPath freedoom-stage -Force
+          New-Item -ItemType Directory -Force -Path 'installer\freedoom' | Out-Null
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\freedoom1.wad' 'installer\freedoom\freedoom1.wad' -Force
+          Copy-Item 'freedoom-stage\freedoom-0.13.0\COPYING.txt' 'installer\freedoom\COPYING.txt' -Force
+
+      - name: Build full controller co-op debug installer
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
+          & $iscc installer\UnifiedCoopBeta.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'installer-output\Fallout-Unified-Coop-Beta-Debug-Setup.exe')) {
+            throw 'installer output was not produced'
+          }
+
+      - name: Upload controller co-op debug installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fallout-Unified-Coop-Controller-Beta-Debug-Setup
+          path: installer-output/Fallout-Unified-Coop-Beta-Debug-Setup.exe
+          retention-days: 7

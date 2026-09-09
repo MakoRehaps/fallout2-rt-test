@@ -1,0 +1,39 @@
+name: Materialize Controller-Owned Menus
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - 'tools/patch_controller_owned_menus.py'
+      - '.github/workflows/controller-menu-materialize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply controller-owned menu patch
+        run: python tools/patch_controller_owned_menus.py
+      - name: Verify controller-owned shell
+        run: |
+          grep -q 'COOP_CONTROLLER_OWNED_MAIN_MENU_V1' src/mainmenu.cc
+          grep -q 'COOP_CONTROLLER_ONLY_SYSTEM_MENU_V1' src/local_coop_system_menu.h
+          grep -q 'COOP_P1_CONTROLLER_ONLY_GAMEPLAY_V1' src/main.cc
+      - name: Commit materialized source
+        run: |
+          if git diff --quiet -- src/mainmenu.cc src/local_coop_system_menu.h src/main.cc; then
+            echo 'Controller-owned menus already materialized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/mainmenu.cc src/local_coop_system_menu.h src/main.cc
+          git commit -m 'Use controller-owned menus and P1 gameplay input'
+          git push origin HEAD:fix/no-debug-no-data-copy

@@ -1,0 +1,327 @@
+name: Patch PhoBoi Remote Play
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[phoboi-remote-play]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+      - name: Apply adaptive input and phone stream
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/local_coop_mobile.cc')
+          s = p.read_text(encoding='utf-8')
+
+          if '#include <zlib.h>' not in s:
+              s = s.replace('#include <vector>\n', '#include <vector>\n\n#include <zlib.h>\n')
+          if '#include "svga.h"' not in s:
+              s = s.replace('#include "local_coop.h"\n', '#include "local_coop.h"\n#include "svga.h"\n')
+
+          s = s.replace('constexpr uint64_t kMobileTimeoutMs = 60000;\n', '''constexpr uint64_t kMobileTimeoutMs = 60000;
+constexpr uint64_t kMobileInputNeutralMs = 750;
+constexpr uint64_t kMobileBadLinkNeutralMs = 1400;
+constexpr int kMobileNominalPacketMs = 16;
+''')
+
+          old = '''    std::array<std::atomic<int>, SDL_CONTROLLER_AXIS_MAX> axes;
+    std::atomic<uint32_t> buttons { 0 };
+
+    MobileSlotState()
+    {
+        for (auto& axis : axes) {
+            axis.store(0);
+        }
+        axes[SDL_CONTROLLER_AXIS_TRIGGERLEFT].store(SDL_JOYSTICK_AXIS_MIN);
+        axes[SDL_CONTROLLER_AXIS_TRIGGERRIGHT].store(SDL_JOYSTICK_AXIS_MIN);
+    }'''
+          new = '''    std::array<std::atomic<int>, SDL_CONTROLLER_AXIS_MAX> axes;
+    std::array<int, SDL_CONTROLLER_AXIS_MAX> smoothedAxes {};
+    std::atomic<uint32_t> buttons { 0 };
+    std::atomic<uint32_t> packetSequence { 0 };
+    std::atomic<uint64_t> previousArrival { 0 };
+    std::atomic<int> packetIntervalMs { kMobileNominalPacketMs };
+    std::atomic<int> jitterMs { 0 };
+    std::atomic<int> rttMs { 0 };
+
+    MobileSlotState()
+    {
+        for (auto& axis : axes) {
+            axis.store(0);
+        }
+        for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
+            smoothedAxes[axis] =
+                axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT
+                    ? SDL_JOYSTICK_AXIS_MIN
+                    : 0;
+        }
+        axes[SDL_CONTROLLER_AXIS_TRIGGERLEFT].store(SDL_JOYSTICK_AXIS_MIN);
+        axes[SDL_CONTROLLER_AXIS_TRIGGERRIGHT].store(SDL_JOYSTICK_AXIS_MIN);
+    }'''
+          if old in s:
+              s = s.replace(old, new)
+
+          globals_anchor = 'bool gMobileNoticeShown = false;\n'
+          globals_add = '''bool gMobileNoticeShown = false;
+std::mutex gMobileStreamMutex;
+std::vector<uint8_t> gMobileStreamFrame;
+std::atomic<uint32_t> gMobileStreamSequence { 0 };
+std::atomic<uint64_t> gMobileLastStreamCapture { 0 };
+'''
+          s = s.replace(globals_anchor, globals_add)
+
+          s = s.replace("#pad{display:none;position:fixed;inset:0;background:radial-gradient(circle at center,#183321,#07100b)}", "#pad{display:none;position:fixed;inset:0;background:radial-gradient(circle at center,#183321,#07100b)}#video{position:absolute;left:25vw;top:5vh;width:50vw;height:50vh;object-fit:contain;background:#000;border:1px solid #295f37;image-rendering:auto}")
+          s = s.replace('<div id="pad"><div class="top" id="top">PHOBOI CONTROLLER</div>', '<div id="pad"><canvas id="video" width="480" height="270"></canvas><div class="top" id="top">PHOBOI CONTROLLER</div>')
+          s = s.replace('let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false;', 'let slot=-1,token=0,buttons=0,axes=[0,0,0,0,-32768,-32768],sending=false,seq=0,rtt=0,jitter=0,lastRtt=0,stream=null;')
+
+          old = ''' ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — LOW LATENCY`;navigator.vibrate?.(35)};
+ ws.onclose=()=>{$('top').textContent='RECONNECTING…';if(slot>=0)reconnectTimer=setTimeout(openSocket,700)};
+}'''
+          new = ''' ws.onopen=()=>{$('top').textContent=`PLAYER ${slot+1} — CONNECTED`;navigator.vibrate?.(35);openStream()};
+ ws.onmessage=ev=>{
+  const m=String(ev.data||'').split(',');if(m[0]!=='a'||m.length<3)return;
+  const sent=Number(m[2]);if(!Number.isFinite(sent))return;
+  const sample=Math.max(0,performance.now()-sent),delta=Math.abs(sample-lastRtt);lastRtt=sample;
+  rtt=rtt?Math.round(rtt*.82+sample*.18):Math.round(sample);jitter=jitter?Math.round(jitter*.8+delta*.2):Math.round(delta);
+  const grade=rtt<90&&jitter<25?'GOOD':rtt<220&&jitter<70?'OK':'ROUGH';
+  $('top').textContent=`PLAYER ${slot+1} — ${grade} ${rtt}ms ±${jitter}`;
+ };
+ ws.onclose=()=>{$('top').textContent='RECONNECTING…';if(slot>=0)reconnectTimer=setTimeout(openSocket,700)};
+}
+async function inflateFrame(buf){
+ const u=new Uint8Array(buf);if(u.length<12)return;const dv=new DataView(buf);const w=dv.getUint16(4,true),h=dv.getUint16(6,true);const payload=buf.slice(12);
+ const ds=new DecompressionStream('deflate');const raw=await new Response(new Blob([payload]).stream().pipeThrough(ds)).arrayBuffer();
+ const rgba=new Uint8ClampedArray(raw);if(rgba.length!==w*h*4)return;const c=$('video');if(c.width!==w||c.height!==h){c.width=w;c.height=h}c.getContext('2d').putImageData(new ImageData(rgba,w,h),0,0);
+}
+function openStream(){
+ if(slot<0||!('DecompressionStream'in window))return;const scheme=location.protocol==='https:'?'wss':'ws';stream=new WebSocket(`${scheme}://${location.host}/stream?slot=${slot}&token=${token}`);stream.binaryType='arraybuffer';
+ stream.onmessage=e=>inflateFrame(e.data).catch(()=>{});stream.onclose=()=>{if(slot>=0)setTimeout(openStream,1200)};
+}'''
+          if old in s:
+              s = s.replace(old, new)
+
+          old = ''' const packet=[axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
+ if(ws&&ws.readyState===WebSocket.OPEN){ws.send(packet);return}'''
+          new = ''' const stamp=performance.now();
+ const packet=[++seq,stamp,axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
+ if(ws&&ws.readyState===WebSocket.OPEN){ws.send(packet);return}'''
+          if old in s:
+              s = s.replace(old, new)
+
+          marker = 'bool mobileReadWebSocketText(MobileSocket socket, std::string& text)\n{'
+          helper = r'''bool mobileSendWebSocketText(MobileSocket socket, const std::string& text)
+{
+    if (text.size() > 125) return false;
+    uint8_t header[2] = { 0x81, static_cast<uint8_t>(text.size()) };
+#ifdef _WIN32
+    if (send(socket, reinterpret_cast<const char*>(header), 2, 0) != 2) return false;
+    return send(socket, text.c_str(), static_cast<int>(text.size()), 0) == static_cast<int>(text.size());
+#else
+    if (send(socket, header, 2, 0) != 2) return false;
+    return send(socket, text.c_str(), text.size(), 0) == static_cast<ssize_t>(text.size());
+#endif
+}
+
+bool mobileSendWebSocketBinary(MobileSocket socket, const std::vector<uint8_t>& bytes)
+{
+    if (bytes.empty() || bytes.size() > 1048576) return false;
+    uint8_t header[10] = { 0x82, 0 };
+    size_t headerLength = 0;
+    if (bytes.size() < 126) {
+        header[1] = static_cast<uint8_t>(bytes.size()); headerLength = 2;
+    } else if (bytes.size() <= 65535) {
+        header[1] = 126; header[2] = static_cast<uint8_t>((bytes.size() >> 8) & 0xFF); header[3] = static_cast<uint8_t>(bytes.size() & 0xFF); headerLength = 4;
+    } else {
+        header[1] = 127; uint64_t n = bytes.size(); for (int i = 0; i < 8; i++) header[2 + i] = static_cast<uint8_t>((n >> ((7 - i) * 8)) & 0xFF); headerLength = 10;
+    }
+#ifdef _WIN32
+    if (send(socket, reinterpret_cast<const char*>(header), static_cast<int>(headerLength), 0) != static_cast<int>(headerLength)) return false;
+    return send(socket, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size()), 0) == static_cast<int>(bytes.size());
+#else
+    if (send(socket, header, headerLength, 0) != static_cast<ssize_t>(headerLength)) return false;
+    return send(socket, bytes.data(), bytes.size(), 0) == static_cast<ssize_t>(bytes.size());
+#endif
+}
+
+void mobileRecordArrival(MobileSlotState& state, uint64_t now)
+{
+    uint64_t previous = state.previousArrival.exchange(now); if (previous == 0 || now <= previous) return;
+    int sample = static_cast<int>(std::min<uint64_t>(1000, now - previous)); int oldInterval = state.packetIntervalMs.load(); int interval = (oldInterval * 7 + sample) / 8;
+    state.packetIntervalMs.store(std::max(1, interval)); int deviation = std::abs(sample - interval); int oldJitter = state.jitterMs.load(); state.jitterMs.store((oldJitter * 7 + deviation) / 8);
+}
+
+'''
+          if marker in s and 'mobileSendWebSocketBinary' not in s:
+              s = s.replace(marker, helper + marker)
+
+          old = '''        int lx;
+        int ly;
+        int rx;
+        int ry;
+        int lt;
+        int rt;
+        unsigned int buttons;
+        if (sscanf(
+                message.c_str(),
+                "%d,%d,%d,%d,%d,%d,%u",
+                &lx,
+                &ly,
+                &rx,
+                &ry,
+                &lt,
+                &rt,
+                &buttons)
+            == 7) {
+            state.axes[SDL_CONTROLLER_AXIS_LEFTX].store(lx);'''
+          new = '''        unsigned int sequence = 0;
+        double clientStamp = 0.0;
+        int lx;
+        int ly;
+        int rx;
+        int ry;
+        int lt;
+        int rt;
+        unsigned int buttons;
+        if (sscanf(
+                message.c_str(),
+                "%u,%lf,%d,%d,%d,%d,%d,%d,%u",
+                &sequence,
+                &clientStamp,
+                &lx,
+                &ly,
+                &rx,
+                &ry,
+                &lt,
+                &rt,
+                &buttons)
+            == 9) {
+            uint64_t arrival = mobileNow();
+            mobileRecordArrival(state, arrival);
+            state.packetSequence.store(sequence);
+            state.axes[SDL_CONTROLLER_AXIS_LEFTX].store(lx);'''
+          if old in s:
+              s = s.replace(old, new)
+
+          wspos = s.find('unsigned int sequence = 0;')
+          if wspos >= 0:
+              old = '            state.buttons.store(buttons);\n            state.lastSeen.store(mobileNow());\n        }'
+              new = '            state.buttons.store(buttons);\n            state.lastSeen.store(arrival);\n            std::ostringstream ack; ack << "a," << sequence << "," << clientStamp;\n            if (!mobileSendWebSocketText(socket, ack.str())) break;\n        }'
+              idx = s.find(old, wspos)
+              if idx >= 0: s = s[:idx] + new + s[idx+len(old):]
+
+          stream_marker = 'void mobileResetInput(MobileSlotState& state)\n{'
+          stream_code = r'''void mobileRunStreamWebSocket(MobileSocket socket, const std::string& request, int slot, uint32_t token)
+{
+    std::string key = mobileHeaderValue(request, "Sec-WebSocket-Key"); if (key.empty()) return;
+    auto digest = mobileSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"); std::string accept = mobileBase64(digest.data(), digest.size());
+    std::ostringstream response; response << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " << accept << "\r\n\r\n"; std::string bytes = response.str();
+#ifdef _WIN32
+    send(socket, bytes.c_str(), static_cast<int>(bytes.size()), 0);
+#else
+    send(socket, bytes.c_str(), bytes.size(), 0);
+#endif
+    uint32_t sentSequence = 0;
+    while (gMobileServerRunning.load() && gMobileSlots[slot].claimed.load() && gMobileSlots[slot].token.load() == token) {
+        uint32_t available = gMobileStreamSequence.load();
+        if (available == sentSequence) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+        std::vector<uint8_t> frame; { std::lock_guard<std::mutex> lock(gMobileStreamMutex); frame = gMobileStreamFrame; }
+        if (!frame.empty() && !mobileSendWebSocketBinary(socket, frame)) break; sentSequence = available;
+    }
+}
+
+void mobileCaptureStreamFrame(uint64_t now)
+{
+    if (gSdlSurface == nullptr) return;
+    bool any = false; int worstJitter = 0; int worstInterval = 0;
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) if (gMobileSlots[slot].claimed.load()) { any = true; worstJitter = std::max(worstJitter, gMobileSlots[slot].jitterMs.load()); worstInterval = std::max(worstInterval, gMobileSlots[slot].packetIntervalMs.load()); }
+    if (!any) return;
+    int width = 480, height = 270, fps = 12;
+    if (worstJitter > 70 || worstInterval > 90) { width = 320; height = 180; fps = 5; } else if (worstJitter > 30 || worstInterval > 45) { width = 400; height = 225; fps = 8; }
+    uint64_t previous = gMobileLastStreamCapture.load(); if (previous != 0 && now - previous < static_cast<uint64_t>(1000 / fps)) return; gMobileLastStreamCapture.store(now);
+    SDL_Surface* scaled = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32); if (scaled == nullptr) return;
+    SDL_Rect dst { 0, 0, width, height }; if (SDL_BlitScaled(gSdlSurface, nullptr, scaled, &dst) != 0) { SDL_FreeSurface(scaled); return; }
+    size_t rawSize = static_cast<size_t>(width) * height * 4; std::vector<uint8_t> raw(rawSize); uint8_t* src = static_cast<uint8_t*>(scaled->pixels);
+    for (int y = 0; y < height; y++) std::memcpy(raw.data() + static_cast<size_t>(y) * width * 4, src + static_cast<size_t>(y) * scaled->pitch, static_cast<size_t>(width) * 4);
+    SDL_FreeSurface(scaled);
+    uLongf compressedSize = compressBound(static_cast<uLong>(raw.size())); std::vector<uint8_t> frame(12 + compressedSize); frame[0]='P'; frame[1]='H'; frame[2]='O'; frame[3]='B'; frame[4]=width&0xFF; frame[5]=(width>>8)&0xFF; frame[6]=height&0xFF; frame[7]=(height>>8)&0xFF; uint32_t sequence = gMobileStreamSequence.load()+1; frame[8]=sequence&0xFF; frame[9]=(sequence>>8)&0xFF; frame[10]=(sequence>>16)&0xFF; frame[11]=(sequence>>24)&0xFF;
+    if (compress2(frame.data()+12, &compressedSize, raw.data(), static_cast<uLong>(raw.size()), Z_BEST_SPEED) != Z_OK) return; frame.resize(12 + compressedSize);
+    { std::lock_guard<std::mutex> lock(gMobileStreamMutex); gMobileStreamFrame.swap(frame); } gMobileStreamSequence.store(sequence);
+}
+
+'''
+          if stream_marker in s and 'mobileCaptureStreamFrame' not in s:
+              s = s.replace(stream_marker, stream_code + stream_marker)
+
+          route_anchor = '''    if (method == "GET" && route == "/ws") {
+        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        if (!state.claimed.load() || token == 0 || token != state.token.load()) {
+            mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
+            return;
+        }
+        mobileRunWebSocket(client, request, slot, token);
+        return;
+    }
+'''
+          route_new = route_anchor + '''
+    if (method == "GET" && route == "/stream") {
+        uint32_t token = static_cast<uint32_t>(mobileValue(values, "token", 0));
+        if (!state.claimed.load() || token == 0 || token != state.token.load()) {
+            mobileSendResponse(client, "403 Forbidden", "text/plain", "Session expired");
+            return;
+        }
+        mobileRunStreamWebSocket(client, request, slot, token);
+        return;
+    }
+'''
+          if route_anchor in s and 'route == "/stream"' not in s:
+              s = s.replace(route_anchor, route_new)
+
+          old = '''    for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
+        int value = state.axes[axis].load();
+        value = std::max(static_cast<int>(SDL_JOYSTICK_AXIS_MIN), std::min(static_cast<int>(SDL_JOYSTICK_AXIS_MAX), value));
+        SDL_JoystickSetVirtualAxis(device.joystick, axis, static_cast<Sint16>(value));
+    }'''
+          new = '''    int jitter = state.jitterMs.load();
+    int interval = state.packetIntervalMs.load();
+    int smoothingDivisor = (jitter > 70 || interval > 90) ? 4 : ((jitter > 30 || interval > 45) ? 3 : 2);
+    for (int axis = 0; axis < SDL_CONTROLLER_AXIS_MAX; axis++) {
+        int target = state.axes[axis].load();
+        target = std::max(static_cast<int>(SDL_JOYSTICK_AXIS_MIN), std::min(static_cast<int>(SDL_JOYSTICK_AXIS_MAX), target));
+        int current = state.smoothedAxes[axis];
+        int value = current + (target - current) / smoothingDivisor;
+        if (std::abs(target - current) < 512) value = target;
+        state.smoothedAxes[axis] = value;
+        SDL_JoystickSetVirtualAxis(device.joystick, axis, static_cast<Sint16>(value));
+    }'''
+          if old in s:
+              s = s.replace(old, new)
+
+          s = s.replace('if (state.claimed.load() && inputAge > 250) {', 'uint64_t neutralAfter = (state.jitterMs.load() > 70 || state.packetIntervalMs.load() > 90) ? kMobileBadLinkNeutralMs : kMobileInputNeutralMs;\n        if (state.claimed.load() && inputAge > neutralAfter) {')
+          s = s.replace('// Keep the player\'s reservation for sixty seconds, but neutralize the\n            // virtual pad almost immediately.', '// Keep the player\'s reservation for sixty seconds. Neutralization is\n            // adaptive so very high-latency links do not get mistaken for disconnects.')
+
+          tick_anchor = '    SDL_JoystickUpdate();\n\n    if (gMobileHostWindow != -1'
+          if tick_anchor in s:
+              s = s.replace(tick_anchor, '    SDL_JoystickUpdate();\n    mobileCaptureStreamFrame(now);\n\n    if (gMobileHostWindow != -1')
+
+          p.write_text(s, encoding='utf-8')
+
+      - name: Remove patch workflow
+        run: rm .github/workflows/patch-phoboi-remote-play.yml
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_mobile.cc .github/workflows/patch-phoboi-remote-play.yml
+          git commit -m "Add adaptive PhoBoi remote play [phoboi-remote-play]"
+          git push origin HEAD:fix/no-debug-no-data-copy

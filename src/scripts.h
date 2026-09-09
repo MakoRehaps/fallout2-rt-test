@@ -3,7 +3,9 @@
 
 #include "combat_defs.h"
 #include "db.h"
+#include "debug.h"
 #include "interpreter.h"
+#include "local_coop_danger.h"
 #include "obj_types.h"
 
 namespace fallout {
@@ -14,13 +16,8 @@ namespace fallout {
 #define SCRIPT_FLAG_0x08 (0x08)
 #define SCRIPT_FLAG_0x10 (0x10)
 
-// 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_HOUR 36000
-
-// 24 * 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_DAY (864000)
-
-// 365 * 24 * 60 * 60 * 10
 #define GAME_TIME_TICKS_PER_YEAR (315360000)
 
 typedef enum ScriptRequests {
@@ -38,11 +35,11 @@ typedef enum ScriptRequests {
 } ScriptRequests;
 
 typedef enum ScriptType {
-    SCRIPT_TYPE_SYSTEM, // s_system
-    SCRIPT_TYPE_SPATIAL, // s_spatial
-    SCRIPT_TYPE_TIMED, // s_time
-    SCRIPT_TYPE_ITEM, // s_item
-    SCRIPT_TYPE_CRITTER, // s_critter
+    SCRIPT_TYPE_SYSTEM,
+    SCRIPT_TYPE_SPATIAL,
+    SCRIPT_TYPE_TIMED,
+    SCRIPT_TYPE_ITEM,
+    SCRIPT_TYPE_CRITTER,
     SCRIPT_TYPE_COUNT,
 } ScriptType;
 
@@ -56,8 +53,8 @@ typedef enum ScriptProc {
     SCRIPT_PROC_USE = 6,
     SCRIPT_PROC_USE_OBJ_ON = 7,
     SCRIPT_PROC_USE_SKILL_ON = 8,
-    SCRIPT_PROC_9 = 9, // use_ad_on_proc
-    SCRIPT_PROC_10 = 10, // use_disad_on_proc
+    SCRIPT_PROC_9 = 9,
+    SCRIPT_PROC_10 = 10,
     SCRIPT_PROC_TALK = 11,
     SCRIPT_PROC_CRITTER = 12,
     SCRIPT_PROC_COMBAT = 13,
@@ -66,8 +63,8 @@ typedef enum ScriptProc {
     SCRIPT_PROC_MAP_EXIT = 16,
     SCRIPT_PROC_CREATE = 17,
     SCRIPT_PROC_DESTROY = 18,
-    SCRIPT_PROC_19 = 19, // barter_init_proc
-    SCRIPT_PROC_20 = 20, // barter_proc
+    SCRIPT_PROC_19 = 19,
+    SCRIPT_PROC_20 = 20,
     SCRIPT_PROC_LOOK_AT = 21,
     SCRIPT_PROC_TIMED = 22,
     SCRIPT_PROC_MAP_UPDATE = 23,
@@ -79,56 +76,28 @@ typedef enum ScriptProc {
 } ScriptProc;
 
 typedef struct Script {
-    // scr_id
     int sid;
-
-    // scr_next
     int field_4;
-
     union {
         struct {
-            // scr_udata.sp.built_tile
             int built_tile;
-            // scr_udata.sp.radius
             int radius;
         } sp;
         struct {
-            // scr_udata.tm.time
             int time;
         } tm;
     };
-
-    // scr_flags
     int flags;
-
-    // scr_script_idx
     int field_14;
-
     Program* program;
-
-    // scr_oid
     int field_1C;
-
-    // scr_local_var_offset
     int localVarsOffset;
-
-    // scr_num_local_vars
     int localVarsCount;
-
-    // return value?
     int field_28;
-
-    // Currently executed action.
-    //
-    // See [opGetScriptAction].
     int action;
     int fixedParam;
     Object* owner;
-
-    // source_obj
     Object* source;
-
-    // target_obj
     Object* target;
     int actionBeingUsed;
     int scriptOverrides;
@@ -143,7 +112,6 @@ typedef struct Script {
     int field_D4;
     int field_D8;
     int field_DC;
-
     Object* overriddenSelf;
 } Script;
 
@@ -229,6 +197,74 @@ int scriptSetLocalVar(int sid, int var, ProgramValue& value);
 bool _scr_end_combat();
 int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation);
 
+// Combat requests become realtime danger/AI engagements instead of queued
+// SCRIPT_REQUEST_COMBAT -> `_combat()` transitions.
+using ScriptCombatRequestRuntimeHandler = int (*)(CombatStartData* combat);
+inline ScriptCombatRequestRuntimeHandler gScriptCombatRequestRuntimeHandler = nullptr;
+
+inline int localCoopScriptsRequestCombatDispatch(CombatStartData* combat)
+{
+    if (gScriptCombatRequestRuntimeHandler != nullptr) {
+        return gScriptCombatRequestRuntimeHandler(combat);
+    }
+    return scriptsRequestCombat(combat);
+}
+
+inline void localCoopScriptsRequestCombatLockedDispatch(CombatStartData* combat)
+{
+    if (gScriptCombatRequestRuntimeHandler != nullptr) {
+        gScriptCombatRequestRuntimeHandler(combat);
+        return;
+    }
+    _scripts_request_combat_locked(combat);
+}
+
+inline void localCoopScriptsRequestTownMapDispatch()
+{
+    debugPrint(
+        "[COOP MAP EXIT] town-map request danger=%d hostiles=%d\n",
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
+    scripts_request_townmap();
+}
+
+inline void localCoopScriptsRequestWorldMapDispatch()
+{
+    // Realtime danger is not Fallout's turn-based combat mode. Never swallow
+    // an original exit request: the exit grid generally fires only once.
+    debugPrint(
+        "[COOP MAP EXIT] world-road request danger=%d hostiles=%d\n",
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
+    scriptsRequestWorldMap();
+}
+
+inline int localCoopScriptsRequestElevatorDispatch(Object* object, int elevator)
+{
+    debugPrint(
+        "[COOP MAP EXIT] elevator=%d danger=%d hostiles=%d\n",
+        elevator,
+        gLocalCoopDangerActive ? 1 : 0,
+        gLocalCoopDangerLiveHostiles);
+    return scriptsRequestElevator(object, elevator);
+}
+
 } // namespace fallout
+
+// interpreter_extra.cc defines this marker before scripts.h. Redirect the
+// script opcodes there while leaving scripts.cc's stock function definitions
+// untouched as backend fallbacks for non-co-op paths.
+#if defined(LOCAL_COOP_INTERPRETER_EXTRA_TRANSLATION_UNIT)
+#define scriptsRequestCombat localCoopScriptsRequestCombatDispatch
+#define _scripts_request_combat_locked localCoopScriptsRequestCombatLockedDispatch
+#define scripts_request_townmap localCoopScriptsRequestTownMapDispatch
+#define scriptsRequestWorldMap localCoopScriptsRequestWorldMapDispatch
+#define scriptsRequestElevator localCoopScriptsRequestElevatorDispatch
+#endif
+
+#ifdef LOCAL_COOP_F1_SCRIPT_WORLDMAP_PROFILE
+#include "unified_worldmap_profile.h"
+#include "unified_worldmap_state_profile.h"
+#endif
 
 #endif /* SCRIPTS_H */

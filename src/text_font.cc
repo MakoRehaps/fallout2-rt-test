@@ -7,33 +7,22 @@
 #include "db.h"
 #include "memory.h"
 #include "platform_compat.h"
+#include "unified_fallout1_dat1_guard.h"
 
 namespace fallout {
 
-// The maximum number of text fonts.
 #define TEXT_FONT_MAX (10)
-
-// The maximum number of font managers.
 #define FONT_MANAGER_MAX (10)
 
 typedef struct TextFontGlyph {
-    // The width of the glyph in pixels.
     int width;
-
-    // Data offset into [TextFont.data].
     int dataOffset;
 } TextFontGlyph;
 
 typedef struct TextFontDescriptor {
-    // The number of glyphs in the font.
     int glyphCount;
-
-    // The height of the font.
     int lineHeight;
-
-    // Horizontal spacing between characters in pixels.
     int letterSpacing;
-
     TextFontGlyph* glyphs;
     unsigned char* data;
 } TextFontDescriptor;
@@ -49,7 +38,6 @@ static int textFontGetLetterSpacingImpl();
 static int textFontGetBufferSizeImpl(const char* string);
 static int textFontGetMonospacedCharacterWidthImpl();
 
-// 0x4D5530
 FontManager gTextFontManager = {
     0,
     9,
@@ -64,46 +52,21 @@ FontManager gTextFontManager = {
     textFontGetMonospacedCharacterWidthImpl,
 };
 
-// 0x51E3B0
 int gCurrentFont = -1;
-
-// 0x51E3B4
 int gFontManagersCount = 0;
-
-// 0x51E3B8
 FontManagerDrawTextProc* fontDrawText = nullptr;
-
-// 0x51E3BC
 FontManagerGetLineHeightProc* fontGetLineHeight = nullptr;
-
-// 0x51E3C0
 FontManagerGetStringWidthProc* fontGetStringWidth = nullptr;
-
-// 0x51E3C4
 FontManagerGetCharacterWidthProc* fontGetCharacterWidth = nullptr;
-
-// 0x51E3C8
 FontManagerGetMonospacedStringWidthProc* fontGetMonospacedStringWidth = nullptr;
-
-// 0x51E3CC
 FontManagerGetLetterSpacingProc* fontGetLetterSpacing = nullptr;
-
-// 0x51E3D0
 FontManagerGetBufferSizeProc* fontGetBufferSize = nullptr;
-
-// 0x51E3D4
 FontManagerGetMonospacedCharacterWidth* fontGetMonospacedCharacterWidth = nullptr;
 
-// 0x6ADB08
 static TextFontDescriptor gTextFontDescriptors[TEXT_FONT_MAX];
-
-// 0x6ADBD0
 static FontManager gFontManagers[FONT_MANAGER_MAX];
-
-// 0x6ADD88
 static TextFontDescriptor* gCurrentTextFontDescriptor;
 
-// 0x4D555C
 int textFontsInit()
 {
     int currentFont = -1;
@@ -114,10 +77,8 @@ int textFontsInit()
     for (int font = 0; font < TEXT_FONT_MAX; font++) {
         if (textFontLoad(font) == -1) {
             gTextFontDescriptors[font].glyphCount = 0;
-        } else {
-            if (currentFont == -1) {
-                currentFont = font;
-            }
+        } else if (currentFont == -1) {
+            currentFont = font;
         }
     }
 
@@ -130,11 +91,9 @@ int textFontsInit()
     }
 
     fontSetCurrent(currentFont);
-
     return 0;
 }
 
-// 0x4D55CC
 void textFontsExit()
 {
     for (int index = 0; index < TEXT_FONT_MAX; index++) {
@@ -146,7 +105,6 @@ void textFontsExit()
     }
 }
 
-// 0x4D55FC
 int textFontLoad(int font)
 {
     int rc = -1;
@@ -154,20 +112,26 @@ int textFontLoad(int font)
     char path[COMPAT_MAX_PATH];
     snprintf(path, sizeof(path), "font%d.fon", font);
 
-    // NOTE: Original code is slightly different. It uses deep nesting and
-    // unwinds everything from the point of failure.
     TextFontDescriptor* textFontDescriptor = &(gTextFontDescriptors[font]);
     textFontDescriptor->data = nullptr;
     textFontDescriptor->glyphs = nullptr;
 
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        unifiedFallout1StartupTrace("FONT0 load: resolving %s through xfile search chain", path);
+    }
+
     File* stream = fileOpen(path, "rb");
-    int dataSize;
+    int dataSize = 0;
     if (stream == nullptr) {
+        if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+            unifiedFallout1StartupTrace("FONT0 load failed: fileOpen(%s) returned null", path);
+        }
         goto out;
     }
 
-    // NOTE: Original code reads entire descriptor in one go. This does not work
-    // in x64 because of the two pointers.
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        unifiedFallout1StartupTrace("FONT0 stream opened successfully");
+    }
 
     if (fileRead(&(textFontDescriptor->glyphCount), 4, 1, stream) != 1) goto out;
     if (fileRead(&(textFontDescriptor->lineHeight), 4, 1, stream) != 1) goto out;
@@ -179,6 +143,8 @@ int textFontLoad(int font)
     int dataPtr;
     if (fileRead(&dataPtr, 4, 1, stream) != 1) goto out;
 
+    if (textFontDescriptor->glyphCount <= 0) goto out;
+
     textFontDescriptor->glyphs = (TextFontGlyph*)internal_malloc(textFontDescriptor->glyphCount * sizeof(TextFontGlyph));
     if (textFontDescriptor->glyphs == nullptr) {
         goto out;
@@ -189,6 +155,8 @@ int textFontLoad(int font)
     }
 
     dataSize = textFontDescriptor->lineHeight * ((textFontDescriptor->glyphs[textFontDescriptor->glyphCount - 1].width + 7) >> 3) + textFontDescriptor->glyphs[textFontDescriptor->glyphCount - 1].dataOffset;
+    if (dataSize <= 0) goto out;
+
     textFontDescriptor->data = (unsigned char*)internal_malloc(dataSize);
     if (textFontDescriptor->data == nullptr) {
         goto out;
@@ -201,6 +169,23 @@ int textFontLoad(int font)
     rc = 0;
 
 out:
+    if (font == 0 && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        if (rc == 0) {
+            unifiedFallout1StartupTrace(
+                "FONT0 parsed: glyphs=%d height=%d spacing=%d data=%d",
+                textFontDescriptor->glyphCount,
+                textFontDescriptor->lineHeight,
+                textFontDescriptor->letterSpacing,
+                dataSize);
+        } else if (stream != nullptr) {
+            unifiedFallout1StartupTrace(
+                "FONT0 parse failed: glyphs=%d height=%d spacing=%d data=%d",
+                textFontDescriptor->glyphCount,
+                textFontDescriptor->lineHeight,
+                textFontDescriptor->letterSpacing,
+                dataSize);
+        }
+    }
 
     if (rc != 0) {
         if (textFontDescriptor->data != nullptr) {
@@ -221,7 +206,6 @@ out:
     return rc;
 }
 
-// 0x4D5780
 int fontManagerAdd(FontManager* fontManager)
 {
     if (fontManager == nullptr) {
@@ -232,7 +216,6 @@ int fontManagerAdd(FontManager* fontManager)
         return -1;
     }
 
-    // Check if a font manager exists for any font in the specified range.
     for (int index = fontManager->minFont; index < fontManager->maxFont; index++) {
         FontManager* existingFontManager;
         if (fontManagerFind(index, &existingFontManager)) {
@@ -242,11 +225,9 @@ int fontManagerAdd(FontManager* fontManager)
 
     memcpy(&(gFontManagers[gFontManagersCount]), fontManager, sizeof(*fontManager));
     gFontManagersCount++;
-
     return 0;
 }
 
-// 0x4D58AC
 static void textFontSetCurrentImpl(int font)
 {
     if (font >= TEXT_FONT_MAX) {
@@ -261,13 +242,11 @@ static void textFontSetCurrentImpl(int font)
     gCurrentTextFontDescriptor = textFontDescriptor;
 }
 
-// 0x4D58D4
 int fontGetCurrent()
 {
     return gCurrentFont;
 }
 
-// 0x4D58DC
 void fontSetCurrent(int font)
 {
     FontManager* fontManager;
@@ -283,12 +262,10 @@ void fontSetCurrent(int font)
         fontGetMonospacedCharacterWidth = fontManager->getMonospacedCharacterWidthProc;
 
         gCurrentFont = font;
-
         fontManager->setCurrentProc(font);
     }
 }
 
-// 0x4D595C
 static bool fontManagerFind(int font, FontManager** fontManagerPtr)
 {
     for (int index = 0; index < gFontManagersCount; index++) {
@@ -302,7 +279,6 @@ static bool fontManagerFind(int font, FontManager** fontManagerPtr)
     return false;
 }
 
-// 0x4D59B0
 static void textFontDrawImpl(unsigned char* buf, const char* string, int length, int pitch, int color)
 {
     if ((color & FONT_SHADOW) != 0) {
@@ -317,9 +293,9 @@ static void textFontDrawImpl(unsigned char* buf, const char* string, int length,
 
     unsigned char* ptr = buf;
     while (*string != '\0') {
-        char ch = *string++;
+        unsigned char ch = static_cast<unsigned char>(*string++);
         if (ch < gCurrentTextFontDescriptor->glyphCount) {
-            TextFontGlyph* glyph = &(gCurrentTextFontDescriptor->glyphs[ch & 0xFF]);
+            TextFontGlyph* glyph = &(gCurrentTextFontDescriptor->glyphs[ch]);
 
             unsigned char* end;
             if ((color & FONT_MONO) != 0) {
@@ -358,7 +334,6 @@ static void textFontDrawImpl(unsigned char* buf, const char* string, int length,
     }
 
     if ((color & FONT_UNDERLINE) != 0) {
-        // TODO: Probably additional -1 present, check.
         int length = ptr - buf;
         unsigned char* underlinePtr = buf + pitch * (gCurrentTextFontDescriptor->lineHeight - 1);
         for (int pix = 0; pix < length; pix++) {
@@ -367,53 +342,45 @@ static void textFontDrawImpl(unsigned char* buf, const char* string, int length,
     }
 }
 
-// 0x4D5B54
 static int textFontGetLineHeightImpl()
 {
     return gCurrentTextFontDescriptor->lineHeight;
 }
 
-// 0x4D5B60
 static int textFontGeStringWidthImpl(const char* string)
 {
     int width = 0;
 
-    const char* ch = string;
-    while (*ch != '\0') {
-        if (*ch < gCurrentTextFontDescriptor->glyphCount) {
-            width += gCurrentTextFontDescriptor->letterSpacing + gCurrentTextFontDescriptor->glyphs[*ch & 0xFF].width;
+    while (*string != '\0') {
+        unsigned char ch = static_cast<unsigned char>(*string++);
+        if (ch < gCurrentTextFontDescriptor->glyphCount) {
+            width += gCurrentTextFontDescriptor->letterSpacing + gCurrentTextFontDescriptor->glyphs[ch].width;
         }
-        ch++;
     }
 
     return width;
 }
 
-// 0x4D5BA4
 static int textFontGetCharacterWidthImpl(int ch)
 {
     return gCurrentTextFontDescriptor->glyphs[ch & 0xFF].width;
 }
 
-// 0x4D5BB8
 static int textFontGetMonospacedStringWidthImpl(const char* string)
 {
     return fontGetMonospacedCharacterWidth() * strlen(string);
 }
 
-// 0x4D5BD8
 static int textFontGetLetterSpacingImpl()
 {
     return gCurrentTextFontDescriptor->letterSpacing;
 }
 
-// 0x4D5BE4
 static int textFontGetBufferSizeImpl(const char* string)
 {
     return fontGetStringWidth(string) * fontGetLineHeight();
 }
 
-// 0x4D5BF8
 static int textFontGetMonospacedCharacterWidthImpl()
 {
     int width = 0;

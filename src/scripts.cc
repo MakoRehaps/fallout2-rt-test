@@ -39,6 +39,7 @@
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
+#include "unified_campaign.h"
 
 namespace fallout {
 
@@ -437,6 +438,18 @@ int gameTimeEventProcess(Object* obj, void* data)
 // 0x4A3690
 int _scriptsCheckGameEvents(int* moviePtr, int window)
 {
+    // UNIFIED_QUEST_PROFILE_ISOLATION_V1
+    // This function is Fallout 2's Arroyo/timed-quest checker. Its GVAR enum
+    // values are not meaningful in Fallout 1 and can alias unrelated F1 quest
+    // globals. F1 owns its timed world events through the dedicated F1 event
+    // adapter, so never evaluate Fallout 2 quest state while F1 is active.
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        if (moviePtr != nullptr) {
+            *moviePtr = -1;
+        }
+        return 0;
+    }
+
     int movie = -1;
     int movieFlags = GAME_MOVIE_FADE_IN | GAME_MOVIE_FADE_OUT | GAME_MOVIE_PAUSE_MUSIC;
     bool endgame = false;

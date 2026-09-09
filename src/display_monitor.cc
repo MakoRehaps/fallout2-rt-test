@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <fstream>
+#include <string>
 
 #include "art.h"
 #include "color.h"
@@ -229,6 +230,19 @@ void displayMonitorExit()
 }
 
 // 0x43186C
+void displayMonitorAddMessage(const char* string)
+{
+    if (string == nullptr) {
+        return;
+    }
+
+    // The stock line wrapper temporarily replaces spaces with NUL terminators.
+    // Keep the original mutable overload for engine callbacks, while routing
+    // immutable storage through a private writable copy.
+    std::string mutableString(string);
+    displayMonitorAddMessage(mutableString.data());
+}
+
 void displayMonitorAddMessage(char* str)
 {
     if (!gDisplayMonitorInitialized) {

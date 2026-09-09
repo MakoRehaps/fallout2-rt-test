@@ -13,6 +13,12 @@ extern unsigned int gCombatState;
 
 extern int _combat_free_move;
 
+// Realtime co-op can consume requests to enter Fallout's legacy turn loop.
+// Returning true means the caller's combat-start request was converted into
+// realtime danger/AI state and `_combat` must not switch game modes.
+using CombatStartRuntimeHandler = bool (*)(CombatStartData* csd);
+inline CombatStartRuntimeHandler gCombatStartRuntimeHandler = nullptr;
+
 int combatInit();
 void combatReset();
 void combatExit();

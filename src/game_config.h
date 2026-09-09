@@ -3,6 +3,10 @@
 
 #include "config.h"
 
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SETTINGS
+#include "unified_campaign.h"
+#endif
+
 namespace fallout {
 
 #define DEFAULT_GAME_CONFIG_FILE_NAME "fallout2.cfg"
@@ -121,6 +125,59 @@ extern char gGameConfigFilePath[];
 bool gameConfigInit(bool isMapper, int argc, char** argv);
 bool gameConfigSave();
 bool gameConfigExit(bool shouldSave);
+
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SETTINGS
+inline bool localCoopUnifiedProfileGameConfigInit(bool isMapper, int argc, char** argv)
+{
+    bool initialized = gameConfigInit(isMapper, argc, argv);
+    if (!initialized || unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        return initialized;
+    }
+
+    // Fallout 1 and Fallout 2 use the same core archive/patch layout. Force the
+    // selected F1 installation paths after Fallout 2's config has been parsed,
+    // so a stale fallout2.cfg beside the executable cannot silently send F1
+    // mode back to the Fallout 2 data files.
+    std::string masterDat = unifiedCampaignResolvePath("master.dat");
+    std::string masterPatches = unifiedCampaignResolvePath("data");
+    std::string critterDat = unifiedCampaignResolvePath("critter.dat");
+    std::string critterPatches = unifiedCampaignResolvePath("data");
+    std::string music = unifiedCampaignResolvePath("sound/music/");
+
+    configSetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_DAT_KEY, masterDat.c_str());
+    configSetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, masterPatches.c_str());
+    configSetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_DAT_KEY, critterDat.c_str());
+    configSetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_PATCHES_KEY, critterPatches.c_str());
+    configSetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_PATH1_KEY, music.c_str());
+    configSetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_PATH2_KEY, music.c_str());
+
+    return true;
+}
+
+inline bool localCoopUnifiedProfileGameConfigSave()
+{
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        // Until the unified engine owns a dedicated profile config, never write
+        // F1 root paths into the user's Fallout 2 configuration file.
+        return true;
+    }
+
+    return gameConfigSave();
+}
+
+inline bool localCoopUnifiedProfileGameConfigExit(bool shouldSave)
+{
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1) {
+        shouldSave = false;
+    }
+
+    return gameConfigExit(shouldSave);
+}
+
+#define gameConfigInit localCoopUnifiedProfileGameConfigInit
+#define gameConfigSave localCoopUnifiedProfileGameConfigSave
+#define gameConfigExit localCoopUnifiedProfileGameConfigExit
+#endif
 
 } // namespace fallout
 

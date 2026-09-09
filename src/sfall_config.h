@@ -3,6 +3,11 @@
 
 #include "config.h"
 
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SFALL
+#include "unified_campaign.h"
+#include "game_movie.h"
+#endif
+
 namespace fallout {
 
 #define SFALL_CONFIG_FILE_NAME "ddraw.ini"
@@ -86,6 +91,40 @@ extern Config gSfallConfig;
 
 bool sfallConfigInit(int argc, char** argv);
 void sfallConfigExit();
+
+#ifdef LOCAL_COOP_UNIFIED_PROFILE_SFALL
+inline bool localCoopUnifiedProfileSfallConfigInit(int argc, char** argv)
+{
+    bool initialized = sfallConfigInit(argc, argv);
+    if (!initialized || unifiedCampaignGetActiveGame() != UnifiedGameId::Fallout1) {
+        return initialized;
+    }
+
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_YEAR, 2161);
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_MONTH, 11);
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_START_DAY, 4);
+    configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_STARTING_MAP_KEY, "V13Ent.map");
+
+    // Keep F1 on the menu while its original movie table is being ported.
+    // F2's MOVIE_ELDER slot is not Fallout 1's new-game cutscene.
+    configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_SKIP_OPENING_MOVIES_KEY, 1);
+
+    return true;
+}
+
+inline int localCoopUnifiedProfileGameMoviePlay(int movie, int flags)
+{
+    if (unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1 && movie == MOVIE_ELDER) {
+        debugPrint("\nF1 new game: skipping F2-only MOVIE_ELDER during compatibility bring-up\n");
+        return 0;
+    }
+
+    return gameMoviePlay(movie, flags);
+}
+
+#define sfallConfigInit localCoopUnifiedProfileSfallConfigInit
+#define gameMoviePlay localCoopUnifiedProfileGameMoviePlay
+#endif
 
 } // namespace fallout
 

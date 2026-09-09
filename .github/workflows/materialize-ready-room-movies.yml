@@ -1,0 +1,49 @@
+name: Materialize Ready Room and Original Movies
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - 'tools/patch_ready_room_sex_host_kick.py'
+      - 'tools/patch_unified_movie_routing.py'
+      - '.github/workflows/materialize-ready-room-movies.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply ready-room and movie fixes
+        run: |
+          python tools/patch_ready_room_sex_host_kick.py
+          python tools/patch_unified_movie_routing.py
+
+      - name: Validate source contracts
+        run: |
+          grep -q 'COOP_READY_ROOM_SEX_AND_HOST_KICK_V1' src/local_coop_group_room.h
+          grep -q 'COOP_READY_ROOM_HOST_KICK_MOBILE_V1' src/local_coop_mobile.cc
+          grep -q 'localCoopMobileKickSlot' src/local_coop_mobile.h
+          grep -q 'UNIFIED_PROFILE_MOVIE_ROUTING_V1' src/game_movie.cc
+          grep -q 'UNIFIED_ORIGINAL_MOVIE_TIMING_V1' src/main.cc
+          grep -q 'gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);' src/main.cc
+          git diff --check
+
+      - name: Commit materialized source
+        run: |
+          if git diff --quiet -- src/local_coop_group_room.h src/local_coop_mobile.h src/local_coop_mobile.cc src/game_movie.cc src/main.cc; then
+            echo 'Ready-room and movie source already materialized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/local_coop_group_room.h src/local_coop_mobile.h src/local_coop_mobile.cc src/game_movie.cc src/main.cc
+          git commit -m 'Add host-managed ready room and original movie routing'
+          git push origin HEAD:fix/no-debug-no-data-copy

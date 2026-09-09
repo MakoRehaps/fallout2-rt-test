@@ -1,0 +1,40 @@
+name: Materialize Co-op Post-load Spawn
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+    paths:
+      - tools/patch_coop_postload_spawn.py
+      - .github/workflows/materialize-coop-postload-spawn.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply direct post-load co-op spawn patch
+        run: python tools/patch_coop_postload_spawn.py
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          if git diff --quiet -- src/main.cc; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main.cc
+          git commit -m "Spawn ready-room co-op players immediately after map load"
+          git push origin HEAD:fix/no-debug-no-data-copy

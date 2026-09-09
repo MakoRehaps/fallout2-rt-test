@@ -33,6 +33,7 @@ SDL_Surface* gSdlSurface = nullptr;
 SDL_Renderer* gSdlRenderer = nullptr;
 SDL_Texture* gSdlTexture = nullptr;
 SDL_Surface* gSdlTextureSurface = nullptr;
+SdlRenderOverlayProc gSdlRenderOverlayProc = nullptr;
 
 // TODO: Remove once migration to update-render cycle is completed.
 FpsLimiter sharedFpsLimiter;
@@ -101,7 +102,10 @@ void _zero_vid_mem()
 // 0x4CAE1C
 int _GNW95_init_mode_ex(int width, int height, int bpp)
 {
-    bool fullscreen = true;
+    // Unified co-op uses one borderless desktop window and lets SDL scale the
+    // internal Fallout render resolution to the display. The old exclusive
+    // fullscreen and fixed SCALE_2X output modes are intentionally ignored.
+    bool fullscreen = false;
     int scale = 1;
 
     Config resolutionConfig;
@@ -117,22 +121,9 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
                 height = screenHeight;
             }
 
-            bool windowed;
-            if (configGetBool(&resolutionConfig, "MAIN", "WINDOWED", &windowed)) {
-                fullscreen = !windowed;
-            }
-
-            int scaleValue;
-            if (configGetInt(&resolutionConfig, "MAIN", "SCALE_2X", &scaleValue)) {
-                scale = scaleValue + 1; // 0 = 1x, 1 = 2x
-                // Only allow scaling if resulting game resolution is >= 640x480
-                if ((width / scale) < 640 || (height / scale) < 480) {
-                    scale = 1;
-                } else {
-                    width /= scale;
-                    height /= scale;
-                }
-            }
+            // WINDOWED/SCALE_2X are legacy output-mode controls. Keep SCR_WIDTH
+            // and SCR_HEIGHT as the logical game resolution, but always create
+            // a borderless non-exclusive desktop window and autoscale into it.
 
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
             configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_WIDTH", &gInterfaceBarWidth);
@@ -140,6 +131,17 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_SIDES_ORI", &gInterfaceSidePanelsExtendFromScreenEdge);
         }
         configFree(&resolutionConfig);
+    }
+
+    // A 640x480-style viewport cannot frame four actors across the 18-hex
+    // shared-screen leash. Render at least a widescreen 1280x720 world and let
+    // SDL scale that logical framebuffer to the desktop. Larger user-selected
+    // resolutions remain untouched.
+    if (width < 1280) {
+        width = 1280;
+    }
+    if (height < 720) {
+        height = 720;
     }
 
     if (_GNW95_init_window(width, height, fullscreen, scale) == -1) {
@@ -173,22 +175,64 @@ int _init_vesa_mode(int width, int height)
 int _GNW95_init_window(int width, int height, bool fullscreen, int scale)
 {
     if (gSdlWindow == nullptr) {
+        (void)fullscreen;
+        (void)scale;
+
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             return -1;
         }
 
-        Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
-
-        if (fullscreen) {
-            windowFlags |= SDL_WINDOW_FULLSCREEN;
+        // Pick the display containing the mouse pointer when possible. This
+        // makes a multi-monitor setup open on the display the player is using.
+        int displayIndex = 0;
+        int globalMouseX = 0;
+        int globalMouseY = 0;
+        SDL_GetGlobalMouseState(&globalMouseX, &globalMouseY);
+        int displayCount = SDL_GetNumVideoDisplays();
+        for (int index = 0; index < displayCount; index++) {
+            SDL_Rect displayBounds {};
+            if (SDL_GetDisplayBounds(index, &displayBounds) == 0
+                && globalMouseX >= displayBounds.x
+                && globalMouseX < displayBounds.x + displayBounds.w
+                && globalMouseY >= displayBounds.y
+                && globalMouseY < displayBounds.y + displayBounds.h) {
+                displayIndex = index;
+                break;
+            }
         }
 
-        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width * scale, height * scale, windowFlags);
+        SDL_Rect windowBounds {};
+        if (SDL_GetDisplayUsableBounds(displayIndex, &windowBounds) != 0) {
+            if (SDL_GetDisplayBounds(displayIndex, &windowBounds) != 0) {
+                windowBounds.x = SDL_WINDOWPOS_UNDEFINED;
+                windowBounds.y = SDL_WINDOWPOS_UNDEFINED;
+                windowBounds.w = width;
+                windowBounds.h = height;
+            }
+        }
+
+        // Never enter SDL exclusive fullscreen. A borderless window sized to the
+        // usable desktop behaves like a full-screen presentation while Alt-Tab,
+        // overlays, capture tools and the Windows desktop remain normal.
+        Uint32 windowFlags = SDL_WINDOW_OPENGL
+            | SDL_WINDOW_ALLOW_HIGHDPI
+            | SDL_WINDOW_BORDERLESS;
+
+        gSdlWindow = SDL_CreateWindow(
+            gProgramWindowTitle,
+            windowBounds.x,
+            windowBounds.y,
+            windowBounds.w,
+            windowBounds.h,
+            windowFlags);
         if (gSdlWindow == nullptr) {
             return -1;
         }
+
+        SDL_SetWindowBordered(gSdlWindow, SDL_FALSE);
 
         if (!createRenderer(width, height)) {
             destroyRenderer();
@@ -365,6 +409,8 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
+    // SDL's logical-size transform performs the automatic output scaling and
+    // mouse-coordinate remapping while preserving the game's aspect ratio.
     if (SDL_RenderSetLogicalSize(gSdlRenderer, width, height) != 0) {
         return false;
     }
@@ -416,6 +462,14 @@ void renderPresent()
     SDL_UpdateTexture(gSdlTexture, nullptr, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, nullptr, nullptr);
+
+    // Draw controller/world overlays only after the palette-indexed Fallout
+    // framebuffer has become an RGB SDL texture. They can never clear, recolor,
+    // or replace the GNW world window this way.
+    if (gSdlRenderOverlayProc != nullptr) {
+        gSdlRenderOverlayProc();
+    }
+
     SDL_RenderPresent(gSdlRenderer);
 }
 

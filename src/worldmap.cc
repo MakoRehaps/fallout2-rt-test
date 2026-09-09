@@ -49,6 +49,8 @@
 #include "text_font.h"
 #include "tile.h"
 #include "window_manager.h"
+#include "unified_world_system.h"
+#include "unified_living_world.h"
 
 namespace fallout {
 
@@ -347,6 +349,185 @@ typedef struct Encounter {
     int entriesLength;
     EncounterEntry entries[10];
 } Encounter;
+
+
+// COOP_PROCEDURAL_SELFPLAY_ENCOUNTERS_V1
+// Before a random encounter is placed, two abstract sides play a short hidden
+// tactical game against each other. The result changes formation, spacing and
+// approach distance so random maps start as ambushes, pursuits, holds, scavenges,
+// breakouts, hunts and messy crossfires instead of always two firing lines.
+enum class CoopEncounterObjective {
+    Ambush,
+    Hold,
+    Scavenge,
+    Rescue,
+    Hunt,
+    Escape,
+    Crossfire,
+};
+
+
+// COOP_STAGED_ENCOUNTER_APPROACH_V1
+// Random-encounter groups are staged apart before the stock combat AI takes over.
+// Off-screen history remains abstract; once the map is visible, normal Fallout
+// pathfinding/combat movement is responsible for closing the distance.
+static int gCoopEncounterStagingGroup = 0;
+static int gCoopEncounterActiveStagingGroup = 0;
+
+static void coopEncounterResetStaging()
+{
+    gCoopEncounterStagingGroup = 0;
+    gCoopEncounterActiveStagingGroup = 0;
+}
+
+static int coopEncounterStagingDirection(int group)
+{
+    // Oppose the first two groups, then distribute additional groups around the
+    // remaining map edges so three/four-sided encounters do not pile together.
+    static const int directions[6] = { 0, 3, 1, 4, 2, 5 };
+    return directions[group % 6];
+}
+
+static int coopEncounterStagingDistance(int group)
+{
+    return 16 + (group % 3) * 3;
+}
+
+static int coopEncounterFindStagingCenter(int group, int fallback)
+{
+    int direction = coopEncounterStagingDirection(group);
+    int wanted = coopEncounterStagingDistance(group);
+    for (int distance = wanted; distance >= 9; distance--) {
+        int candidate = tileGetTileInDirection(gDude->tile, direction, distance);
+        if (candidate >= 0 && wmEvalTileNumForPlacement(candidate)) {
+            return candidate;
+        }
+    }
+    return fallback;
+}
+
+static void coopEncounterQueueVisibleApproach(Object* object, int group)
+{
+    if (object == nullptr || PID_TYPE(object->pid) != OBJ_TYPE_CRITTER) {
+        return;
+    }
+
+    // Walk roughly halfway toward the map/player center. Hostile groups will
+    // continue from there using the ordinary combat AI; peaceful generated
+    // groups still visibly enter/move instead of materializing beside a target.
+    int inward = (coopEncounterStagingDirection(group) + 3) % ROTATION_COUNT;
+    int stride = 5 + (group % 3);
+    int destination = tileGetTileInDirection(object->tile, inward, stride);
+    if (destination < 0 || !wmEvalTileNumForPlacement(destination)) {
+        return;
+    }
+
+    if (reg_anim_begin(ANIMATION_REQUEST_UNRESERVED) == 0) {
+        animationRegisterMoveToTile(object, destination, object->elevation, -1, 0);
+        reg_anim_end();
+    }
+}
+
+static const char* coopEncounterObjectiveName(CoopEncounterObjective objective)
+{
+    switch (objective) {
+    case CoopEncounterObjective::Ambush: return "ambush";
+    case CoopEncounterObjective::Hold: return "hold";
+    case CoopEncounterObjective::Scavenge: return "scavenge";
+    case CoopEncounterObjective::Rescue: return "rescue";
+    case CoopEncounterObjective::Hunt: return "hunt";
+    case CoopEncounterObjective::Escape: return "escape";
+    case CoopEncounterObjective::Crossfire: return "crossfire";
+    }
+    return "unknown";
+}
+
+static void coopDirectEncounterBySelfPlay(Encounter* encounter)
+{
+    if (encounter == nullptr || encounter->entriesLength <= 0) return;
+
+    // COOP_UNIFIED_LIVING_WORLD_ENCOUNTERS_V1
+    // The same hidden encounter game still decides the tactical setup, but the
+    // current cell's persistent event/war/economy state biases its objective.
+    int objectiveRoll = unifiedLivingEncounterObjectiveBias(randomBetween(0, 6));
+    CoopEncounterObjective objective = static_cast<CoopEncounterObjective>(objectiveRoll);
+
+    // Two simple agents evaluate pressure, cover, morale and objective progress.
+    // This is intentionally cheap: it runs before spawning and produces a state,
+    // not an off-screen combat animation.
+    int sideA = 45 + randomBetween(0, 35) + encounter->entriesLength * 2;
+    int sideB = 45 + randomBetween(0, 35) + encounter->entriesLength * 2;
+    int progressA = 0;
+    int progressB = 0;
+    int pressure = randomBetween(-10, 10);
+
+    for (int turn = 0; turn < 10; turn++) {
+        int coverA = randomBetween(0, 12);
+        int coverB = randomBetween(0, 12);
+        int aggressionA = randomBetween(4, 16) + std::max(0, pressure);
+        int aggressionB = randomBetween(4, 16) + std::max(0, -pressure);
+        int objectiveA = randomBetween(2, 12);
+        int objectiveB = randomBetween(2, 12);
+
+        sideA -= std::max(0, aggressionB - coverA) / 3;
+        sideB -= std::max(0, aggressionA - coverB) / 3;
+        progressA += objectiveA + (sideA > sideB ? 2 : 0);
+        progressB += objectiveB + (sideB > sideA ? 2 : 0);
+        pressure += (aggressionA - aggressionB) / 5;
+        pressure = std::clamp(pressure, -14, 14);
+    }
+
+    int lead = (sideA + progressA) - (sideB + progressB);
+
+    // Feed the hidden setup result back into the persistent cell so repeated
+    // trouble raises conflict/danger and can create later revenge events.
+    unifiedLivingRecordEncounterSetup(lead);
+
+    switch (objective) {
+    case CoopEncounterObjective::Ambush:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_WEDGE;
+        encounter->spacing = randomBetween(2, 4);
+        break;
+    case CoopEncounterObjective::Hold:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_DOUBLE_LINE;
+        encounter->spacing = randomBetween(2, 5);
+        break;
+    case CoopEncounterObjective::Scavenge:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_HUDDLE;
+        encounter->spacing = randomBetween(1, 3);
+        break;
+    case CoopEncounterObjective::Rescue:
+        encounter->position = lead >= 0 ? ENCOUNTER_FORMATION_TYPE_CONE : ENCOUNTER_FORMATION_TYPE_HUDDLE;
+        encounter->spacing = randomBetween(1, 3);
+        break;
+    case CoopEncounterObjective::Hunt:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_SURROUNDING;
+        encounter->spacing = randomBetween(2, 4);
+        break;
+    case CoopEncounterObjective::Escape:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_STRAIGHT_LINE;
+        encounter->spacing = randomBetween(3, 6);
+        break;
+    case CoopEncounterObjective::Crossfire:
+        encounter->position = ENCOUNTER_FORMATION_TYPE_CONE;
+        encounter->spacing = randomBetween(3, 5);
+        break;
+    }
+
+    // A side that won the hidden setup game starts with the positional edge,
+    // while the losing side is pushed farther away. Existing teams, scripts,
+    // inventories and encounter identities remain untouched.
+    for (int index = 0; index < encounter->entriesLength; index++) {
+        EncounterEntry& entry = encounter->entries[index];
+        int base = entry.distance != 0 ? entry.distance : 5;
+        int sideBias = (index & 1) == 0 ? lead : -lead;
+        int delta = sideBias > 15 ? -2 : (sideBias < -15 ? 3 : randomBetween(-1, 2));
+        entry.distance = std::clamp(base + delta, 2, 14);
+    }
+
+    debugPrint("[COOP ENCOUNTER DIRECTOR] objective=%s lead=%d formation=%d spacing=%d entries=%d\n",
+        coopEncounterObjectiveName(objective), lead, encounter->position, encounter->spacing, encounter->entriesLength);
+}
 
 typedef struct SubtileInfo {
     int terrain;
@@ -775,6 +956,50 @@ static int wmTownMapButtonId[ENTRANCE_LIST_CAPACITY];
 //
 // 0x672E00
 static WmGenData wmGenData;
+
+
+void unifiedWorldSystemClearFallout2EncounterContext()
+{
+    wmGenData.encounterMapId = -1;
+    wmGenData.encounterTableId = -1;
+    wmGenData.encounterEntryId = -1;
+}
+
+void unifiedWorldSystemRestoreFallout2EncounterContext(
+    int mapIdx,
+    int encounterTableId,
+    int encounterEntryId)
+{
+    wmGenData.encounterMapId = mapIdx;
+
+    if (encounterTableId >= 0 && encounterEntryId >= 0) {
+        wmGenData.encounterTableId = encounterTableId;
+        wmGenData.encounterEntryId = encounterEntryId;
+        return;
+    }
+
+    const UnifiedWorldSystemTravelState& travel =
+        unifiedWorldSystemGetStateConst().travel;
+    int gameIndex = unifiedWorldSystemGameIndex(UnifiedGameId::Fallout2);
+    wmGenData.worldPosX =
+        travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+        + kUnifiedWorldSystemCellSize / 2;
+    wmGenData.worldPosY =
+        travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+        + kUnifiedWorldSystemCellSize / 2;
+    wmGenData.currentSubtile = nullptr;
+
+    if (wmRndEncounterPick() == -1) {
+        wmGenData.encounterMapId = -1;
+        wmGenData.encounterTableId = -1;
+        wmGenData.encounterEntryId = -1;
+        return;
+    }
+
+    // Keep the persistent cell's original wilderness map while using the
+    // biome-correct encounter population selected at this world position.
+    wmGenData.encounterMapId = mapIdx;
+}
 
 // worldmap.msg
 //
@@ -3653,6 +3878,8 @@ int wmSetupRandomEncounter()
 {
     MessageListItem messageListItem;
 
+    coopEncounterResetStaging();
+
     if (wmGenData.encounterMapId == -1) {
         return 0;
     }
@@ -3775,6 +4002,10 @@ static int wmSetupCritterObjs(int encounterIndex, Object** critterPtr, int critt
 
     debugPrint("\nwmSetupCritterObjs: typeIdx: %d, Formation: %s", encounterIndex, wmFormationStrs[encounter->position]);
 
+    coopDirectEncounterBySelfPlay(encounter);
+
+    gCoopEncounterActiveStagingGroup = gCoopEncounterStagingGroup++;
+
     if (wmSetupRndNextTileNumInit(encounter) == -1) {
         return -1;
     }
@@ -3852,6 +4083,8 @@ static int wmSetupCritterObjs(int encounterIndex, Object** critterPtr, int critt
             int direction = tileGetRotationTo(tile, gDude->tile);
             objectSetRotation(object, direction, nullptr);
 
+            coopEncounterQueueVisibleApproach(object, gCoopEncounterActiveStagingGroup);
+
             for (int itemIndex = 0; itemIndex < encounterEntry->itemsLength; itemIndex++) {
                 EncounterItem* encounterItem = &(encounterEntry->items[itemIndex]);
 
@@ -3914,8 +4147,9 @@ static int wmSetupRndNextTileNumInit(Encounter* encounter)
 
     switch (encounter->position) {
     case ENCOUNTER_FORMATION_TYPE_SURROUNDING:
-        wmRndCenterTiles[0] = gDude->tile;
-        wmRndTileDirs[0] = randomBetween(0, ROTATION_COUNT - 1);
+        wmRndCenterTiles[0] = coopEncounterFindStagingCenter(
+            gCoopEncounterActiveStagingGroup, gDude->tile);
+        wmRndTileDirs[0] = tileGetRotationTo(wmRndCenterTiles[0], gDude->tile);
 
         wmRndOriginalCenterTile = wmRndCenterTiles[0];
 
@@ -3943,6 +4177,14 @@ static int wmSetupRndNextTileNumInit(Encounter* encounter)
                 wmRndCenterTiles[0] = gDude->tile;
                 wmRndCenterTiles[1] = gDude->tile;
             }
+
+            // Stage each encounter group at a different map-side approach.
+            // Keep authored/random start points as a fallback when an edge tile
+            // is unreachable on a particular wilderness layout.
+            int stagedCenter = coopEncounterFindStagingCenter(
+                gCoopEncounterActiveStagingGroup, wmRndCenterTiles[0]);
+            wmRndCenterTiles[0] = stagedCenter;
+            wmRndCenterTiles[1] = stagedCenter;
 
             wmRndTileDirs[0] = tileGetRotationTo(wmRndCenterTiles[0], gDude->tile);
             wmRndTileDirs[1] = tileGetRotationTo(wmRndCenterTiles[1], gDude->tile);
@@ -5709,6 +5951,23 @@ int wmGetPartyWorldPos(int* xPtr, int* yPtr)
         *yPtr = wmGenData.worldPosY;
     }
 
+    return 0;
+}
+
+// COOP_NEAREST_CLINIC_V1
+int wmGetAreaWorldPos(int areaIdx, int* xPtr, int* yPtr)
+{
+    if (areaIdx < 0 || areaIdx >= wmMaxAreaNum || wmAreaInfoList == nullptr) {
+        return -1;
+    }
+
+    const CityInfo& city = wmAreaInfoList[areaIdx];
+    if (xPtr != nullptr) {
+        *xPtr = city.x;
+    }
+    if (yPtr != nullptr) {
+        *yPtr = city.y;
+    }
     return 0;
 }
 

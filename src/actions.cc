@@ -17,6 +17,7 @@
 #include "geometry.h"
 #include "interface.h"
 #include "item.h"
+#include "local_coop.h"
 #include "map.h"
 #include "memory.h"
 #include "object.h"
@@ -1327,7 +1328,7 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
     switch (skill) {
     case SKILL_FIRST_AID:
     case SKILL_DOCTOR:
-        if (isInCombat()) {
+        if (isInCombat() || localCoopDangerBlocksMapExit()) {
             // NOTE: Uninline.
             return _action_use_skill_in_combat_error(a1);
         }
@@ -1416,7 +1417,7 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
 
     // Performer is either dude, or party member who's best at the specified
     // skill in entire party, and this skill is his/her own best.
-    Object* performer = gDude;
+    Object* performer = a1 != nullptr ? a1 : gDude;
 
     if (a1 == gDude) {
         Object* partyMember = partyMemberGetBestInSkill(skill);
@@ -1481,7 +1482,7 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
         animationRegisterMoveToObject(performer, a2, performer->data.critter.combat.ap, 0);
     } else {
         reg_anim_begin(a1 == gDude ? ANIMATION_REQUEST_RESERVED : ANIMATION_REQUEST_UNRESERVED);
-        if (a2 != gDude) {
+        if (a2 != performer) {
             if (objectGetDistanceBetween(performer, a2) >= 5) {
                 animationRegisterRunToObject(performer, a2, -1, 0);
             } else {

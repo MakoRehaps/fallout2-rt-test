@@ -1,0 +1,32 @@
+name: Materialize Regular Co-op Cleanup
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply cleanup
+        run: python tools/patch_regular_coop_cleanup.py
+      - name: Commit materialized source
+        run: |
+          if git diff --quiet -- src/main.cc src/local_coop_runtime.h src/unified_world_system.h; then
+            echo "Cleanup already materialized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main.cc src/local_coop_runtime.h src/unified_world_system.h
+          git commit -m "Disable FPS and fix Pip-Boy encounter cleanup"
+          git push origin HEAD:fix/no-debug-no-data-copy

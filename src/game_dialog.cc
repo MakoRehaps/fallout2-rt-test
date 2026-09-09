@@ -25,6 +25,7 @@
 #include "item.h"
 #include "kb.h"
 #include "lips.h"
+#include "local_coop_dialog_chatter.h"
 #include "memory.h"
 #include "mouse.h"
 #include "object.h"
@@ -1649,6 +1650,11 @@ int gameDialogAddReviewMessage(int messageListId, int messageId)
     entry->optionMessageListId = -3;
     entry->optionMessageId = -3;
 
+    // COOP_DOS_DIALOG_CHATTER_HOOK_V1
+    // Non-verbal, quiet synthetic chatter only; the original Fallout dialog
+    // art/text remains authoritative and no spoken voice line is generated.
+    localCoopDialogChatter(gGameDialogSpeaker, 42 + (messageId & 31));
+
     gGameDialogReviewEntriesLength++;
 
     return 0;
@@ -1677,6 +1683,8 @@ int gameDialogAddReviewText(const char* string)
     entry->optionMessageListId = -3;
     entry->optionMessageId = -3;
     entry->optionText = nullptr;
+
+    localCoopDialogChatter(gGameDialogSpeaker, static_cast<int>(strlen(string)));
 
     gGameDialogReviewEntriesLength++;
 

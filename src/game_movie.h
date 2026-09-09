@@ -44,4 +44,41 @@ bool gameMovieIsPlaying();
 
 } // namespace fallout
 
+// proto.cc chooses the unarmored player critter from the Fallout 2 native-look
+// state: before MOVIE_VSUIT it selects the tribal model, afterwards the jumpsuit.
+// Fallout 1 never uses that Fallout 2 Temple-of-Trials transition; its player is
+// already the vault-jumpsuit character. Treat MOVIE_VSUIT as seen only for the
+// proto translation unit while an F1-origin world is active. This keeps the F1
+// critter LST on hmjmps/hfjmps instead of falling through to the missing F2
+// tribal name and index 0 (the visible fire-guy fallback).
+#if defined(PROTO_H)
+#include "unified_campaign.h"
+
+namespace fallout {
+
+inline bool unifiedProtoGameMovieIsSeen(int movie)
+{
+    if (unifiedCampaignIsEnabled()
+        && unifiedCampaignGetActiveGame() == UnifiedGameId::Fallout1
+        && movie == MOVIE_VSUIT) {
+        return true;
+    }
+
+    return gameMovieIsSeen(movie);
+}
+
+} // namespace fallout
+
+#define gameMovieIsSeen unifiedProtoGameMovieIsSeen
+#endif
+
+// main.cc includes main.h before its own game_movie.h include. Route only that
+// executable translation unit through the profile-aware startup movie table;
+// game_movie.cc includes this header directly and therefore retains the stock
+// implementation and Fallout 2 movie table unchanged.
+#if defined(MAIN_H)
+#include "unified_main_movie_profile.h"
+#define gameMoviePlay unifiedMainGameMoviePlay
+#endif
+
 #endif /* GAME_MOVIE_H */

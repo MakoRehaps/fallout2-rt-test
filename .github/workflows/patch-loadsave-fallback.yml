@@ -1,0 +1,73 @@
+name: Patch load/save fallback
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/no-debug-no-data-copy
+          fetch-depth: 0
+
+      - name: Patch missing F1 load/save confirmation messages
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/loadsave.cc')
+          s = p.read_text(encoding='utf-8')
+          old_save = '''    gLoadSaveMessageListItem.num = 140;
+    if (messageListGetItem(&gLoadSaveMessageList, &gLoadSaveMessageListItem)) {
+        displayMonitorAddMessage(gLoadSaveMessageListItem.text);
+    } else {
+        debugPrint("\\nError: Couldn't find LoadSave Message!");
+    }
+'''
+          new_save = '''    gLoadSaveMessageListItem.num = 140;
+    if (messageListGetItem(&gLoadSaveMessageList, &gLoadSaveMessageListItem)) {
+        displayMonitorAddMessage(gLoadSaveMessageListItem.text);
+    } else {
+        // Fallout 1's LSGAME.MSG does not define Fallout 2's message 140.
+        // Saving already completed successfully, so use a profile-safe fallback
+        // instead of reporting a false load/save error after the write.
+        displayMonitorAddMessage("Game Saved.");
+    }
+'''
+          old_load = '''    gLoadSaveMessageListItem.num = 141;
+    if (messageListGetItem(&gLoadSaveMessageList, &gLoadSaveMessageListItem) == 1) {
+        displayMonitorAddMessage(gLoadSaveMessageListItem.text);
+    } else {
+        debugPrint("\\nError: Couldn't find LoadSave Message!");
+    }
+'''
+          new_load = '''    gLoadSaveMessageListItem.num = 141;
+    if (messageListGetItem(&gLoadSaveMessageList, &gLoadSaveMessageListItem) == 1) {
+        displayMonitorAddMessage(gLoadSaveMessageListItem.text);
+    } else {
+        // Fallout 1's LSGAME.MSG does not define Fallout 2's message 141.
+        displayMonitorAddMessage("Game Loaded.");
+    }
+'''
+          if old_save not in s or old_load not in s:
+              raise SystemExit('expected load/save message blocks not found; refusing broad patch')
+          s = s.replace(old_save, new_save, 1).replace(old_load, new_load, 1)
+          p.write_text(s, encoding='utf-8')
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-loadsave-fallback.yml
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/loadsave.cc .github/workflows/patch-loadsave-fallback.yml
+          git commit -m "Fix Fallout 1 load/save confirmation fallback"
+          git push origin HEAD:fix/no-debug-no-data-copy

@@ -25,6 +25,9 @@
 #include "item.h"
 #include "light.h"
 #include "loadsave.h"
+#include "map_entry_utils.h"
+#include "local_coop_ai_realtime.h"
+#include "local_coop_staging_room.h"
 #include "memory.h"
 #include "object.h"
 #include "palette.h"
@@ -39,6 +42,10 @@
 #include "svga.h"
 #include "text_object.h"
 #include "tile.h"
+#include "unified_campaign.h"
+#include "unified_fallout1_worldmap_state.h"
+#include "unified_wilderness_generator.h"
+#include "unified_world_system.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
@@ -67,6 +74,9 @@ static void _square_reset();
 static int _square_load(File* stream, int a2);
 static int mapHeaderWrite(MapHeader* ptr, File* stream);
 static int mapHeaderRead(MapHeader* ptr, File* stream);
+static void mapPlacePartyAtRoadEntry(
+    UnifiedWorldSystemRoadDirection direction,
+    int sourceMap);
 
 // 0x50B058
 static char byte_50B058[] = "";
@@ -86,6 +96,11 @@ static const int _map_data_elev_flags[ELEVATION_COUNT] = {
 
 // 0x519550
 static unsigned int gIsoWindowScrollTimestamp = 0;
+
+// Prevent a broken exit script from retrying a failed physical-road load every
+// frame while the party is still standing on the same exit grid.
+static unsigned int gRoadTransitionFailureTimestamp = 0;
+static int gRoadTransitionFailureMap = -1;
 
 // 0x519554
 static bool gIsoEnabled = false;
@@ -796,6 +811,21 @@ int mapLoadByName(char* fileName)
 // 0x482B34
 int mapLoadById(int map)
 {
+    // COOP_HARD_BLOCK_MOUNTAIN_MAPS_V1
+    // Final safety gate: every map-loading path comes through here, including
+    // physical-road travel, random encounters, scripts, encounter chains and
+    // temporary dungeons. Keep mountain terrain on the world map, but never
+    // load the cramped authored MOUNTN layouts.
+    UnifiedGameId activeGame = unifiedCampaignGetActiveGame();
+    int requestedMap = map;
+    map = unifiedWorldSystemSafeTemplateMap(activeGame, map);
+    if (map != requestedMap) {
+        debugPrint("[WILDERNESS MAP REMAP] game=%d blockedMountainMap=%d replacement=%d\n",
+            static_cast<int>(static_cast<uint32_t>(activeGame)),
+            requestedMap,
+            map);
+    }
+
     scriptSetFixedParam(gMapSid, map);
 
     char name[16];
@@ -928,6 +958,11 @@ static int mapLoad(File* stream)
     objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
     objectSetRotation(gDude, gEnteringRotation, nullptr);
     gMapHeader.field_34 = wmMapMatchNameToIdx(gMapHeader.name);
+    unifiedWildernessGenerateLoadedMap(gMapHeader.field_34);
+    unifiedWorldSystemMarkMapVisited(
+        unifiedCampaignGetActiveGame(),
+        gMapHeader.field_34,
+        gameTimeGetTime());
 
     if ((gMapHeader.flags & 1) == 0) {
         char path[COMPAT_MAX_PATH];
@@ -1199,6 +1234,79 @@ static int _map_age_dead_critters()
     return rc;
 }
 
+static void mapPlacePartyAtRoadEntry(
+    UnifiedWorldSystemRoadDirection direction,
+    int sourceMap)
+{
+    if (gDude == nullptr) {
+        return;
+    }
+
+    int authoredStartTile = gMapHeader.enteringTile;
+    int oldTile = gDude->tile;
+    const char* method = "none";
+    int tile = mapEntryResolveSafeEntrance(
+        gDude,
+        direction,
+        sourceMap,
+        authoredStartTile,
+        gDude->elevation,
+        &method);
+    if (tile == -1) {
+        debugPrint(
+            "[COOP ROAD] no safe authored entry sourceMap=%d map=%d headerTile=%d currentTile=%d\n",
+            sourceMap,
+            gMapHeader.field_34,
+            authoredStartTile,
+            oldTile);
+        return;
+    }
+
+    reg_anim_clear(gDude);
+    if (tile != oldTile
+        && objectSetLocation(gDude, tile, gDude->elevation, nullptr) == -1) {
+        debugPrint(
+            "[COOP ROAD] authored entry placement failed method=%s tile=%d\n",
+            method,
+            tile);
+        return;
+    }
+
+    int facing = ROTATION_E;
+    switch (direction) {
+    case UnifiedWorldSystemRoadDirection::North:
+        facing = ROTATION_NW;
+        break;
+    case UnifiedWorldSystemRoadDirection::East:
+        facing = ROTATION_E;
+        break;
+    case UnifiedWorldSystemRoadDirection::South:
+        facing = ROTATION_SE;
+        break;
+    case UnifiedWorldSystemRoadDirection::West:
+        facing = ROTATION_W;
+        break;
+    }
+    objectSetRotation(gDude, facing, nullptr);
+
+    _partyMemberSyncPosition();
+    localCoopKeepReservedActorsWithParty();
+    tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW);
+
+    debugPrint(
+        "[COOP ROAD] authored entry method=%s sourceMap=%d map=%d direction=%d oldTile=%d headerTile=%d tile=%d x=%d y=%d open=%d\n",
+        method,
+        sourceMap,
+        gMapHeader.field_34,
+        static_cast<int>(direction),
+        oldTile,
+        authoredStartTile,
+        tile,
+        tile % 200,
+        tile / 200,
+        mapEntryHexOpenNeighborCount(gDude, tile, gDude->elevation));
+}
+
 // 0x48358C
 int _map_target_load_area()
 {
@@ -1216,16 +1324,41 @@ int mapSetTransition(MapTransition* transition)
         return -1;
     }
 
+    int requestedMap = transition->map;
     memcpy(&gMapTransition, transition, sizeof(gMapTransition));
 
     if (gMapTransition.map == 0) {
         gMapTransition.map = -2;
     }
 
-    if (isInCombat()) {
-        _game_user_wants_to_quit = 1;
+    // Encounter/caravan map scripts often contain a stock destination town.
+    // While the map belongs to an active physical chain, every outward map
+    // transition must remain a road step instead of teleporting to that town.
+    const UnifiedWorldSystemActiveChain& activeChain =
+        unifiedWorldSystemGetStateConst().activeChain;
+    UnifiedGameId activeGame = unifiedCampaignGetActiveGame();
+    if (gMapTransition.map > 0
+        && activeChain.valid
+        && activeChain.gameId
+            == static_cast<int32_t>(static_cast<uint32_t>(activeGame))
+        && activeChain.currentMapIdx == gMapHeader.field_34
+        && unifiedWorldSystemPoolContains(activeGame, gMapHeader.field_34)) {
+        gMapTransition.map = -2;
     }
 
+    if (gMapTransition.map == -2
+        && gRoadTransitionFailureMap == gMapHeader.field_34
+        && getTicksSince(gRoadTransitionFailureTimestamp) < 1000) {
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
+        return 0;
+    }
+
+    debugPrint(
+        "[COOP MAP EXIT] transition queued currentMap=%d requested=%d normalized=%d combat=%d\n",
+        gMapHeader.field_34,
+        requestedMap,
+        gMapTransition.map,
+        isInCombat() ? 1 : 0);
     return 0;
 }
 
@@ -1236,37 +1369,204 @@ int mapHandleTransition()
         return 0;
     }
 
-    gameMouseObjectsHide();
+    // COOP_PREOPENING_STAGING_ROOM_HOOK_V1
+    // The first outward transition from the preparation room is the party's
+    // explicit READY action. Do not enter the world graph yet: show the normal
+    // opening movie once and move into the real campaign start map instead.
+    if (localCoopConsumeStagingRoomExit()) {
+        animationStop();
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
+        gameMoviePlay(MOVIE_ELDER, GAME_MOVIE_STOP_MUSIC);
+        if (gLocalCoopStagingDestinationMap[0] != '\0') {
+            char destination[COMPAT_MAX_PATH];
+            strncpy(destination, gLocalCoopStagingDestinationMap, sizeof(destination) - 1);
+            destination[sizeof(destination) - 1] = '\0';
+            debugPrint("[COOP STAGING] ready; loading campaign start %s\n", destination);
+            int stagingLoadRc = mapLoadByName(destination);
+            // COOP_STAGING_EPHEMERAL_SAVE_V1
+            // mapLoad saves the map being left before reading the destination.
+            // That save contains the hidden staging critters, so discard it now.
+            _MapDirEraseFile_("MAPS\\", "V13ENT.SAV");
+            // COOP_STAGING_MUSIC_RESUME_V1
+            // mapLoadById normally restarts map music, but this named reload is
+            // intentional so the saved start-map filename survives staging.
+            // Restore the original game's map track after the opening movie.
+            if (stagingLoadRc == 0) {
+                wmMapMusicStart();
+            }
+            return stagingLoadRc;
+        }
+        return 0;
+    }
 
+    gameMouseObjectsHide();
     gameMouseSetCursor(MOUSE_CURSOR_NONE);
 
     if (gMapTransition.map == -1) {
-        if (!isInCombat()) {
-            animationStop();
-            wmTownMap();
-            memset(&gMapTransition, 0, sizeof(gMapTransition));
-        }
+        animationStop();
+        wmTownMap();
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
     } else if (gMapTransition.map == -2) {
-        if (!isInCombat()) {
-            animationStop();
-            wmWorldMap();
-            memset(&gMapTransition, 0, sizeof(gMapTransition));
+        // Realtime co-op danger must not strand the party. Stop the current
+        // animation batch, clear map-local hostiles, and execute the road exit.
+        animationStop();
+
+        UnifiedGameId game = unifiedCampaignGetActiveGame();
+        int sourceMap = gMapHeader.field_34;
+        int exitTile = localCoopConsumeMapExitTile();
+        if (exitTile < 0 && gDude != nullptr) {
+            exitTile = gDude->tile;
         }
+        UnifiedWorldSystemRoadDirection direction =
+            unifiedWorldSystemRoadDirectionFromTile(exitTile);
+
+        // Traversal prepares the destination cell and chain before loading.
+        // Keep an exact snapshot so a missing/corrupt map cannot move the save
+        // to a cell the party never actually entered.
+        UnifiedWorldSystemState worldSystemBefore =
+            unifiedWorldSystemGetStateConst();
+        UnifiedFallout1WorldMapState fallout1WorldBefore =
+            unifiedFallout1WorldMapGetStateConst();
+        const UnifiedWorldSystemTravelState& before = worldSystemBefore.travel;
+        int gameIndex = unifiedWorldSystemGameIndex(game);
+        int fromX = before.currentCellX[gameIndex];
+        int fromY = before.currentCellY[gameIndex];
+
+        int nextMap = -1;
+        bool loadRoadMap = unifiedWorldSystemTraverseRoad(
+            game,
+            gMapHeader.field_34,
+            direction,
+            gameTimeGetTime(),
+            &nextMap);
+
+        if (loadRoadMap) {
+            const UnifiedWorldSystemTravelState& travel =
+                unifiedWorldSystemGetStateConst().travel;
+            int worldX =
+                travel.currentCellX[gameIndex] * kUnifiedWorldSystemCellSize
+                + kUnifiedWorldSystemCellSize / 2;
+            int worldY =
+                travel.currentCellY[gameIndex] * kUnifiedWorldSystemCellSize
+                + kUnifiedWorldSystemCellSize / 2;
+
+            if (game == UnifiedGameId::Fallout1) {
+                UnifiedFallout1WorldMapState& fallout1World =
+                    unifiedFallout1WorldMapGetState();
+                fallout1World.worldX = worldX;
+                fallout1World.worldY = worldY;
+                fallout1World.currentTown = -1;
+                const UnifiedWorldSystemActiveChain& active =
+                    unifiedWorldSystemGetStateConst().activeChain;
+                unifiedFallout1SetEncounterRegionGlobal(
+                    active.special != 0
+                        ? -1
+                        : unifiedFallout1EncounterRegionAt(worldX, worldY));
+            } else {
+                wmSetPartyWorldPos(worldX, worldY);
+            }
+
+            debugPrint(
+                "[COOP ROAD] game=%d dir=%d tile=%d from=%d,%d to=%d,%d map=%d\n",
+                static_cast<int>(static_cast<uint32_t>(game)),
+                static_cast<int>(direction),
+                exitTile,
+                fromX,
+                fromY,
+                travel.currentCellX[gameIndex],
+                travel.currentCellY[gameIndex],
+                nextMap);
+
+            // Alert hostiles occupy the linked road graph too. Transfer them
+            // out of the old map before it is saved, then restore them beside
+            // the party after the destination map finishes loading.
+            localCoopRealtimeAiCapturePursuers(
+                exitTile,
+                static_cast<int>(travel.lastRoadDirection[gameIndex]));
+            localCoopDangerEnd();
+            gMapTransition.map = nextMap;
+            gMapTransition.elevation = 0;
+            gMapTransition.tile = -1;
+            gMapTransition.rotation = 0;
+            int loadRc = mapLoadById(nextMap);
+            if (loadRc == 0) {
+                // The road layer already captured the authoritative game and
+                // destination before load. Run procedural generation here too
+                // so a transient profile-state mismatch inside mapLoad cannot
+                // silently skip Fallout 1 mountain templates.
+                unifiedWildernessGenerateLoadedMapForGame(game, nextMap);
+                UnifiedWorldSystemRoadDirection effectiveDirection =
+                    static_cast<UnifiedWorldSystemRoadDirection>(
+                        unifiedWorldSystemGetStateConst()
+                            .travel.lastRoadDirection[gameIndex]);
+                mapPlacePartyAtRoadEntry(effectiveDirection, sourceMap);
+                localCoopRealtimeAiBeginMapEntryGrace(10000);
+                localCoopRealtimeAiActivateLoadedEncounterFactions();
+                localCoopRealtimeAiRestorePursuers();
+                gRoadTransitionFailureMap = -1;
+                gRoadTransitionFailureTimestamp = 0;
+            } else {
+                // A failed load leaves pursuers on the source map rather than
+                // materializing them at a destination the party never entered.
+                localCoopRealtimeAiRestorePursuers();
+                unifiedWorldSystemGetState() = worldSystemBefore;
+                if (game == UnifiedGameId::Fallout1) {
+                    unifiedFallout1WorldMapSetState(fallout1WorldBefore);
+                    unifiedFallout1SetEncounterRegionGlobal(
+                        unifiedFallout1EncounterRegionAt(
+                            fallout1WorldBefore.worldX,
+                            fallout1WorldBefore.worldY));
+                }
+                gRoadTransitionFailureMap = gMapHeader.field_34;
+                gRoadTransitionFailureTimestamp = getTicks();
+                debugPrint(
+                    "[COOP ROAD] rolled back failed destination map=%d cell=%d,%d\n",
+                    nextMap,
+                    fromX,
+                    fromY);
+            }
+            debugPrint(
+                "[COOP ROAD] load map=%d rc=%d now=%d\n",
+                nextMap,
+                loadRc,
+                gMapHeader.field_34);
+        } else {
+            debugPrint(
+                "[COOP ROAD] blocked game=%d dir=%d tile=%d cell=%d,%d map=%d\n",
+                static_cast<int>(static_cast<uint32_t>(game)),
+                static_cast<int>(direction),
+                exitTile,
+                fromX,
+                fromY,
+                gMapHeader.field_34);
+        }
+
+        memset(&gMapTransition, 0, sizeof(gMapTransition));
     } else {
         if (!isInCombat()) {
-            if (gMapTransition.map != gMapHeader.field_34 || gElevation == gMapTransition.elevation) {
+            if (gMapTransition.map != gMapHeader.field_34
+                || gElevation == gMapTransition.elevation) {
                 mapLoadById(gMapTransition.map);
             }
 
-            if (gMapTransition.tile != -1 && gMapTransition.tile != 0
-                && gMapHeader.field_34 != MAP_MODOC_BEDNBREAKFAST && gMapHeader.field_34 != MAP_THE_SQUAT_A
+            if (gMapTransition.tile != -1
+                && gMapTransition.tile != 0
+                && gMapHeader.field_34 != MAP_MODOC_BEDNBREAKFAST
+                && gMapHeader.field_34 != MAP_THE_SQUAT_A
                 && elevationIsValid(gMapTransition.elevation)) {
-                objectSetLocation(gDude, gMapTransition.tile, gMapTransition.elevation, nullptr);
+                objectSetLocation(
+                    gDude,
+                    gMapTransition.tile,
+                    gMapTransition.elevation,
+                    nullptr);
                 mapSetElevation(gMapTransition.elevation);
                 objectSetRotation(gDude, gMapTransition.rotation, nullptr);
             }
 
-            if (tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW) == -1) {
+            if (tileSetCenter(
+                    gDude->tile,
+                    TILE_SET_CENTER_REFRESH_WINDOW)
+                == -1) {
                 debugPrint("\nError: map: attempt to center out-of-bounds!");
             }
 
@@ -1275,7 +1575,8 @@ int mapHandleTransition()
             int city;
             wmMatchAreaContainingMapIdx(gMapHeader.field_34, &city);
             if (wmTeleportToArea(city) == -1) {
-                debugPrint("\nError: couldn't make jump on worldmap for map jump!");
+                debugPrint(
+                    "\nError: couldn't make jump on worldmap for map jump!");
             }
         }
     }
@@ -1450,13 +1751,25 @@ int _map_save_in_game(bool a1)
 
     char name[16];
 
-    if (a1 && !wmMapIsSaveable()) {
+    if (!wmMapIsSaveable()) {
         debugPrint("\nNot saving RANDOM encounter map.");
 
         strcpy(name, gMapHeader.name);
         _strmfe(gMapHeader.name, name, "SAV");
         _MapDirEraseFile_("MAPS\\", gMapHeader.name);
         strcpy(gMapHeader.name, name);
+
+        // Random encounter maps are intentionally not persisted, but a real
+        // transition must still release their objects, scripts and loaded
+        // prototypes. Without this cleanup each road step leaks the previous
+        // encounter into the legacy movable heap.
+        if (a1) {
+            gMapHeader.name[0] = '\0';
+            _obj_remove_all();
+            _proto_remove_all();
+            _square_reset();
+            gameTimeScheduleUpdateEvent();
+        }
     } else {
         debugPrint("\n Saving \".SAV\" map.");
 

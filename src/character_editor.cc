@@ -5717,7 +5717,10 @@ static int characterEditorUpdateLevel()
                 }
 
                 if (nextLevel % progression == 0) {
-                    gCharacterEditorHasFreePerk = 1;
+                    // COOP_GLOBAL_PERKS_STOCK_PICKER_DISABLED_V1
+                    // The co-op draft owns perk awards; do not also grant
+                    // the stock full-list perk picker.
+                    gCharacterEditorHasFreePerk = 0;
                 }
             }
         }

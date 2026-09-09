@@ -30,6 +30,7 @@
 #include "skill.h"
 #include "stat.h"
 #include "tile.h"
+#include "unified_vehicle_system.h"
 #include "worldmap.h"
 
 namespace fallout {
@@ -1481,6 +1482,10 @@ int _obj_use(Object* a1, Object* a2)
                 }
             }
         }
+    }
+
+    if (a1 == gDude && unifiedVehicleTryUseWreck(a2)) {
+        scriptOverrides = true;
     }
 
     if (!scriptOverrides) {

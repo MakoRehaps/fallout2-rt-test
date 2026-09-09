@@ -1,6 +1,16 @@
 #ifndef ELEVATOR_H
 #define ELEVATOR_H
 
+// Capture whether combat_ai.h was already included BEFORE pulling in the
+// realtime helper below. combat.cc includes combat_ai.h before elevator.h;
+// scripts.cc includes elevator.h without it. This keeps the combat-time clock
+// redirect scoped to combat.cc without leaking it into scripts.cc.
+#if defined(COMBAT_AI_H)
+#define LOCAL_COOP_COMBAT_CC_INTERCEPTS
+#endif
+
+#include "local_coop_ai_realtime.h"
+
 namespace fallout {
 
 typedef enum Elevator {
@@ -36,5 +46,12 @@ int elevatorSelectLevel(int elevator, int* mapPtr, int* elevationPtr, int* tileP
 void elevatorsInit();
 
 } // namespace fallout
+
+#ifdef LOCAL_COOP_COMBAT_CC_INTERCEPTS
+// AI routing is now owned by combat_ai.h's single dispatcher. Keep only the
+// combat.cc-specific game-time redirect here.
+#define gameTimeAddSeconds localCoopRealtimeCombatAdvanceTime
+#undef LOCAL_COOP_COMBAT_CC_INTERCEPTS
+#endif
 
 #endif /* ELEVATOR_H */

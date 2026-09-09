@@ -1,0 +1,35 @@
+name: Materialize Main Menu Gate
+
+on:
+  push:
+    branches:
+      - fix/no-debug-no-data-copy
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply stock main-menu runtime gate
+        run: |
+          python tools/patch_main_menu_coop_gate.py
+          grep -q COOP_MAIN_MENU_RUNTIME_GATE_V1 src/local_coop_runtime.h
+
+      - name: Commit materialized runtime fix
+        run: |
+          if git diff --quiet -- src/local_coop_runtime.h; then
+            echo "Main-menu gate already materialized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/local_coop_runtime.h
+          git commit -m "Keep co-op runtime off stock main menu"
+          git push origin HEAD:fix/no-debug-no-data-copy
