@@ -26,4 +26,9 @@ if missing:
 # materializer, then the no-refresh/transport repair owns connection behavior.
 runpy.run_path('tools/patch_phoboi_compact_gamepad.py', run_name='__main__')
 runpy.run_path('tools/patch_phoboi_final_no_refresh_controls.py', run_name='__main__')
+
+# F11 must bypass Fallout's intentionally suppressed legacy gameplay keyboard
+# queue. This direct SDL edge check runs after patch_esc_exit_game.py has created
+# the setup-only input route, so the final compiled build always retains F11.
+runpy.run_path('tools/patch_phoboi_direct_f11.py', run_name='__main__')
 print('Applied final PhoBoi repair v3')
