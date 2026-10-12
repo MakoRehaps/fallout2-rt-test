@@ -252,6 +252,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 <button class="small" id="lb">LB<span class="control-label">RUN</span></button><button class="small" id="lt">LT<span class="control-label">HEX AIM</span></button>
 <button class="small" id="rb">RB<span class="control-label">ALT ATTACK</span></button><button class="small" id="rt">RT<span class="control-label">ATTACK</span></button>
 <button class="small" id="back">PHOBOI<span class="control-label">PHONE</span></button><button class="small" id="fps">FPS / ISO<span class="control-label">CAMERA</span></button><button class="small" id="start">START<span class="control-label">MENU</span></button><button class="small" id="skill">SKILLS<span class="control-label">SKILLDEX</span></button>
+<button id="leave" class="small" style="left:calc(50% - 130px);top:max(112px,calc(env(safe-area-inset-top) + 108px));width:82px">LEAVE<span class="control-label">FREE SLOT</span></button>
 <button class="small" id="view" style="left:calc(50% - 41px);top:max(112px,calc(env(safe-area-inset-top) + 108px));width:82px">VIEW<span class="control-label">FIT / 1.3X / 1.6X</span></button>
 <div class="stick" id="ls"><div class="stick-label">LEFT STICK<br>MOVE</div><div class="nub"></div></div><div class="stick" id="rs"><div class="stick-label">RIGHT STICK<br>AIM / CURSOR</div><div class="nub"></div></div>
 <button class="btn" id="ba">A<span class="control-label">USE / TALK / PICKUP</span></button><button class="btn" id="bb">B<span class="control-label">CANCEL / BACK</span></button><button class="btn" id="bx">X<span class="control-label">RELOAD</span></button><button class="btn" id="by">Y<span class="control-label">SWAP HAND</span></button>
@@ -301,6 +302,19 @@ function enterControllerPage(){
  $('join').style.display='none';$('pad').style.display='block';
  controlMode='STARTING';videoMode='STARTING';updateStatus();openSocket();openStream();
 }
+$('leave').onclick=async()=>{
+ const previousSlot=slot, previousToken=token;
+ if(previousSlot<0||!previousToken)return;
+ // Send neutral input first and close the browser's WebSocket and video.
+ axes=[0,0,0,0,-32768,-32768];buttons=0;
+ try{if(ws&&ws.readyState===WebSocket.OPEN)ws.send([++seq,performance.now(),0,0,0,0,0,0,-32768,-32768,0].join(','))}catch(_){}
+ slot=-1;token=0;sessionStorage.removeItem('phoboiSession');
+ try{ws?.close();stream?.close()}catch(_){}
+ ws=null;stream=null;
+ try{await fetch('/release',{method:'POST',body:new URLSearchParams({slot:previousSlot,token:previousToken}),cache:'no-store'})}catch(_){}
+ $('pad').style.display='none';$('join').style.display='flex';$('connect').disabled=false;
+ $('msg').textContent='SLOT RELEASED — LOCAL CONTROLLER MAY REJOIN';
+};
 $('connect').onclick=async()=>{const button=$('connect');button.disabled=true;try{
  $('msg').textContent='CONNECTING TO CURRENT GAME...';
  const body=new URLSearchParams({slot:$('slot').value,pin:$('pin').value});
@@ -1022,7 +1036,7 @@ void mobileHandleClient(MobileSocket client)
     if (method == "GET" && route == "/ready") {
         uint32_t token = mobileUnsignedValue(values, "token", 0);
         if (!state.claimed.load() || token == 0 || token != state.token.load()) {
-            mobileSendResponse(client, "403 Forbidden", "application/json", "{\"ok\":false,\"error\":\"Session expired\"}");
+            mobileSendResponse(client, "403 Forbidden", "application/json", "{\"ok\":false,\"error\":\"Session expired or local controller already owns slot\"}");
             return;
         }
         state.lastSeen.store(mobileNow());
@@ -1548,7 +1562,12 @@ bool mobileAttachController(int slot)
     player.controller = controller;
     player.joystickId = SDL_JoystickInstanceID(joystick);
     player.connected = true;
-    snprintf(player.controllerGuid, sizeof(player.controllerGuid), "PHOBOI-MOBILE-%d", slot + 1);
+    // COOP_INPUT_SLOT_HANDOFF_V1: retain physical GUID and saved affinity while
+    // the browser operates this character. A browser-first slot gets its own
+    // virtual GUID only until a real controller is paired to that slot.
+    if (!player.slotLocked || player.controllerGuid[0] == '\0') {
+        snprintf(player.controllerGuid, sizeof(player.controllerGuid), "PHOBOI-MOBILE-%d", slot + 1);
+    }
 
     // COOP_MIDGAME_PHONE_READY_ROOM_V1
     // Selecting an unused phone slot is itself a join request. In a running
@@ -1684,6 +1703,15 @@ void localCoopMobileTick()
         bool mobileAttached = gMobileDevices[slot].deviceIndex >= 0;
         bool occupiedByOtherController =
             gLocalCoopPlayers[slot].connected && !mobileAttached;
+
+        // The game thread owns SDL and character bindings. Never replace an
+        // active physical controller with a pending network claim.
+        if (occupiedByOtherController && state.claimed.load()) {
+            mobileResetInput(state);
+            state.claimed.store(false);
+            state.token.store(0);
+            debugPrint("[COOP HANDOFF] rejected browser claim; P%d owned by local controller\n", slot + 1);
+        }
         state.available.store(!occupiedByOtherController && !state.claimed.load());
 
         if (state.claimed.load() && !mobileAttached) {
