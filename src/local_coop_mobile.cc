@@ -215,7 +215,7 @@ const std::string& mobileControllerHtml()
 *{box-sizing:border-box;touch-action:none;-webkit-user-select:none;user-select:none}
 html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#000;color:#9cff9c;font-family:monospace}
 body{min-height:100dvh}
-body.phoboi-browser-gamepad #pad .stick,body.phoboi-browser-gamepad #pad .btn,body.phoboi-browser-gamepad #pad .small,body.phoboi-browser-gamepad #pad .dpad{opacity:.12;pointer-events:none}
+body.phoboi-browser-gamepad #pad .stick,body.phoboi-browser-gamepad #pad .btn,body.phoboi-browser-gamepad #pad .small:not(#leave):not(#view),body.phoboi-browser-gamepad #pad .dpad{opacity:.12;pointer-events:none}
 #join{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#07100b;z-index:20;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
 .panel{border:2px solid #4dbd68;padding:20px;width:min(92vw,420px);box-shadow:0 0 28px #174d29}
 h1{margin:0 0 14px;font-size:25px}.row{display:flex;gap:8px;margin-top:10px}input,select,button{font:inherit;color:#d7ffd7;background:#102218;border:1px solid #4dbd68;padding:8px}
@@ -1467,7 +1467,11 @@ bool mobileStartCloudflareTunnel()
     startup.hStdError = outputWrite;
     startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION process {};
-    std::string commandText = "\"" + executable + "\" tunnel --no-autoupdate --url http://127.0.0.1:27888";
+    // PHOBOI_QUICK_TUNNEL_IPV4_HTTP2_V1
+    // Keep Cloudflare Quick Tunnel for remote browser controllers. Force
+    // IPv4/http2 as in the last known working remote controller build.
+    std::string commandText = "\"" + executable
+        + "\" tunnel --edge-ip-version 4 --protocol http2 --no-autoupdate --loglevel info --url http://127.0.0.1:27888";
     std::vector<char> command(commandText.begin(), commandText.end());
     command.push_back('\0');
     BOOL created = CreateProcessA(
