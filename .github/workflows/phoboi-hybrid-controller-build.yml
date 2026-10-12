@@ -42,7 +42,7 @@ jobs:
             'route == "/gamepad.js"',
             'route == "/release"',
             'nativePad ? nativePad.axes : axes',
-            'PHOBOI_CLOUDFLARE_ROUTE_V5',
+            'PHOBOI_QUICK_TUNNEL_IPV4_HTTP2_V1',
             'SLOT RELEASED'
           )) {
             if (-not $mobile.Contains($symbol)) { throw "PhoBoi hybrid missing: $symbol" }
