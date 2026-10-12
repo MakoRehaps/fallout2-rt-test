@@ -182,7 +182,7 @@ inline int localCoopFindFreeControllerSlot()
 inline int localCoopFindReservedControllerSlot(const char* guid)
 {
     if (guid != nullptr && *guid != '\0') {
-        int connectedMatch = -1;
+        bool occupiedExactSerial = false;
         for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
             const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
             if (!player.slotLocked || strcmp(player.controllerGuid, guid) != 0) {
@@ -191,10 +191,15 @@ inline int localCoopFindReservedControllerSlot(const char* guid)
             if (!player.connected) {
                 return slot;
             }
-            connectedMatch = slot;
+            // SDL GUID identifies a controller *model*, not an individual pad.
+            // Only a genuine serial-qualified fingerprint can block a second
+            // physical pad of the same model while this slot is browser-owned.
+            if (strchr(guid, '@') != nullptr) {
+                occupiedExactSerial = true;
+            }
         }
-        if (connectedMatch >= 0) {
-            return -2; // Owned slot is busy; wait rather than hijack another.
+        if (occupiedExactSerial) {
+            return -2;
         }
     }
 
@@ -242,27 +247,52 @@ inline void localCoopOpenController(int deviceIndex)
         return;
     }
 
+    // Open once, so a serial number (when supported by the pad/driver) can
+    // distinguish multiple Xbox controllers with identical SDL model GUIDs.
+    SDL_GameController* controller = SDL_GameControllerOpen(deviceIndex);
+    if (controller == nullptr) {
+        return;
+    }
+    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
     SDL_JoystickGUID deviceGuid = SDL_JoystickGetDeviceGUID(deviceIndex);
+    char modelGuid[64] {};
     char guid[64] {};
-    SDL_JoystickGetGUIDString(deviceGuid, guid, sizeof(guid));
+    SDL_JoystickGetGUIDString(deviceGuid, modelGuid, sizeof(modelGuid));
+    const char* serial = SDL_JoystickGetSerial(joystick);
+    if (serial != nullptr && serial[0] != '\0') {
+        snprintf(guid, sizeof(guid), "%.32s@%.28s", modelGuid, serial);
+    } else {
+        snprintf(guid, sizeof(guid), "%s", modelGuid);
+    }
 
     int slot = localCoopFindReservedControllerSlot(guid);
-    if (slot == -2) {
-        return; // Affinity is occupied by a browser session.
+    // Saved games from before serial-aware input used the model GUID alone.
+    // Keep that binding compatible when exactly one disconnected slot matches.
+    if (slot == -1 && serial != nullptr && serial[0] != '\0') {
+        int prior = -1;
+        for (int index = 0; index < kLocalCoopMaxPlayers; index++) {
+            const LocalCoopPlayer& player = gLocalCoopPlayers[index];
+            if (!player.connected && player.slotLocked && strcmp(player.controllerGuid, modelGuid) == 0) {
+                if (prior != -1) {
+                    prior = -1;
+                    break;
+                }
+                prior = index;
+            }
+        }
+        if (prior >= 0) {
+            slot = prior;
+        }
     }
     if (slot == -1) {
         slot = localCoopFindFreeControllerSlot();
     }
     if (slot < 0 || gLocalCoopPlayers[slot].connected) {
+        // This pad might be a returning P2 whose slot is currently remote.
+        // Do not create another character, and never leak the SDL handle.
+        SDL_GameControllerClose(controller);
         return;
     }
-
-    SDL_GameController* controller = SDL_GameControllerOpen(deviceIndex);
-    if (controller == nullptr) {
-        return;
-    }
-
-    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
     LocalCoopPlayer& player = gLocalCoopPlayers[slot];
     player.slot = slot;
     player.controller = controller;
@@ -345,11 +375,11 @@ inline void localCoopRefreshControllers()
         }
     }
 
+    // Even when every character slot is reserved, a disconnected owner may
+    // reclaim that slot. Never stop scanning solely because no *new* slots are
+    // free. The device-instance check prevents duplicate opens.
     int joystickCount = SDL_NumJoysticks();
     for (int deviceIndex = 0; deviceIndex < joystickCount; deviceIndex++) {
-        if (localCoopFindFreeControllerSlot() == -1) {
-            break;
-        }
         localCoopOpenController(deviceIndex);
     }
 }
