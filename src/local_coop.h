@@ -175,37 +175,45 @@ inline int localCoopFindFreeControllerSlot()
     return -1;
 }
 
+// COOP_INPUT_SLOT_HANDOFF_V1
+// A character slot outlives both the physical controller and PhoBoi session.
+// An exact device affinity has priority. Never send a known controller into
+// another vacant character slot while its own slot is currently browser-owned.
 inline int localCoopFindReservedControllerSlot(const char* guid)
 {
     if (guid != nullptr && *guid != '\0') {
+        int connectedMatch = -1;
         for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
             const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-            if (player.slotLocked
-                && !player.connected
-                && strcmp(player.controllerGuid, guid) == 0) {
-                return slot;
-            }
-        }
-    }
-
-    // When every numbered slot is already reserved, permit a replacement
-    // controller to reclaim the only disconnected reservation.
-    if (localCoopFindFreeControllerSlot() == -1) {
-        int candidate = -1;
-        for (int slot = 0; slot < kLocalCoopMaxPlayers; slot++) {
-            const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
-            if (!player.slotLocked || player.connected) {
+            if (!player.slotLocked || strcmp(player.controllerGuid, guid) != 0) {
                 continue;
             }
-            if (candidate != -1) {
-                return -1;
+            if (!player.connected) {
+                return slot;
             }
-            candidate = slot;
+            connectedMatch = slot;
         }
-        return candidate;
+        if (connectedMatch >= 0) {
+            return -2; // Owned slot is busy; wait rather than hijack another.
+        }
     }
 
-    return -1;
+    // Replacement pad: with only one disconnected P2-P4 character, reclaim it
+    // even if an unused higher-numbered slot exists. Ambiguous cases still use
+    // the existing free-slot assignment instead of guessing whose character.
+    int candidate = -1;
+    for (int slot = 1; slot < kLocalCoopMaxPlayers; slot++) {
+        const LocalCoopPlayer& player = gLocalCoopPlayers[slot];
+        if (!player.slotLocked || player.connected) {
+            continue;
+        }
+        if (candidate != -1) {
+            return -1;
+        }
+        candidate = slot;
+    }
+    // P1 always has first claim when its host controller is absent.
+    return gLocalCoopPlayers[0].connected ? candidate : -1;
 }
 
 inline bool localCoopHasJoystickId(SDL_JoystickID joystickId)
@@ -239,10 +247,13 @@ inline void localCoopOpenController(int deviceIndex)
     SDL_JoystickGetGUIDString(deviceGuid, guid, sizeof(guid));
 
     int slot = localCoopFindReservedControllerSlot(guid);
+    if (slot == -2) {
+        return; // Affinity is occupied by a browser session.
+    }
     if (slot == -1) {
         slot = localCoopFindFreeControllerSlot();
     }
-    if (slot == -1) {
+    if (slot < 0 || gLocalCoopPlayers[slot].connected) {
         return;
     }
 
@@ -260,10 +271,8 @@ inline void localCoopOpenController(int deviceIndex)
     snprintf(player.controllerGuid, sizeof(player.controllerGuid), "%s", guid);
 
     if (player.slotLocked && player.actor != nullptr) {
-        int spawnTile = localCoopFindSpawnTile(gDude, 3);
-        if (spawnTile != -1) {
-            objectSetLocation(player.actor, spawnTile, gDude->elevation, nullptr);
-        }
+        // Handoff preserves the existing actor/location/stats/inventory.
+        // The party tether handles out-of-range recovery if needed.
         player.actor->flags &= ~(OBJECT_HIDDEN | OBJECT_NO_BLOCK);
         player.humanOwned = true;
 
