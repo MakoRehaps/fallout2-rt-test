@@ -1,4 +1,5 @@
 #include "local_coop_mobile.h"
+#include "local_coop_browser_gamepad.h"
 
 #include <SDL.h>
 
@@ -200,9 +201,9 @@ uint32_t mobileNextToken()
     return value != 0 ? value : 1;
 }
 
-const char* mobileControllerHtml()
+const std::string& mobileControllerHtml()
 {
-    return R"PHOBOI(<!doctype html>
+    static const std::string html = std::string(R"PHOBOI(<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -214,6 +215,7 @@ const char* mobileControllerHtml()
 *{box-sizing:border-box;touch-action:none;-webkit-user-select:none;user-select:none}
 html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#000;color:#9cff9c;font-family:monospace}
 body{min-height:100dvh}
+body.phoboi-browser-gamepad #pad .stick,body.phoboi-browser-gamepad #pad .btn,body.phoboi-browser-gamepad #pad .small,body.phoboi-browser-gamepad #pad .dpad{opacity:.12;pointer-events:none}
 #join{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#07100b;z-index:20;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
 .panel{border:2px solid #4dbd68;padding:20px;width:min(92vw,420px);box-shadow:0 0 28px #174d29}
 h1{margin:0 0 14px;font-size:25px}.row{display:flex;gap:8px;margin-top:10px}input,select,button{font:inherit;color:#d7ffd7;background:#102218;border:1px solid #4dbd68;padding:8px}
@@ -237,7 +239,7 @@ input{width:100%}select{flex:1}button{font-weight:bold}.status{min-height:22px;m
 .dpad button{padding:0;min-width:0;min-height:0;background:#102d19bb;border-color:#79ff91aa}.du{grid-column:2}.dl{grid-column:1;grid-row:2}.dr{grid-column:3;grid-row:2}.dd{grid-column:2;grid-row:3}
 @media (max-height:390px){.stick{width:96px;height:96px}#rs{right:124px}.btn{width:46px;height:46px}#ba{bottom:48px}#bb{right:50px}#bx{right:50px;bottom:96px}#by{right:98px;bottom:48px}.dpad{left:112px;grid-template-columns:repeat(3,30px);grid-template-rows:repeat(3,30px)}.small{height:28px}.control-label{display:none}#skill{top:58px}}
 @media (orientation:portrait){#pad:before{content:'ROTATE PHONE TO LANDSCAPE';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#07100b;color:#ffd56a;font-size:18px;z-index:15}#video,.stick,.btn,.small,.dpad,.top{visibility:hidden}}
-</style>
+</style>)PHOBOI") + R"PHOBOI(
 </head>
 <body>
 <div id="join"><div class="panel"><h1>NOKIA BLACKBERRY PHOBOI</h1>
@@ -313,7 +315,8 @@ let streamTimer=null,streamAttempt=0,videoMode='STARTING',lastFrameAt=0,lastHttp
 // PHOBOI_LOW_LATENCY_CONTROLS_V1
 function updateStatus(){
  const link=rtt>0?` ${rtt}ms ±${jitter}`:'';
- $('top').textContent=`P${slot+1} | CTRL ${controlMode} | VIDEO ${videoMode} | VIEW ${phoneViewZoom===0?'FIT':phoneViewZoom===1?'1.3X':'1.6X'}${link}`;
+ const controllerMode=window.phoboiBrowserGamepadActive?'GAMEPAD':'TOUCH';
+ $('top').textContent=`P${slot+1} | ${controllerMode} | CTRL ${controlMode} | VIDEO ${videoMode} | VIEW ${phoneViewZoom===0?'FIT':phoneViewZoom===1?'1.3X':'1.6X'}${link}`;
 }
 function retryDelay(attempt){return Math.min(5000,500*Math.pow(1.55,Math.min(attempt,6)))}
 function scheduleControl(){if(slot<0||controlTimer)return;controlTimer=setTimeout(()=>{controlTimer=null;openSocket()},retryDelay(controlAttempt++))}
@@ -364,7 +367,10 @@ function openStream(){
 async function send(immediate=false){
  if(slot<0)return;
  const stamp=performance.now();
- const packet=[++seq,stamp,Math.round(rtt),Math.round(jitter),axes[0],axes[1],axes[2],axes[3],axes[4],axes[5],buttons].join(',');
+ const nativePad=window.phoboiBrowserGamepadRead?.();
+ const inputAxes=nativePad ? nativePad.axes : axes;
+ const inputButtons=nativePad ? nativePad.buttons : buttons;
+ const packet=[++seq,stamp,Math.round(rtt),Math.round(jitter),inputAxes[0],inputAxes[1],inputAxes[2],inputAxes[3],inputAxes[4],inputAxes[5],inputButtons].join(',');
  if(ws&&ws.readyState===WebSocket.OPEN){
   if(ws.bufferedAmount>1024)return;
   try{ws.send(packet);controlMode='WS'}catch(e){}return
@@ -372,7 +378,7 @@ async function send(immediate=false){
  // HTTP fallback stays responsive without flooding Cloudflare with ~60 POST/s.
  if(stamp-lastHttpSent<50||sending)return;lastHttpSent=stamp;sending=true;controlMode='HTTP';updateStatus();
  try{
-  const body=new URLSearchParams({slot,token,lx:axes[0],ly:axes[1],rx:axes[2],ry:axes[3],lt:axes[4],rt:axes[5],buttons});
+  const body=new URLSearchParams({slot,token,lx:inputAxes[0],ly:inputAxes[1],rx:inputAxes[2],ry:inputAxes[3],lt:inputAxes[4],rt:inputAxes[5],buttons:inputButtons});
   const r=await fetch('/input',{method:'POST',body,cache:'no-store'});
   if(r.status===403){controlMode='EXPIRED';updateStatus()}
  }catch(e){}
@@ -397,7 +403,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&slot>=0){
  slot=saved.slot;token=saved.token;$('msg').textContent=`PLAYER ${slot+1} - RESTORING CONTROLLER...`;
  await waitForControllerReady();enterControllerPage();
 }catch(e){sessionStorage.removeItem('phoboiSession');slot=-1;token=0;$('join').style.display='flex';$('pad').style.display='none';$('msg').textContent=e.message||String(e)}})();
-</script></body></html>)PHOBOI";
+</script><script src="/gamepad.js"></script></body></html>)PHOBOI";
+    return html;
 }
 
 std::string mobileReadRequest(MobileSocket socket)
@@ -993,6 +1000,10 @@ void mobileHandleClient(MobileSocket client)
 
     if (method == "GET" && route == "/") {
         mobileSendResponse(client, "200 OK", "text/html; charset=utf-8", mobileControllerHtml());
+        return;
+    }
+    if (method == "GET" && route == "/gamepad.js") {
+        mobileSendResponse(client, "200 OK", "application/javascript; charset=utf-8", localCoopBrowserGamepadScript());
         return;
     }
 
